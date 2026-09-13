@@ -21,7 +21,10 @@ portafolios de máximo Sharpe y mínima volatilidad, una frontera eficiente, VaR
 
 ## Instalación
 
-Requiere Python 3.11 o superior.
+Entorno soportado y probado: Python 3.12. Las instalaciones utilizan las versiones
+exactas de `constraints-tested.txt`, incluidas las dependencias transitivas del entorno probado.
+CI comprueba instalación, integridad de dependencias y pruebas en Linux y Windows.
+El archivo de restricciones fija versiones; no es un bloqueo criptográfico por hashes.
 
 ```bash
 python -m venv .venv
