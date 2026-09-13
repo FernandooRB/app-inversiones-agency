@@ -63,6 +63,12 @@ pytest
 
 ## Limitaciones actuales
 
+- VaR histórico multidiario capitaliza retornos de una cartera rebalanceada diariamente;
+  las ventanas se solapan. El VaR normal sigue siendo una aproximación aditiva con retornos independientes.
+- La nube aleatoria respeta el límite por activo mediante contracción hacia pesos iguales;
+  no es una muestra uniforme ni una simulación de precios futuros.
+- Las pruebas automatizadas no son una auditoría de seguridad ni validación para operar con clientes.
+
 - Yahoo Finance no debe asumirse como fuente contractual para un servicio de inversión en producción.
 - No hay conversión de monedas; los activos deben analizarse en una base comparable.
 - No se incorporan costos, impuestos, spreads, liquidez ni restricciones regulatorias.

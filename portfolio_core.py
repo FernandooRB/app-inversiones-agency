@@ -107,6 +107,14 @@ def download_adjusted_prices(tickers: Iterable[str], start_date: date, end_date:
 def calculate_returns(prices: pd.DataFrame) -> pd.DataFrame:
     if prices.empty:
         raise PortfolioError("La tabla de precios está vacía.")
+    if (
+        prices.columns.has_duplicates
+        or prices.index.has_duplicates
+        or not prices.index.is_monotonic_increasing
+    ):
+        raise PortfolioError("Los precios requieren etiquetas únicas y fechas ordenadas.")
+    if not np.isfinite(prices.to_numpy()).all() or (prices <= 0).any().any():
+        raise PortfolioError("Los precios deben ser positivos y finitos.")
     returns = prices.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan).dropna()
     if len(returns) < MIN_OBSERVATIONS - 1:
         raise PortfolioError("No existen suficientes retornos válidos para estimar el modelo.")
@@ -114,6 +122,10 @@ def calculate_returns(prices: pd.DataFrame) -> pd.DataFrame:
 
 
 def annualized_moments(returns: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame]:
+    if len(returns) < 2 or not np.isfinite(returns.to_numpy()).all():
+        raise PortfolioError("Retornos insuficientes o no finitos.")
+    if (returns.std() <= 1e-10).any():
+        raise PortfolioError("Hay activos sin variación suficiente; revisa los datos.")
     mean_returns = returns.mean() * TRADING_DAYS
     covariance = returns.cov() * TRADING_DAYS
     ridge = max(float(np.trace(covariance.to_numpy())), 1.0) * 1e-10
@@ -123,10 +135,41 @@ def annualized_moments(returns: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame]:
     return mean_returns, covariance
 
 
-def portfolio_statistics(weights, mean_returns, covariance, risk_free_rate):
+def validate_weights(weights, asset_count, max_weight=1.0):
     weights = np.asarray(weights, dtype=float)
-    if len(weights) != len(mean_returns):
-        raise PortfolioError("La cantidad de pesos no coincide con la cantidad de activos.")
+    if (
+        weights.shape != (asset_count,)
+        or not np.isfinite(weights).all()
+        or not np.isclose(weights.sum(), 1.0, atol=1e-7, rtol=0)
+        or (weights < -1e-8).any()
+        or (weights > max_weight + 1e-7).any()
+    ):
+        raise PortfolioError("Pesos inválidos: deben ser finitos, no negativos y sumar 100%.")
+    return weights
+
+
+def validate_model(mean_returns, covariance, risk_free_rate):
+    if (
+        len(mean_returns) == 0
+        or not mean_returns.index.is_unique
+        or not covariance.index.equals(mean_returns.index)
+        or not covariance.columns.equals(mean_returns.index)
+    ):
+        raise PortfolioError("Las etiquetas de medias y covarianza no coinciden.")
+    matrix = covariance.to_numpy()
+    if (
+        not np.isfinite(mean_returns).all()
+        or not np.isfinite(matrix).all()
+        or not np.isfinite(risk_free_rate)
+        or not np.allclose(matrix, matrix.T)
+        or np.linalg.eigvalsh(matrix).min() < -1e-10
+    ):
+        raise PortfolioError("Modelo no finito, asimétrico o con covarianza inválida.")
+
+
+def portfolio_statistics(weights, mean_returns, covariance, risk_free_rate):
+    validate_model(mean_returns, covariance, risk_free_rate)
+    weights = validate_weights(weights, len(mean_returns))
     annual_return = float(weights @ mean_returns.to_numpy())
     variance = float(weights @ covariance.to_numpy() @ weights)
     annual_volatility = float(np.sqrt(max(variance, 0.0)))
@@ -137,6 +180,8 @@ def portfolio_statistics(weights, mean_returns, covariance, risk_free_rate):
 
 
 def _validate_weight_limit(asset_count: int, max_weight: float) -> None:
+    if asset_count < 1:
+        raise PortfolioError("Se requiere al menos un activo.")
     if not 0 < max_weight <= 1:
         raise PortfolioError("El peso máximo debe estar entre 0% y 100%.")
     if asset_count * max_weight < 1 - 1e-10:
@@ -148,6 +193,7 @@ def _validate_weight_limit(asset_count: int, max_weight: float) -> None:
 def optimize_portfolio(mean_returns, covariance, risk_free_rate, objective="max_sharpe", max_weight=1.0):
     """Optimize a long-only portfolio with a concentration cap."""
     asset_count = len(mean_returns)
+    validate_model(mean_returns, covariance, risk_free_rate)
     _validate_weight_limit(asset_count, max_weight)
     initial = np.full(asset_count, 1 / asset_count)
     bounds = tuple((0.0, max_weight) for _ in range(asset_count))
@@ -177,6 +223,7 @@ def optimize_portfolio(mean_returns, covariance, risk_free_rate, objective="max_
         raise PortfolioError(f"La optimización no convergió: {result.message}")
     weights = np.clip(result.x, 0.0, max_weight)
     weights = weights / weights.sum()
+    validate_weights(weights, asset_count, max_weight)
     annual_return, annual_volatility, sharpe = portfolio_statistics(
         weights, mean_returns, covariance, risk_free_rate
     )
@@ -188,6 +235,12 @@ def efficient_frontier(mean_returns, covariance, max_weight=1.0, points=40):
     asset_count = len(mean_returns)
     _validate_weight_limit(asset_count, max_weight)
     minimum = optimize_portfolio(mean_returns, covariance, 0.0, "min_volatility", max_weight)
+    if (
+        asset_count == 1
+        or np.isclose(asset_count * max_weight, 1.0)
+        or np.ptp(mean_returns.to_numpy()) < 1e-10
+    ):
+        return pd.DataFrame([{"Retorno": minimum.annual_return, "Volatilidad": minimum.annual_volatility}])
     bounds = tuple((0.0, max_weight) for _ in range(asset_count))
     cov, means = covariance.to_numpy(), mean_returns.to_numpy()
     # Determine the maximum feasible return under the concentration cap.
@@ -221,10 +274,18 @@ def efficient_frontier(mean_returns, covariance, max_weight=1.0, points=40):
     return pd.DataFrame(rows)
 
 
-def random_portfolios(mean_returns, covariance, risk_free_rate, simulations=5_000, seed=42):
+def random_portfolios(mean_returns, covariance, risk_free_rate, simulations=5_000, seed=42, max_weight=1.0):
     """Generate reproducible random allocations for visual context."""
     rng = np.random.default_rng(seed)
     weights = rng.dirichlet(np.ones(len(mean_returns)), simulations)
+    _validate_weight_limit(len(mean_returns), max_weight)
+    # Contract each draw towards equal weight until it obeys the same cap as the frontier.
+    equal = 1 / len(mean_returns)
+    excess = weights.max(axis=1) - equal
+    scale = np.minimum(
+        1.0, np.divide(max_weight - equal, excess, out=np.ones_like(excess), where=excess > 1e-12)
+    )
+    weights = equal + scale[:, None] * (weights - equal)
     means, cov = mean_returns.to_numpy(), covariance.to_numpy()
     returns = weights @ means
     volatilities = np.sqrt(np.einsum("ij,jk,ik->i", weights, cov, weights))
@@ -238,17 +299,19 @@ def calculate_risk_metrics(returns, weights, confidence_level=0.95, horizon_days
     """Return positive loss magnitudes for normal and historical VaR/ES."""
     if not 0.90 <= confidence_level <= 0.999:
         raise PortfolioError("El nivel de confianza debe estar entre 90% y 99.9%.")
-    if not 1 <= horizon_days <= 252:
+    if not isinstance(horizon_days, int) or not 1 <= horizon_days <= 252:
         raise PortfolioError("El horizonte debe estar entre 1 y 252 días hábiles.")
-    weights = np.asarray(weights, dtype=float)
-    if len(weights) != returns.shape[1]:
-        raise PortfolioError("La cantidad de pesos no coincide con la cantidad de activos.")
+    weights = validate_weights(weights, returns.shape[1])
+    if len(returns) < 2 or not np.isfinite(returns.to_numpy()).all() or (returns < -1).any().any():
+        raise PortfolioError("Retornos inválidos para calcular riesgo.")
     daily = returns.to_numpy() @ weights
     mean = float(np.mean(daily)) * horizon_days
     sigma = float(np.std(daily, ddof=1)) * np.sqrt(horizon_days)
     parametric_var = max(0.0, -(mean + norm.ppf(1 - confidence_level) * sigma))
     historical = (
-        daily if horizon_days == 1 else pd.Series(daily).rolling(horizon_days).sum().dropna().to_numpy()
+        daily
+        if horizon_days == 1
+        else ((1 + pd.Series(daily)).rolling(horizon_days).apply(np.prod, raw=True) - 1).dropna().to_numpy()
     )
     if not len(historical):
         raise PortfolioError("No hay suficientes datos para el horizonte de riesgo elegido.")

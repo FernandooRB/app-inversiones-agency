@@ -58,7 +58,19 @@ with st.sidebar:
     portfolio_value = st.number_input("Valor del portafolio", min_value=0.0, value=100_000.0, step=10_000.0)
     analyze = st.button("Analizar portafolio", type="primary", use_container_width=True)
 
-if not analyze:
+settings = (
+    tickers_input,
+    start_date,
+    end_date,
+    risk_free_rate,
+    max_weight,
+    confidence,
+    horizon,
+    portfolio_value,
+)
+if analyze:
+    st.session_state["analysis_settings"] = settings
+if st.session_state.get("analysis_settings") != settings:
     st.info("Configura los parámetros y selecciona **Analizar portafolio**.")
     with st.expander("Metodología y límites"):
         st.markdown(
@@ -87,7 +99,7 @@ try:
             mean_returns, covariance, risk_free_rate, "min_volatility", max_weight
         )
         frontier = efficient_frontier(mean_returns, covariance, max_weight)
-        random_set = random_portfolios(mean_returns, covariance, risk_free_rate)
+        random_set = random_portfolios(mean_returns, covariance, risk_free_rate, max_weight=max_weight)
         risk = calculate_risk_metrics(returns, max_sharpe.weights, confidence, horizon)
 
     if download.rejected_tickers:
