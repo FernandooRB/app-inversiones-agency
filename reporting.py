@@ -6,13 +6,15 @@ from datetime import UTC, date, datetime
 from xml.sax.saxutils import escape
 
 import numpy as np
+from reportlab.graphics.shapes import Drawing, Line, Polygon, PolyLine, String
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from portfolio_core import PortfolioMetrics, RiskMetrics, validate_weights
+from simulation import SimulationResult
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,64 @@ class PortfolioAlternative:
     name: str
     metrics: PortfolioMetrics
     risk: RiskMetrics
+
+
+@dataclass(frozen=True)
+class SimulationReport:
+    alternative_name: str
+    result: SimulationResult
+    monthly_contribution: float
+    annual_fee: float
+    transaction_cost_bps: float
+    inflation_rate: float
+    rebalance_months: int | None
+    block_days: int
+
+
+def _simulation_chart(result: SimulationResult) -> Drawing:
+    bands = result.bands()
+    drawing = Drawing(180 * mm, 55 * mm)
+    left, bottom, width, height = 18 * mm, 10 * mm, 155 * mm, 36 * mm
+    maximum = max(float(bands["Percentil 95"].max()), float(bands["Capital aportado"].max()))
+    maximum = max(maximum * 1.08, 1.0)
+    months = len(bands) - 1
+
+    def compact(value):
+        if value >= 1_000_000:
+            return f"{value / 1_000_000:.1f} M"
+        if value >= 1_000:
+            return f"{value / 1_000:.0f} k"
+        return f"{value:.0f}"
+
+    def point(month, value):
+        return left + month / months * width, bottom + float(value) / maximum * height
+
+    upper = [point(month, value) for month, value in enumerate(bands["Percentil 95"])]
+    lower = [point(month, value) for month, value in enumerate(bands["Percentil 5"])]
+    drawing.add(Polygon(
+        [coordinate for pair in upper + lower[::-1] for coordinate in pair],
+        fillColor=colors.HexColor("#DDEBF1"), strokeColor=None,
+    ))
+    for label, color, line_width in (
+        ("Mediana", "#176B91", 2.0), ("Capital aportado", "#666666", 1.2),
+    ):
+        points = [point(month, value) for month, value in enumerate(bands[label])]
+        drawing.add(PolyLine(
+            [coordinate for pair in points for coordinate in pair],
+            strokeColor=colors.HexColor(color), strokeWidth=line_width,
+        ))
+    drawing.add(Line(left, bottom, left + width, bottom, strokeColor=colors.HexColor("#8CA0AE")))
+    drawing.add(Line(left, bottom, left, bottom + height, strokeColor=colors.HexColor("#8CA0AE")))
+    drawing.add(String(left - 1 * mm, bottom - 5 * mm, "0", fontSize=8))
+    drawing.add(String(1 * mm, bottom + height - 1 * mm, compact(maximum), fontSize=8))
+    drawing.add(String(1 * mm, bottom + height / 2, compact(maximum / 2), fontSize=8))
+    drawing.add(String(left + width - 14 * mm, bottom - 5 * mm, f"{months} meses", fontSize=8))
+    drawing.add(String(left, bottom + height + 3 * mm, "Banda 5-95 %", fontSize=8))
+    drawing.add(String(left + 46 * mm, bottom + height + 3 * mm, "Mediana", fontSize=8,
+                       fillColor=colors.HexColor("#176B91")))
+    drawing.add(String(left + 80 * mm, bottom + height + 3 * mm, "Capital aportado", fontSize=8,
+                       fillColor=colors.HexColor("#666666")))
+    return drawing
 
 
 def create_comparison_pdf_report(
@@ -34,6 +94,7 @@ def create_comparison_pdf_report(
     observations: int,
     quotes: dict[str, str],
     data_source: str = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico",
+    simulation: SimulationReport | None = None,
 ) -> bytes:
     """Compare historical portfolio alternatives on one sample and set of assumptions."""
     if not 2 <= len(alternatives) <= 4 or len({item.name for item in alternatives}) != len(alternatives):
@@ -162,6 +223,90 @@ def create_comparison_pdf_report(
             styles["Normal"],
         ),
     ])
+
+    if simulation is not None:
+        if simulation.alternative_name not in {item.name for item in alternatives}:
+            raise ValueError("La asignación simulada no pertenece al comparativo.")
+        values = simulation.result.monthly_values
+        if (values.ndim != 2 or len(values) < 2 or values.shape[1] < 1
+                or not np.isfinite(values).all()):
+            raise ValueError("La simulación no contiene trayectorias válidas.")
+        if simulation.result.method not in {"bootstrap_blocks", "lognormal"}:
+            raise ValueError("Método de simulación no reconocido.")
+        bands = simulation.result.bands()
+        final = bands.iloc[-1]
+        months = len(values) - 1
+        method = (
+            "Remuestreo de bloques históricos"
+            if simulation.result.method == "bootstrap_blocks"
+            else "Modelo lognormal correlacionado"
+        )
+        rebalance = (
+            "Sin rebalanceo" if simulation.rebalance_months is None
+            else f"Cada {simulation.rebalance_months} meses"
+        )
+        assumptions = [
+            ["Escenario", escape(simulation.alternative_name)],
+            ["Método", method],
+            ["Muestra para calibración",
+             f"{start_date.isoformat()} a {end_date.isoformat()} | {observations:,} retornos"],
+            ["Horizonte y trayectorias", f"{months} meses | {values.shape[1]:,} trayectorias"],
+            ["Semilla y bloque", f"{simulation.result.seed} | {simulation.block_days} sesiones"],
+            ["Aportación mensual", f"{simulation.monthly_contribution:,.2f} {base_currency}"],
+            ["Comisión anual", f"{simulation.annual_fee:.2%}"],
+            ["Costo por operación", f"{simulation.transaction_cost_bps:.1f} puntos base"],
+            ["Inflación anual", f"{simulation.inflation_rate:.2%}"],
+            ["Rebalanceo", rebalance],
+        ]
+        results = [
+            ["Percentil 5 final nominal", f"{final['Percentil 5']:,.0f} {base_currency}"],
+            ["Mediana final nominal", f"{final['Mediana']:,.0f} {base_currency}"],
+            ["Percentil 95 final nominal", f"{final['Percentil 95']:,.0f} {base_currency}"],
+            ["Mediana final real",
+             f"{np.median(simulation.result.real_terminal_values):,.0f} {base_currency}"],
+            ["Capital aportado", f"{final['Capital aportado']:,.0f} {base_currency}"],
+            ["Trayectorias bajo capital aportado",
+             f"{simulation.result.probability_below_contributions:.1%}"],
+        ]
+
+        def simple_table(rows):
+            table = Table(rows, colWidths=[86 * mm, 99 * mm])
+            table.setStyle(TableStyle([
+                ("ROWBACKGROUNDS", (0, 0), (-1, -1),
+                 [colors.white, colors.HexColor("#F4F7FA")]),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor("#D7E0E5")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+            ]))
+            return table
+
+        story.extend([
+            PageBreak(),
+            Paragraph("Escenarios Monte Carlo", styles["Title"]),
+            Paragraph(
+                "Distribución hipotética del patrimonio para una asignación del comparativo. "
+                "Las cifras no son rendimientos previstos ni límites garantizados.",
+                styles["Normal"],
+            ),
+            Spacer(1, 4 * mm),
+            Paragraph("Supuestos", styles["Heading2"]),
+            simple_table(assumptions),
+            Spacer(1, 4 * mm),
+            Paragraph("Patrimonio al final del horizonte", styles["Heading2"]),
+            simple_table(results),
+            Spacer(1, 4 * mm),
+            _simulation_chart(simulation.result),
+            Spacer(1, 2 * mm),
+            Paragraph(
+                "La banda muestra percentiles entre trayectorias en cada mes. El valor real "
+                "descuenta la inflación supuesta; la comisión se aplica diariamente y el costo "
+                "de operación a compras y rebalanceos. La frecuencia bajo capital aportado no "
+                "es una probabilidad calibrada. Se reutiliza la muestra histórica, que puede "
+                "omitir cambios de régimen. No incluye retiros, impuestos, diferenciales ni liquidez.",
+                styles["Normal"],
+            ),
+        ])
 
     def footer(canvas, doc):
         canvas.saveState()

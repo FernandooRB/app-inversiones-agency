@@ -20,6 +20,9 @@ Ambos usan 21 sesiones por mes y 252 por año. El número de trayectorias y la
 semilla se muestran y son configurables. Los percentiles 5, 50 y 95 se calculan
 **entre trayectorias en cada mes**; no son intervalos de confianza estadísticos
 de un parámetro ni límites garantizados para una cartera real.
+Al activar la simulación, el PDF comparativo añade una página con los supuestos,
+la tabla final y una banda de percentiles; el CSV conserva los percentiles de
+cada mes para auditoría interna.
 
 ## Flujos y costos
 
