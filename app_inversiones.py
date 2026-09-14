@@ -324,9 +324,20 @@ try:
                 method = "bootstrap_blocks" if method_label == "Bloques históricos" else "lognormal"
                 years = st.slider("Horizonte (años)", 1, 10, 3)
                 path_count = st.slider("Trayectorias", 100, 2000, 500, 100)
-                contribution = st.number_input(
-                    f"Aportación mensual ({base_currency})", min_value=0.0, value=0.0, step=1000.0
+                flow_mode = st.radio(
+                    "Flujo mensual", ["Sin flujos", "Aportaciones", "Retiros"], horizontal=True
                 )
+                contribution, withdrawal = 0.0, 0.0
+                if flow_mode == "Aportaciones":
+                    contribution = st.number_input(
+                        f"Aportación mensual ({base_currency})", min_value=0.0,
+                        value=0.0, step=1000.0,
+                    )
+                elif flow_mode == "Retiros":
+                    withdrawal = st.number_input(
+                        f"Retiro mensual ({base_currency})", min_value=0.0,
+                        value=0.0, step=1000.0,
+                    )
                 fee = st.number_input(
                     "Comisión anual supuesta (%)", min_value=0.0, max_value=10.0,
                     value=0.0, step=0.25,
@@ -356,14 +367,16 @@ try:
                 scenario = next(item for item in alternatives if item.name == selected)
                 simulated = simulate_portfolio_paths(
                     returns, scenario.metrics.weights, initial_value=portfolio_value,
-                    months=years * 12, paths=path_count, monthly_contribution=contribution,
+                    months=years * 12, paths=path_count,
+                    monthly_contribution=contribution, monthly_withdrawal=withdrawal,
                     annual_fee=fee, transaction_cost_bps=trading_cost,
                     rebalance_months=rebalance_months, inflation_rate=inflation,
                     method=method, seed=int(seed), block_days=block_days,
                 )
                 simulation_report = SimulationReport(
                     alternative_name=selected, result=simulated,
-                    monthly_contribution=contribution, annual_fee=fee,
+                    monthly_contribution=contribution, monthly_withdrawal=withdrawal,
+                    annual_fee=fee,
                     transaction_cost_bps=trading_cost, inflation_rate=inflation,
                     rebalance_months=rebalance_months, block_days=block_days,
                 )
@@ -376,9 +389,15 @@ try:
                     "Mediana final real",
                     f"{np.median(simulated.real_terminal_values):,.0f} {base_currency}",
                 )
-                sim_cols[3].metric(
-                    "Bajo capital aportado", f"{simulated.probability_below_contributions:.1%}"
-                )
+                if withdrawal > 0:
+                    sim_cols[3].metric(
+                        "Con retiro no cubierto", f"{simulated.probability_of_shortfall:.1%}"
+                    )
+                    bands["Retiros programados acumulados"] = withdrawal * bands["Mes"]
+                else:
+                    sim_cols[3].metric(
+                        "Bajo capital aportado", f"{simulated.probability_below_contributions:.1%}"
+                    )
                 sim_chart = go.Figure()
                 sim_chart.add_trace(go.Scatter(
                     x=bands["Mes"], y=bands["Percentil 95"],
@@ -393,7 +412,8 @@ try:
                     line={"color": "#1f77b4", "width": 3},
                 ))
                 sim_chart.add_trace(go.Scatter(
-                    x=bands["Mes"], y=bands["Capital aportado"], name="Capital aportado",
+                    x=bands["Mes"], y=bands["Capital aportado"],
+                    name="Capital inicial" if withdrawal > 0 else "Capital aportado",
                     line={"color": "#555555", "dash": "dash"},
                 ))
                 sim_chart.update_layout(
@@ -405,11 +425,18 @@ try:
                     "Descargar percentiles mensuales CSV", bands.to_csv(index=False).encode("utf-8"),
                     "montecarlo_percentiles.csv", "text/csv",
                 )
+                if withdrawal > 0:
+                    st.caption(
+                        f"Retiros programados: {withdrawal * years * 12:,.0f} {base_currency}; "
+                        f"mediana efectivamente retirada: "
+                        f"{np.median(simulated.total_withdrawn):,.0f} {base_currency}. "
+                        "Si una trayectoria no alcanza para un retiro, se vende lo disponible "
+                        "y el patrimonio queda en cero. No se permite saldo negativo."
+                    )
                 st.caption(
-                    "Capital aportado = inicial + aportaciones nominales. La comisión se aplica "
-                    "diariamente; el costo de operación se aplica al capital inicial, aportaciones "
-                    "y volumen negociado al rebalancear. El valor real descuenta la inflación supuesta. "
-                    "No se modelan impuestos, spreads ni liquidez."
+                    "La comisión se aplica diariamente; el costo de operación se aplica "
+                    "a compras, ventas por retiros y rebalanceos. El valor real descuenta "
+                    "la inflación supuesta. No se modelan impuestos, spreads ni liquidez."
                 )
 
     render_comparison(

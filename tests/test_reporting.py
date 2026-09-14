@@ -55,7 +55,7 @@ def test_comparison_pdf_includes_simulation_assumptions_and_limits():
         1000, base_currency="MXN", risk_free_rate=0.05, observations=80,
         quotes={"AAA": "MXN", "BBB": "MXN"},
         simulation=SimulationReport(
-            "Máximo Sharpe", result, 100, 0.01, 0, 0.04, 12, 21,
+            "Máximo Sharpe", result, 100, 0, 0.01, 0, 0.04, 12, 21,
         ),
     )
     pdf = PdfReader(BytesIO(report))
@@ -64,3 +64,29 @@ def test_comparison_pdf_includes_simulation_assumptions_and_limits():
     assert "Escenarios Monte Carlo" in text
     assert "1,000" in text
     assert "No incluye retiros" in text
+
+
+def test_comparison_pdf_reports_unfunded_withdrawals():
+    metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 5, 0.02, 0.025, 0.035)
+    returns = pd.DataFrame(np.zeros((80, 2)), columns=["AAA", "BBB"])
+    result = simulate_portfolio_paths(
+        returns, metrics.weights, initial_value=1000, months=4, paths=100,
+        monthly_withdrawal=300,
+    )
+    report = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (PortfolioAlternative("Máximo Sharpe", metrics, risk),
+         PortfolioAlternative("Pesos iguales", metrics, risk)),
+        1000, base_currency="MXN", risk_free_rate=0.05, observations=80,
+        quotes={"AAA": "MXN", "BBB": "MXN"},
+        simulation=SimulationReport(
+            "Máximo Sharpe", result, 0, 300, 0, 0, 0, 12, 21,
+        ),
+    )
+    pdf = PdfReader(BytesIO(report))
+    assert len(pdf.pages) >= 2
+    text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    assert "Retiros programados" in text
+    assert "1,200" in text
+    assert "retiro no cubierto" in text

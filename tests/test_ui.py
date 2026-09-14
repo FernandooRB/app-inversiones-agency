@@ -31,6 +31,12 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     assert not app.exception
     assert not app.error
     assert len(app.metric) == 8
+    app.radio[0].set_value("Retiros").run()
+    withdrawal = next(item for item in app.number_input if item.label.startswith("Retiro mensual"))
+    withdrawal.set_value(50_000.0).run()
+    assert not app.exception
+    assert not app.error
+    assert any(item.label == "Con retiro no cubierto" for item in app.metric)
     app.run()
     assert not app.exception
     assert len(app.metric) == 8

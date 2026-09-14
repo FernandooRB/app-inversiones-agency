@@ -36,6 +36,38 @@ def test_annual_fee_is_effective_over_252_sessions():
     np.testing.assert_allclose(result.monthly_values[-1], 900, atol=1e-8)
 
 
+def test_unfunded_withdrawal_stops_at_zero_and_records_shortfall():
+    returns = pd.DataFrame(np.zeros((80, 1)), columns=["A"])
+    result = simulate_portfolio_paths(
+        returns, [1], initial_value=1000, months=4, paths=100,
+        monthly_withdrawal=300, rebalance_months=None,
+    )
+    np.testing.assert_allclose(result.monthly_values[:, 0], [1000, 700, 400, 100, 0])
+    np.testing.assert_allclose(result.total_withdrawn, 1000)
+    assert result.probability_of_shortfall == 1
+    assert (result.monthly_values >= 0).all()
+
+
+def test_withdrawal_trading_cost_requires_larger_gross_sale():
+    returns = pd.DataFrame(np.zeros((80, 1)), columns=["A"])
+    result = simulate_portfolio_paths(
+        returns, [1], initial_value=1000, months=1, paths=100,
+        monthly_withdrawal=300, transaction_cost_bps=100,
+    )
+    np.testing.assert_allclose(result.monthly_values[-1], 990 - 300 / 0.99)
+    np.testing.assert_allclose(result.total_withdrawn, 300)
+    assert result.probability_of_shortfall == 0
+
+
+def test_contributions_and_withdrawals_cannot_overlap():
+    returns = pd.DataFrame(np.zeros((80, 1)), columns=["A"])
+    with pytest.raises(PortfolioError, match="no ambos"):
+        simulate_portfolio_paths(
+            returns, [1], initial_value=1000, months=12, paths=100,
+            monthly_contribution=100, monthly_withdrawal=100,
+        )
+
+
 @pytest.mark.parametrize("method", ["bootstrap_blocks", "lognormal"])
 def test_seed_reproduces_correlated_scenarios(method):
     base = np.sin(np.arange(90)) * 0.01
