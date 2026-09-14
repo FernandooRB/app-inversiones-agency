@@ -11,6 +11,7 @@ import streamlit as st
 
 from access import require_access
 from currencies import convert_prices, currency_map, download_fx
+from fx_comparison import render_comparison
 from portfolio_core import (
     PortfolioError,
     annualized_moments,
@@ -259,6 +260,11 @@ try:
         st.write(f"**Observaciones comunes:** {len(returns):,}")
         st.write(f"**Tasa libre de riesgo:** {risk_free_rate:.2%}")
         st.write(f"**Límite por activo:** {max_weight:.0%}")
+
+    render_comparison(
+        download.prices, quotes, base_currency, fx, max_sharpe.weights,
+        risk_free_rate, max_weight, confidence, horizon,
+    )
 
     pdf = create_pdf_report(
         download.valid_tickers,
