@@ -26,19 +26,29 @@ cada mes para auditoría interna.
 
 ## Flujos y costos
 
-Se invierte el capital inicial en las proporciones elegidas. Las aportaciones
-nominales se agregan al final de cada mes con esas mismas proporciones. El costo
-por operación, expresado en puntos base del monto negociado, se descuenta de la
-compra inicial, cada aportación y del volumen comprado y vendido al rebalancear.
+Se invierte el capital inicial en las proporciones elegidas. Cada escenario puede
+tener aportaciones o retiros mensuales fijos, pero no ambos. Las aportaciones
+nominales se agregan al final de cada mes con esas mismas proporciones. Para
+cubrir un retiro se venden posiciones proporcionalmente; la venta bruta incluye
+el costo por operación para que el retiro neto sea el solicitado. Si una
+trayectoria no alcanza, se vende lo disponible, se registra el retiro parcialmente
+cubierto y la cartera queda en cero, sin deuda ni posiciones negativas.
+El costo por operación, expresado en puntos base del monto negociado, se descuenta
+de la compra inicial, cada aportación, los retiros y el volumen comprado y vendido
+al rebalancear.
 La comisión anual se aplica como factor diario efectivo. El rebalanceo puede ser
 nulo, trimestral, semestral o anual; la cartera deriva entre rebalanceos. El
 valor real final divide el patrimonio nominal por `(1 + inflación anual)^años`.
 
-«Bajo capital aportado» es la proporción de trayectorias cuyo valor nominal
-final es inferior a `capital inicial + aportaciones nominales`. Este indicador
-incluye los costos modelados, pero no equivale a una probabilidad calibrada del
-mundo real. No se modelan retiros, impuestos, spreads, custodia, liquidez,
-quiebra de intermediarios ni cambios de correlación. Los retornos de entrada
+En escenarios de aportaciones, «bajo capital aportado» es la proporción de
+trayectorias cuyo valor nominal final es inferior a `capital inicial + aportaciones
+nominales`. En escenarios de retiros, «con retiro no cubierto» es la proporción
+de trayectorias en las que al menos un retiro planeado se pagó parcialmente o
+no se pagó; también se muestra la mediana del monto efectivamente retirado.
+Estas fracciones simuladas no son probabilidades calibradas del mundo real.
+Los retiros son nominales fijos: no crecen con inflación. No se modelan
+impuestos, spreads, custodia, liquidez, quiebra de intermediarios ni cambios de correlación.
+Los retornos de entrada
 deben ser diarios comparables; si falta FX en fechas de precios, la app no
 ejecuta esta simulación.
 
@@ -50,7 +60,7 @@ recuerda que las proyecciones hipotéticas no son desempeño real.
 
 ## Siguientes controles
 
-Agregar retiros y trayectorias de agotamiento, escenarios de estrés explícitos,
+Agregar escenarios de estrés explícitos, retiros crecientes con inflación,
 comparaciones fuera de muestra y tratamiento de impuestos por instrumento y
 régimen. Para CETES y bonos se necesita un modelo de flujos y valoración propio;
 no se deben introducir rendimientos a vencimiento como si fueran retornos diarios.

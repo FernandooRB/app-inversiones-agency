@@ -36,11 +36,11 @@ def main() -> None:
     result = simulate_portfolio_paths(
         fictional_returns, alternatives[0].metrics.weights,
         initial_value=1_000_000, months=36, paths=500,
-        monthly_contribution=10_000, annual_fee=0.01,
+        monthly_withdrawal=40_000, annual_fee=0.01,
         transaction_cost_bps=10, inflation_rate=0.04,
         rebalance_months=6, seed=42,
     )
-    output = Path("output/pdf/comparativo_ficticio_montecarlo_mxn.pdf")
+    output = Path("output/pdf/comparativo_ficticio_retiros_mxn.pdf")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(create_comparison_pdf_report(
         labels, date(2021, 1, 4), date(2025, 12, 31), alternatives, 1_000_000,
@@ -48,7 +48,7 @@ def main() -> None:
         quotes=dict.fromkeys(labels, "MXN"),
         data_source="datos ficticios para revisión visual; no son cotizaciones de mercado",
         simulation=SimulationReport(
-            "Máximo Sharpe", result, 10_000, 0.01, 10, 0.04, 6, 21,
+            "Máximo Sharpe", result, 0, 40_000, 0.01, 10, 0.04, 6, 21,
         ),
     ))
     print(output.resolve())

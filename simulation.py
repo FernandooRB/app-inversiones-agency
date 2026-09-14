@@ -19,6 +19,8 @@ class SimulationResult:
     real_terminal_values: np.ndarray
     method: str
     seed: int
+    shortfall_paths: np.ndarray
+    total_withdrawn: np.ndarray
 
     def bands(self) -> pd.DataFrame:
         percentiles = np.quantile(self.monthly_values, [0.05, 0.5, 0.95], axis=1).T
@@ -37,9 +39,14 @@ class SimulationResult:
         """Fraction of simulated endings below nominal capital contributed."""
         return float(np.mean(self.monthly_values[-1] < self.invested_capital[-1]))
 
+    @property
+    def probability_of_shortfall(self) -> float:
+        """Fraction of paths unable to cover at least one scheduled withdrawal."""
+        return float(np.mean(self.shortfall_paths))
+
 
 def _validate_inputs(
-    returns, weights, initial_value, months, paths, monthly_contribution,
+    returns, weights, initial_value, months, paths, monthly_contribution, monthly_withdrawal,
     annual_fee, transaction_cost_bps, rebalance_months, inflation_rate, seed, block_days,
     method,
 ):
@@ -61,11 +68,16 @@ def _validate_inputs(
         raise PortfolioError("El bloque histórico debe tener entre 1 y 63 sesiones disponibles.")
     if rebalance_months not in {None, 3, 6, 12}:
         raise PortfolioError("Rebalanceo no reconocido.")
-    for value in (initial_value, monthly_contribution, annual_fee, transaction_cost_bps, inflation_rate):
+    for value in (
+        initial_value, monthly_contribution, monthly_withdrawal,
+        annual_fee, transaction_cost_bps, inflation_rate,
+    ):
         if not np.isfinite(value):
             raise PortfolioError("Los supuestos de simulación deben ser finitos.")
-    if initial_value <= 0 or monthly_contribution < 0:
-        raise PortfolioError("El capital inicial debe ser positivo y las aportaciones no negativas.")
+    if initial_value <= 0 or monthly_contribution < 0 or monthly_withdrawal < 0:
+        raise PortfolioError("El capital debe ser positivo; aportaciones y retiros no negativos.")
+    if monthly_contribution > 0 and monthly_withdrawal > 0:
+        raise PortfolioError("Elige aportaciones o retiros mensuales para un escenario, no ambos.")
     if not 0 <= annual_fee < 1 or not 0 <= transaction_cost_bps <= 500:
         raise PortfolioError("Comisión anual o costo de operación fuera del rango permitido.")
     if not -0.5 < inflation_rate <= 1:
@@ -81,6 +93,7 @@ def simulate_portfolio_paths(
     months: int,
     paths: int = 500,
     monthly_contribution: float = 0.0,
+    monthly_withdrawal: float = 0.0,
     annual_fee: float = 0.0,
     transaction_cost_bps: float = 0.0,
     rebalance_months: int | None = 12,
@@ -91,12 +104,15 @@ def simulate_portfolio_paths(
 ) -> SimulationResult:
     """Simulate correlated asset returns and deterministic cash-flow rules.
 
-    Contributions occur at month-end. Trading cost is charged on initial and
-    contribution purchases and on gross traded notional at each rebalance.
+    Contributions or withdrawals occur at month-end. Withdrawals sell holdings
+    proportionally and stop at zero; any unpaid amount flags a shortfall. Trading
+    cost is charged on initial/contribution purchases, withdrawal sales and
+    gross traded notional at each rebalance.
     Annual fees accrue daily. No tax, spread, liquidity or regime model is included.
     """
     data, target_weights = _validate_inputs(
         returns, weights, initial_value, months, paths, monthly_contribution,
+        monthly_withdrawal,
         annual_fee, transaction_cost_bps, rebalance_months, inflation_rate, seed,
         block_days, method,
     )
@@ -109,6 +125,8 @@ def simulate_portfolio_paths(
     monthly_values = np.empty((months + 1, paths))
     monthly_values[0] = holdings.sum(axis=1)
     invested = initial_value + monthly_contribution * np.arange(months + 1)
+    shortfall_paths = np.zeros(paths, dtype=bool)
+    total_withdrawn = np.zeros(paths)
 
     if method == "lognormal":
         log_returns = np.log1p(data)
@@ -132,6 +150,17 @@ def simulate_portfolio_paths(
         if day % SESSIONS_PER_MONTH == 0:
             month = day // SESSIONS_PER_MONTH
             holdings += monthly_contribution * (1 - cost_rate) * target_weights
+            if monthly_withdrawal > 0:
+                before = holdings.sum(axis=1)
+                gross_sale = np.minimum(before, monthly_withdrawal / (1 - cost_rate))
+                paid = gross_sale * (1 - cost_rate)
+                total_withdrawn += paid
+                shortfall_paths |= paid < monthly_withdrawal - 1e-8
+                remaining_fraction = np.divide(
+                    before - gross_sale, before,
+                    out=np.zeros_like(before), where=before > 0,
+                )
+                holdings *= remaining_fraction[:, None]
             if rebalance_months is not None and month % rebalance_months == 0:
                 before = holdings.sum(axis=1)
                 desired = before[:, None] * target_weights
@@ -143,4 +172,7 @@ def simulate_portfolio_paths(
             raise PortfolioError("La simulación produjo valores no finitos; revisa los supuestos.")
 
     real_terminal = monthly_values[-1] / (1 + inflation_rate) ** (months / 12)
-    return SimulationResult(monthly_values, invested, real_terminal, method, seed)
+    return SimulationResult(
+        monthly_values, invested, real_terminal, method, seed,
+        shortfall_paths, total_withdrawn,
+    )

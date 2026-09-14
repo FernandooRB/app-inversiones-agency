@@ -29,6 +29,7 @@ class SimulationReport:
     alternative_name: str
     result: SimulationResult
     monthly_contribution: float
+    monthly_withdrawal: float
     annual_fee: float
     transaction_cost_bps: float
     inflation_rate: float
@@ -36,7 +37,7 @@ class SimulationReport:
     block_days: int
 
 
-def _simulation_chart(result: SimulationResult) -> Drawing:
+def _simulation_chart(result: SimulationResult, withdrawal_mode: bool) -> Drawing:
     bands = result.bands()
     drawing = Drawing(180 * mm, 55 * mm)
     left, bottom, width, height = 18 * mm, 10 * mm, 155 * mm, 36 * mm
@@ -77,7 +78,8 @@ def _simulation_chart(result: SimulationResult) -> Drawing:
     drawing.add(String(left, bottom + height + 3 * mm, "Banda 5-95 %", fontSize=8))
     drawing.add(String(left + 46 * mm, bottom + height + 3 * mm, "Mediana", fontSize=8,
                        fillColor=colors.HexColor("#176B91")))
-    drawing.add(String(left + 80 * mm, bottom + height + 3 * mm, "Capital aportado", fontSize=8,
+    capital_label = "Capital inicial" if withdrawal_mode else "Capital aportado"
+    drawing.add(String(left + 80 * mm, bottom + height + 3 * mm, capital_label, fontSize=8,
                        fillColor=colors.HexColor("#666666")))
     return drawing
 
@@ -245,6 +247,8 @@ def create_comparison_pdf_report(
             "Sin rebalanceo" if simulation.rebalance_months is None
             else f"Cada {simulation.rebalance_months} meses"
         )
+        cash_flow_amount = simulation.monthly_withdrawal or simulation.monthly_contribution
+        cash_flow_label = "Retiro mensual" if simulation.monthly_withdrawal > 0 else "Aportación mensual"
         assumptions = [
             ["Escenario", escape(simulation.alternative_name)],
             ["Método", method],
@@ -252,7 +256,7 @@ def create_comparison_pdf_report(
              f"{start_date.isoformat()} a {end_date.isoformat()} | {observations:,} retornos"],
             ["Horizonte y trayectorias", f"{months} meses | {values.shape[1]:,} trayectorias"],
             ["Semilla y bloque", f"{simulation.result.seed} | {simulation.block_days} sesiones"],
-            ["Aportación mensual", f"{simulation.monthly_contribution:,.2f} {base_currency}"],
+            [cash_flow_label, f"{cash_flow_amount:,.2f} {base_currency}"],
             ["Comisión anual", f"{simulation.annual_fee:.2%}"],
             ["Costo por operación", f"{simulation.transaction_cost_bps:.1f} puntos base"],
             ["Inflación anual", f"{simulation.inflation_rate:.2%}"],
@@ -264,10 +268,31 @@ def create_comparison_pdf_report(
             ["Percentil 95 final nominal", f"{final['Percentil 95']:,.0f} {base_currency}"],
             ["Mediana final real",
              f"{np.median(simulation.result.real_terminal_values):,.0f} {base_currency}"],
-            ["Capital aportado", f"{final['Capital aportado']:,.0f} {base_currency}"],
-            ["Trayectorias bajo capital aportado",
-             f"{simulation.result.probability_below_contributions:.1%}"],
         ]
+        if simulation.monthly_withdrawal > 0:
+            results.extend([
+                ["Retiros programados", f"{simulation.monthly_withdrawal * months:,.0f} {base_currency}"],
+                ["Mediana efectivamente retirada",
+                 f"{np.median(simulation.result.total_withdrawn):,.0f} {base_currency}"],
+                ["Trayectorias con retiro no cubierto",
+                 f"{simulation.result.probability_of_shortfall:.1%}"],
+            ])
+        else:
+            results.extend([
+                ["Capital aportado", f"{final['Capital aportado']:,.0f} {base_currency}"],
+                ["Trayectorias bajo capital aportado",
+                 f"{simulation.result.probability_below_contributions:.1%}"],
+            ])
+        if simulation.monthly_withdrawal > 0:
+            flow_note = (
+                "Si falta dinero para un retiro, se vende lo disponible y se marca la trayectoria "
+                "como insuficiente; no hay deuda ni saldo negativo. "
+            )
+        else:
+            flow_note = (
+                "La frecuencia bajo capital aportado no es una probabilidad calibrada. "
+                "No incluye retiros. "
+            )
 
         def simple_table(rows):
             table = Table(rows, colWidths=[86 * mm, 99 * mm])
@@ -296,14 +321,13 @@ def create_comparison_pdf_report(
             Paragraph("Patrimonio al final del horizonte", styles["Heading2"]),
             simple_table(results),
             Spacer(1, 4 * mm),
-            _simulation_chart(simulation.result),
+            _simulation_chart(simulation.result, simulation.monthly_withdrawal > 0),
             Spacer(1, 2 * mm),
             Paragraph(
-                "La banda muestra percentiles entre trayectorias en cada mes. El valor real "
-                "descuenta la inflación supuesta; la comisión se aplica diariamente y el costo "
-                "de operación a compras y rebalanceos. La frecuencia bajo capital aportado no "
-                "es una probabilidad calibrada. Se reutiliza la muestra histórica, que puede "
-                "omitir cambios de régimen. No incluye retiros, impuestos, diferenciales ni liquidez.",
+                flow_note + "La banda muestra percentiles entre trayectorias por mes. "
+                "El valor real descuenta "
+                "inflación supuesta; comisión diaria y costos de operación afectan los resultados. "
+                "La muestra puede omitir cambios de régimen. No incluye impuestos ni liquidez.",
                 styles["Normal"],
             ),
         ])
