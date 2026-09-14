@@ -35,6 +35,9 @@
   personalizadas, confirmar el encuadre regulatorio y la inscripción aplicable.
 - Los impuestos se presentan por separado después de definir instrumento, intermediario y régimen
   fiscal del cliente; no se aplica una tasa universal.
+- El [contraste H.10 completo](fx_reference_validation_2024h1.md) de AAPL/MSFT para
+  enero-junio de 2024 muestra sensibilidad material de las métricas a la fuente FX.
+  No determina todavía la fuente principal de producción ni valida precios de acciones.
 
 ## Fuentes a evaluar
 

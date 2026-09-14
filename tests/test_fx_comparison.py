@@ -1,8 +1,10 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from fx_comparison import compare_series, fixed_metrics, read_reference
+from fx_comparison import compare_series, fixed_metrics, internal_missing_dates, read_reference
 from portfolio_core import PortfolioError
 
 
@@ -28,6 +30,18 @@ def test_alignment_uses_intersection_without_filling():
     assert baseline["A"].tolist() == [170., 228.]
     assert alternative["A"].tolist() == [160., 240.]
     assert table.iloc[0]["Diferencia relativa"] == pytest.approx(17 / 16 - 1)
+    assert list(internal_missing_dates(prices, table.index)) == [prices.index[1]]
+
+
+def test_full_h10_reference_matches_documented_observations():
+    path = Path(__file__).resolve().parents[1] / "docs/fx_reference_fed_h10_2024h1.csv"
+    reference = read_reference(path.read_bytes())
+    assert len(reference) == 125
+    assert reference.index.min() == pd.Timestamp("2024-01-02")
+    assert reference.index.max() == pd.Timestamp("2024-06-28")
+    assert reference.loc["2024-01-02"] == pytest.approx(17.0140)
+    assert reference.loc["2024-06-03"] == pytest.approx(17.5780)
+    assert reference.loc["2024-06-28"] == pytest.approx(18.2610)
 
 
 def test_constant_fx_rescaling_does_not_change_returns_or_risk():
