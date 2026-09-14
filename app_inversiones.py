@@ -262,7 +262,7 @@ try:
             "Contribución al retorno": max_sharpe.weights * mean_returns.to_numpy(),
         }
     )
-    st.subheader("Asignación propuesta por el modelo")
+    st.subheader("Escenarios de asignación del modelo (análisis histórico)")
     st.dataframe(
         weights.style.format(
             {
