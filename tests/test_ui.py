@@ -27,9 +27,13 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     assert not app.exception
     assert not app.error
     assert len(app.metric) == 4
+    app.checkbox[0].set_value(True).run()
+    assert not app.exception
+    assert not app.error
+    assert len(app.metric) == 8
     app.run()
     assert not app.exception
-    assert len(app.metric) == 4
+    assert len(app.metric) == 8
     app.text_input[2].set_value("25,25,25,25").run()
     app.button[0].click().run()
     assert not app.exception

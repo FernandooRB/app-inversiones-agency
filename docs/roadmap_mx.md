@@ -23,7 +23,7 @@
 | 2. Datos mexicanos | Catálogo de instrumentos, serie FX independiente y referencias de tasas | Fuente, licencia, moneda, horario, ajustes y fechas documentados; sin retornos diarios falsos por huecos |
 | 3. Instrumentos | Acciones/ETF mexicanos y SIC; CETES, fondos y efectivo con modelos propios | Valoración y flujos apropiados por tipo; no tratar rendimiento a vencimiento como retorno total diario |
 | 4. Optimización | Objetivos y límites de escenarios de investigación, referencias y sensibilidad | Restricciones factibles; comparación con alternativas simples; diagnósticos de estabilidad; asignación por perfil solo después de resolver las condiciones legales y laborales |
-| 5. Simulación | Trayectorias Monte Carlo con aportaciones, retiros, inflación, costos y rebalanceo | Semilla y supuestos guardados; resultados hipotéticos; pruebas de sensibilidad y estrés |
+| 5. Simulación | [Trayectorias Monte Carlo](monte_carlo.md) con aportaciones, inflación, costos y rebalanceo; retiros y estrés pendientes | Semilla y supuestos visibles; resultados hipotéticos; pruebas de sensibilidad y estrés antes de uso externo |
 | 6. Validación | Ventanas fuera de muestra, referencias y costos | Fechas de estimación/evaluación separadas; límites y fallos comunicados |
 | 7. Datos de clientes | Etapa condicionada a la definición legal del servicio | No guardar perfiles, carteras identificables ni historial de propuestas para clientes hasta definir finalidad, privacidad, autorización laboral y alcance regulatorio |
 

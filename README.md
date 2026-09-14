@@ -2,6 +2,8 @@
 
 Aplicación educativa de uso interno en Streamlit para analizar asignaciones de activos con datos históricos. Calcula
 portafolios de máximo Sharpe y mínima volatilidad, una frontera eficiente, VaR, CVaR y un reporte PDF.
+Incluye [escenarios Monte Carlo](docs/monte_carlo.md) para investigación interna,
+con métodos histórico por bloques y lognormal correlacionado.
 
 > **Importante:** los resultados son estimaciones históricas y no constituyen asesoría, una recomendación
 > personalizada ni una garantía de rendimiento futuro.

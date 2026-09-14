@@ -27,6 +27,7 @@ from portfolio_core import (
     random_portfolios,
 )
 from reporting import PortfolioAlternative, create_comparison_pdf_report, create_pdf_report
+from simulation import simulate_portfolio_paths
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOGGER = logging.getLogger(__name__)
@@ -297,6 +298,107 @@ try:
         st.write(f"**Observaciones comunes:** {len(returns):,}")
         st.write(f"**Tasa libre de riesgo:** {risk_free_rate:.2%}")
         st.write(f"**Límite por activo:** {max_weight:.0%}")
+
+    with st.expander("Monte Carlo: escenarios hipotéticos del patrimonio"):
+        st.caption(
+            "Las trayectorias usan retornos históricos remuestreados en bloques o una distribución "
+            "lognormal correlacionada estimada con la muestra. No son rendimientos previstos."
+        )
+        if st.checkbox("Calcular trayectorias hipotéticas"):
+            if removed:
+                st.warning(
+                    "Hay fechas de precios sin tipo de cambio dentro de la muestra. "
+                    "Resuelve esos huecos antes de simular retornos diarios."
+                )
+            else:
+                selected = st.selectbox("Escenario de asignación", [item.name for item in alternatives])
+                method_label = st.selectbox(
+                    "Método", ["Bloques históricos", "Lognormal correlacionado"]
+                )
+                method = "bootstrap_blocks" if method_label == "Bloques históricos" else "lognormal"
+                years = st.slider("Horizonte (años)", 1, 10, 3)
+                path_count = st.slider("Trayectorias", 100, 2000, 500, 100)
+                contribution = st.number_input(
+                    f"Aportación mensual ({base_currency})", min_value=0.0, value=0.0, step=1000.0
+                )
+                fee = st.number_input(
+                    "Comisión anual supuesta (%)", min_value=0.0, max_value=10.0,
+                    value=0.0, step=0.25,
+                ) / 100
+                trading_cost = st.number_input(
+                    "Costo por operación (puntos base)", min_value=0.0, max_value=500.0,
+                    value=0.0, step=5.0,
+                )
+                inflation = st.number_input(
+                    "Inflación anual supuesta (%)", min_value=-20.0, max_value=50.0,
+                    value=4.0, step=0.25,
+                ) / 100
+                rebalance_label = st.selectbox(
+                    "Rebalanceo", ["Sin rebalanceo", "Cada 3 meses", "Cada 6 meses", "Cada 12 meses"]
+                )
+                rebalance_months = {
+                    "Sin rebalanceo": None, "Cada 3 meses": 3,
+                    "Cada 6 meses": 6, "Cada 12 meses": 12,
+                }[rebalance_label]
+                block_days = 21
+                if method == "bootstrap_blocks":
+                    block_days = st.slider(
+                        "Tamaño del bloque histórico (sesiones)", 1, min(63, len(returns)),
+                        min(21, len(returns)),
+                    )
+                seed = st.number_input("Semilla reproducible", min_value=0, value=42, step=1)
+                scenario = next(item for item in alternatives if item.name == selected)
+                simulated = simulate_portfolio_paths(
+                    returns, scenario.metrics.weights, initial_value=portfolio_value,
+                    months=years * 12, paths=path_count, monthly_contribution=contribution,
+                    annual_fee=fee, transaction_cost_bps=trading_cost,
+                    rebalance_months=rebalance_months, inflation_rate=inflation,
+                    method=method, seed=int(seed), block_days=block_days,
+                )
+                bands = simulated.bands()
+                end = bands.iloc[-1]
+                sim_cols = st.columns(4)
+                sim_cols[0].metric("Mediana final nominal", f"{end['Mediana']:,.0f} {base_currency}")
+                sim_cols[1].metric("Percentil 5 nominal", f"{end['Percentil 5']:,.0f} {base_currency}")
+                sim_cols[2].metric(
+                    "Mediana final real",
+                    f"{np.median(simulated.real_terminal_values):,.0f} {base_currency}",
+                )
+                sim_cols[3].metric(
+                    "Bajo capital aportado", f"{simulated.probability_below_contributions:.1%}"
+                )
+                sim_chart = go.Figure()
+                sim_chart.add_trace(go.Scatter(
+                    x=bands["Mes"], y=bands["Percentil 95"],
+                    name="Percentil 95", line={"width": 0}, showlegend=False,
+                ))
+                sim_chart.add_trace(go.Scatter(
+                    x=bands["Mes"], y=bands["Percentil 5"], fill="tonexty",
+                    name="Rango 5–95 %", line={"width": 0}, fillcolor="rgba(31,119,180,0.20)",
+                ))
+                sim_chart.add_trace(go.Scatter(
+                    x=bands["Mes"], y=bands["Mediana"], name="Mediana",
+                    line={"color": "#1f77b4", "width": 3},
+                ))
+                sim_chart.add_trace(go.Scatter(
+                    x=bands["Mes"], y=bands["Capital aportado"], name="Capital aportado",
+                    line={"color": "#555555", "dash": "dash"},
+                ))
+                sim_chart.update_layout(
+                    xaxis_title="Mes", yaxis_title=f"Valor nominal ({base_currency})",
+                    title="Distribución simulada del patrimonio",
+                )
+                st.plotly_chart(sim_chart, use_container_width=True)
+                st.download_button(
+                    "Descargar percentiles mensuales CSV", bands.to_csv(index=False).encode("utf-8"),
+                    "montecarlo_percentiles.csv", "text/csv",
+                )
+                st.caption(
+                    "Capital aportado = inicial + aportaciones nominales. La comisión se aplica "
+                    "diariamente; el costo de operación se aplica al capital inicial, aportaciones "
+                    "y volumen negociado al rebalancear. El valor real descuenta la inflación supuesta. "
+                    "No se modelan impuestos, spreads ni liquidez."
+                )
 
     render_comparison(
         download.prices, quotes, base_currency, fx, max_sharpe.weights,
