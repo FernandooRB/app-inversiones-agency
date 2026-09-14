@@ -1,6 +1,7 @@
 """Compare explicitly supplied USD/MXN references on identical observation dates."""
 
 import io
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -14,6 +15,8 @@ from portfolio_core import (
     optimize_portfolio,
     portfolio_statistics,
 )
+
+H10_REFERENCE = Path(__file__).with_name("docs") / "fx_reference_fed_h10_2024h1.csv"
 
 
 def read_reference(data):
@@ -50,6 +53,14 @@ def compare_series(prices, yahoo, reference):
     return table, original.mul(table["Yahoo"], axis=0), original.mul(table["Referencia"], axis=0)
 
 
+def internal_missing_dates(prices, common_dates):
+    """Find asset-price dates omitted inside the comparison's effective period."""
+    if len(common_dates) < 2:
+        return prices.index[:0]
+    expected = prices.loc[common_dates.min():common_dates.max()].index
+    return expected.difference(common_dates)
+
+
 def fixed_metrics(prices, weights, rate, confidence, horizon):
     returns = calculate_returns(prices)
     mean, covariance = annualized_moments(returns)
@@ -73,22 +84,36 @@ def render_comparison(prices, quotes, base, fx, weights, rate, cap, confidence, 
         if base != "MXN" or set(quotes.values()) != {"USD"}:
             st.info("Esta comparación admite por ahora activos cotizados en USD con moneda base MXN.")
             return
-        source = st.text_input("Fuente de referencia y enlace", max_chars=500)
-        method = st.text_input(
-            "Método, hora de observación y zona horaria de la referencia", max_chars=500
+        mode = st.radio(
+            "Referencia", ["Subir CSV", "Reserva Federal H.10 (enero-junio 2024)"],
+            horizontal=True,
         )
-        st.caption(
-            "CSV con columnas Date,USDMXN; fechas YYYY-MM-DD y pesos por dólar. "
-            "Utiliza la fecha de observación, no la de publicación. No se rellenan huecos."
-        )
-        upload = st.file_uploader("Serie de referencia CSV", type=["csv"])
-        if upload is None:
-            return
-        if not source.strip() or not method.strip():
-            st.info("Identifica la fuente y su convención temporal para comparar.")
-            return
+        if mode == "Subir CSV":
+            source = st.text_input("Fuente de referencia y enlace", max_chars=500)
+            method = st.text_input(
+                "Método, hora de observación y zona horaria de la referencia", max_chars=500
+            )
+            st.caption(
+                "CSV con columnas Date,USDMXN; fechas YYYY-MM-DD y pesos por dólar. "
+                "Utiliza la fecha de observación, no la de publicación. No se rellenan huecos."
+            )
+            upload = st.file_uploader("Serie de referencia CSV", type=["csv"])
+            if upload is None:
+                return
+            if not source.strip() or not method.strip():
+                st.info("Identifica la fuente y su convención temporal para comparar.")
+                return
+            reference_bytes = upload.getvalue()
+        else:
+            st.caption(
+                "Reserva Federal H.10: pesos por dólar, tasa de compra de mediodía en "
+                "Nueva York (ET), por fecha de observación. Serie disponible del "
+                "02/01/2024 al 28/06/2024; no equivale al cierre bursátil. "
+                "Fuente: https://www.federalreserve.gov/releases/h10/Hist/dat00_mx.htm"
+            )
+            reference_bytes = H10_REFERENCE.read_bytes()
         try:
-            reference = read_reference(upload.getvalue())
+            reference = read_reference(reference_bytes)
             table, baseline, alternative = compare_series(prices, fx["USDMXN=X"], reference)
             st.write(
                 f"Fechas comunes: {len(table)}; de {table.index.min().date()} "
@@ -101,27 +126,59 @@ def render_comparison(prices, quotes, base, fx, weights, rate, cap, confidence, 
                 "Descargar diferencias CSV", table.to_csv().encode("utf-8"),
                 "contraste_fx.csv", "text/csv",
             )
+            omitted_inside = internal_missing_dates(prices, table.index)
             if len(table) < 60:
                 st.info("Contraste puntual disponible. El riesgo requiere 60 fechas comunes.")
                 return
+            if len(omitted_inside):
+                st.warning(
+                    f"Hay {len(omitted_inside)} fecha(s) de precios omitida(s) dentro del periodo. "
+                    "Solo se comparan tasas: los retornos entre fechas comunes abarcarían varias "
+                    "sesiones y no se pueden tratar como diarios."
+                )
+                return
             st.caption(
                 "Sensibilidad con los mismos pesos y fechas en ambas fuentes. "
-                "Los retornos entre fechas comunes pueden abarcar varias sesiones si hay huecos."
+                "No hay fechas de precios omitidas dentro del periodo comparado."
             )
             metrics = pd.DataFrame({
                 "Yahoo (muestra común)": fixed_metrics(baseline, weights, rate, confidence, horizon),
                 "Referencia (muestra común)": fixed_metrics(alternative, weights, rate, confidence, horizon),
             })
-            st.dataframe(metrics)
+            display = metrics.astype(object)
+            display["Cambio referencia - Yahoo"] = ""
+            for label in metrics.index:
+                yahoo_value, reference_value = metrics.loc[label]
+                if label == "Sharpe":
+                    display.loc[label] = [
+                        f"{yahoo_value:.3f}", f"{reference_value:.3f}",
+                        f"{reference_value - yahoo_value:+.3f}",
+                    ]
+                else:
+                    display.loc[label] = [
+                        f"{yahoo_value:.2%}", f"{reference_value:.2%}",
+                        f"{100 * (reference_value - yahoo_value):+.2f} p.p.",
+                    ]
+            st.dataframe(display)
             allocations = {}
             for label, series in [("Yahoo", baseline), ("Referencia", alternative)]:
                 mean, covariance = annualized_moments(calculate_returns(series))
                 allocations[label] = optimize_portfolio(mean, covariance, rate, max_weight=cap).weights
             st.write("Pesos de máximo Sharpe reoptimizados por fuente sobre las mismas fechas:")
             st.dataframe(pd.DataFrame(allocations, index=prices.columns).style.format("{:.2%}"))
+            if mode == "Subir CSV":
+                source_note = (
+                    "Referencia aportada por el usuario; autenticidad y sincronización "
+                    "sin verificación automática."
+                )
+            else:
+                source_note = (
+                    "Referencia H.10 de la Reserva Federal; horarios de FX y acciones "
+                    "sin sincronización automática."
+                )
             st.caption(
-                "Métricas porcentuales expresadas como fracción (0.10 = 10%); Sharpe es adimensional. "
-                "Referencia del usuario; autenticidad y sincronización sin verificación automática."
+                "Cambio en puntos porcentuales, salvo Sharpe que es adimensional. "
+                + source_note
             )
         except PortfolioError as exc:
             st.error(str(exc))
