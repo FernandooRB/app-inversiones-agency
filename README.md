@@ -1,10 +1,15 @@
 # Optimizador de Portafolios V2
 
-Aplicación educativa en Streamlit para analizar asignaciones de activos con datos históricos. Calcula
+Aplicación educativa de uso interno en Streamlit para analizar asignaciones de activos con datos históricos. Calcula
 portafolios de máximo Sharpe y mínima volatilidad, una frontera eficiente, VaR, CVaR y un reporte PDF.
 
 > **Importante:** los resultados son estimaciones históricas y no constituyen asesoría, una recomendación
 > personalizada ni una garantía de rendimiento futuro.
+
+El PDF compara escenarios matemáticos. La aplicación no está habilitada como flujo de
+recomendaciones individualizadas para clientes ni como sistema de ejecución de operaciones.
+Ese uso requiere definir antes su encuadre regulatorio, los permisos laborales aplicables,
+los derechos de datos y la revisión de cada entregable.
 
 ## Cambios de seguridad y metodología en V2
 

@@ -60,7 +60,7 @@ def create_comparison_pdf_report(
     styles["Heading2"].textColor = colors.HexColor("#17365D")
     story = [
         Paragraph("Comparativo de carteras", styles["Title"]),
-        Paragraph("Análisis histórico para revisión del asesor", styles["Normal"]),
+        Paragraph("Análisis histórico para revisión del equipo", styles["Normal"]),
         Spacer(1, 5 * mm),
         Paragraph(
             f"Generado: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')} | "
@@ -158,7 +158,7 @@ def create_comparison_pdf_report(
             "No se incluyen comisiones, diferenciales, impuestos ni restricciones de liquidez. "
             "Los resultados usan la misma muestra con la que se estimaron los pesos optimizados; "
             "no son una prueba fuera de muestra ni una recomendación personalizada. "
-            "Requieren revisión del asesor antes de compartirse con un cliente.",
+            "La entrega a terceros requiere revisión legal de su contenido y contexto.",
             styles["Normal"],
         ),
     ])
@@ -168,7 +168,7 @@ def create_comparison_pdf_report(
         canvas.setStrokeColor(colors.HexColor("#C7D2DD"))
         canvas.line(15 * mm, 14 * mm, 200 * mm, 14 * mm)
         canvas.setFont("Helvetica", 8)
-        canvas.drawString(15 * mm, 10 * mm, "Comparativo histórico | Revisión del asesor")
+        canvas.drawString(15 * mm, 10 * mm, "Comparativo histórico | Revisión interna")
         canvas.drawRightString(200 * mm, 10 * mm, f"Página {doc.page}")
         canvas.restoreState()
 
@@ -203,7 +203,7 @@ def create_pdf_report(
     )
     styles = getSampleStyleSheet()
     story = [
-        Paragraph("Agencia de Inversiones · Reporte cuantitativo V2", styles["Title"]),
+        Paragraph("Reporte cuantitativo V2", styles["Title"]),
         Paragraph(f"Generado: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}", styles["Normal"]),
         Spacer(1, 3 * mm),
         Paragraph("Alcance", styles["Heading2"]),
