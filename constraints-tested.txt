@@ -42,6 +42,7 @@ pytest==9.1.1
 pytest-cov==7.1.0
 python-dateutil==2.9.0.post0
 python-multipart==0.0.32
+pypdf==6.10.0
 pytz==2026.3.post1
 referencing==0.37.0
 reportlab==4.5.1

@@ -3,7 +3,7 @@ from io import BytesIO
 
 import numpy as np
 import pandas as pd
-import pdfplumber
+from pypdf import PdfReader
 
 from portfolio_core import PortfolioMetrics, RiskMetrics
 from reporting import (
@@ -58,9 +58,9 @@ def test_comparison_pdf_includes_simulation_assumptions_and_limits():
             "Máximo Sharpe", result, 100, 0.01, 0, 0.04, 12, 21,
         ),
     )
-    with pdfplumber.open(BytesIO(report)) as pdf:
-        assert len(pdf.pages) >= 2
-        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    pdf = PdfReader(BytesIO(report))
+    assert len(pdf.pages) >= 2
+    text = "\n".join(page.extract_text() or "" for page in pdf.pages)
     assert "Escenarios Monte Carlo" in text
     assert "1,000" in text
     assert "No incluye retiros" in text
