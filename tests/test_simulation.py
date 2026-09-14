@@ -28,6 +28,14 @@ def test_purchase_costs_reduce_initial_and_new_contributions():
     assert result.probability_below_contributions == 1
 
 
+def test_annual_fee_is_effective_over_252_sessions():
+    returns = pd.DataFrame(np.zeros((80, 1)), columns=["A"])
+    result = simulate_portfolio_paths(
+        returns, [1], initial_value=1000, months=12, paths=100, annual_fee=0.1,
+    )
+    np.testing.assert_allclose(result.monthly_values[-1], 900, atol=1e-8)
+
+
 @pytest.mark.parametrize("method", ["bootstrap_blocks", "lognormal"])
 def test_seed_reproduces_correlated_scenarios(method):
     base = np.sin(np.arange(90)) * 0.01
