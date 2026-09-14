@@ -8,6 +8,9 @@ import portfolio_core as core
 
 
 def test_complete_analysis_survives_rerun(monkeypatch):
+    import access
+
+    monkeypatch.setattr(access, "require_access", lambda: None)
     rng = np.random.default_rng(21)
     prices = 100 * np.cumprod(1 + rng.normal(0.001, 0.01, (150, 4)), axis=0)
     data = pd.DataFrame(

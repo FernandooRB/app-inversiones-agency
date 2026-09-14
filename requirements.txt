@@ -1,5 +1,5 @@
 -c constraints-tested.txt
-streamlit>=1.40,<2
+streamlit[auth]>=1.40,<2
 yfinance>=0.2.54,<1
 pandas>=2.2,<4
 numpy>=2.0,<3

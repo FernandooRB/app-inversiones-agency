@@ -8,6 +8,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from access import require_access
+from currencies import convert_prices, currency_map, download_fx
 from portfolio_core import (
     PortfolioError,
     annualized_moments,
@@ -25,6 +27,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 LOGGER = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Optimizador de Portafolios V2", page_icon="📊", layout="wide")
+require_access()
 
 
 @st.cache_data(ttl=3_600, show_spinner=False)
@@ -36,12 +39,22 @@ def percent(value: float) -> str:
     return f"{value:.2%}"
 
 
+@st.cache_data(ttl=3_600, show_spinner=False)
+def cached_fx(quotes, base, start, end):
+    return download_fx(quotes, base, start, end)
+
+
 st.title("Optimizador de Portafolios V2")
 st.caption("Análisis histórico educativo · No constituye una recomendación personalizada de inversión")
 
 with st.sidebar:
     st.header("Configuración")
     tickers_input = st.text_input("Tickers", "AAPL, MSFT, GOOG, TSLA", help="Máximo 25; separados por comas.")
+    quote_input = st.text_input("Monedas de cotización, en el mismo orden", "USD, USD, USD, USD")
+    base_currency = st.selectbox(
+        "Moneda base del análisis", ["USD", "MXN", "EUR", "GBP", "CAD", "JPY", "CHF"]
+    )
+    st.caption("Verifica cada moneda en el mercado de cotización; no se deduce del ticker.")
     start_date = st.date_input("Fecha inicial", value=date(2023, 1, 1), min_value=date(2000, 1, 1))
     end_date = st.date_input("Fecha final", value=date.today(), max_value=date.today())
     risk_free_rate = (
@@ -50,12 +63,15 @@ with st.sidebar:
         )
         / 100
     )
+    st.caption("La tasa libre de riesgo debe corresponder a la moneda base.")
     max_weight = st.slider("Peso máximo por activo", 10, 100, 60, 5) / 100
     confidence = st.select_slider("Confianza de VaR", options=[0.90, 0.95, 0.975, 0.99], value=0.95)
     horizon = st.selectbox(
         "Horizonte de riesgo", [1, 5, 10, 21], index=0, format_func=lambda value: f"{value} día(s)"
     )
-    portfolio_value = st.number_input("Valor del portafolio", min_value=0.0, value=100_000.0, step=10_000.0)
+    portfolio_value = st.number_input(
+        f"Valor del portafolio ({base_currency})", min_value=0.0, value=100_000.0, step=10_000.0
+    )
     analyze = st.button("Analizar portafolio", type="primary", use_container_width=True)
 
 settings = (
@@ -67,6 +83,8 @@ settings = (
     confidence,
     horizon,
     portfolio_value,
+    quote_input,
+    base_currency,
 )
 if analyze:
     st.session_state["analysis_settings"] = settings
@@ -79,20 +97,28 @@ if st.session_state.get("analysis_settings") != settings:
             - El rendimiento mostrado es una media histórica anualizada; no es un pronóstico.
             - La frontera eficiente usa optimización de mínima varianza con posiciones largas.
             - VaR y CVaR dependen de la muestra y no representan la pérdida máxima posible.
-            - Los activos deben ser comparables en una moneda base; esta versión no convierte divisas.
+            - Los precios se convierten a la moneda base con tipos de cambio históricos disponibles.
             """
         )
     st.stop()
 
 try:
     tickers = tuple(normalize_tickers(tickers_input))
+    quotes = currency_map(tickers, quote_input)
     if len(tickers) * max_weight < 1:
         raise PortfolioError(
             f"Con {len(tickers)} activos, el peso máximo debe ser al menos {1 / len(tickers):.1%}."
         )
     with st.spinner("Descargando y validando datos..."):
         download = cached_prices(tickers, start_date, end_date)
-        returns = calculate_returns(download.prices)
+        if download.rejected_tickers:
+            raise PortfolioError("Corrige los tickers sin datos: " + ", ".join(download.rejected_tickers))
+        fx = cached_fx(quotes, base_currency, start_date, end_date)
+        prices = convert_prices(download.prices, quotes, base_currency, fx)
+        removed = len(download.prices) - len(prices)
+        if removed:
+            st.warning(f"Se excluyeron {removed} fechas sin tipo de cambio; no se rellenaron precios.")
+        returns = calculate_returns(prices)
         mean_returns, covariance = annualized_moments(returns)
         max_sharpe = optimize_portfolio(mean_returns, covariance, risk_free_rate, "max_sharpe", max_weight)
         min_volatility = optimize_portfolio(
@@ -106,7 +132,7 @@ try:
         st.warning("Tickers excluidos por falta de datos: " + ", ".join(download.rejected_tickers))
     st.success(
         f"Análisis realizado con {len(returns):,} observaciones, del "
-        f"{download.prices.index.min().date()} al {download.prices.index.max().date()}."
+        f"{prices.index.min().date()} al {prices.index.max().date()}. Moneda: {base_currency}."
     )
 
     col1, col2, col3, col4 = st.columns(4)
@@ -201,18 +227,23 @@ try:
 
     pdf = create_pdf_report(
         download.valid_tickers,
-        download.prices.index.min().date(),
-        download.prices.index.max().date(),
+        prices.index.min().date(),
+        prices.index.max().date(),
         max_sharpe,
         risk,
         portfolio_value,
+        base_currency=base_currency,
+        risk_free_rate=risk_free_rate,
+        max_weight=max_weight,
+        observations=len(returns),
+        quotes=quotes,
     )
     st.download_button(
         "Descargar reporte metodológico PDF", pdf, f"reporte_portafolio_{date.today()}.pdf", "application/pdf"
     )
     st.warning(
         "Los resultados dependen de datos históricos y supuestos estadísticos. No incorporan impuestos, "
-        "comisiones, liquidez, situación personal ni riesgo cambiario."
+        "comisiones, liquidez ni situación personal. La conversión cambiaria no constituye una cobertura."
     )
 except PortfolioError as exc:
     st.error(str(exc))
