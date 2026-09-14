@@ -251,7 +251,9 @@ def efficient_frontier(mean_returns, covariance, max_weight=1.0, points=40):
         remaining -= allocation
         if remaining <= 1e-12:
             break
-    targets = np.linspace(minimum.annual_return, max(highest, minimum.annual_return), points)
+    if highest - minimum.annual_return <= 1e-8:
+        return pd.DataFrame([{"Retorno": minimum.annual_return, "Volatilidad": minimum.annual_volatility}])
+    targets = np.linspace(minimum.annual_return, highest, points)
     initial, rows = minimum.weights, []
     for target in targets:
         constraints = (

@@ -3,6 +3,7 @@
 import logging
 from datetime import date
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -63,7 +64,9 @@ with st.sidebar:
         )
         / 100
     )
-    st.caption("La tasa libre de riesgo debe corresponder a la moneda base.")
+    st.caption(
+        "Supuesto manual: verifica la tasa para la moneda base y el periodo; no se consulta una fuente."
+    )
     max_weight = st.slider("Peso máximo por activo", 10, 100, 60, 5) / 100
     confidence = st.select_slider("Confianza de VaR", options=[0.90, 0.95, 0.975, 0.99], value=0.95)
     horizon = st.selectbox(
@@ -154,8 +157,8 @@ try:
         go.Scatter(
             x=frontier["Volatilidad"],
             y=frontier["Retorno"],
-            mode="lines",
-            name="Frontera eficiente",
+            mode="markers" if len(frontier) == 1 else "lines",
+            name="Punto eficiente" if len(frontier) == 1 else "Frontera eficiente",
             line={"width": 4, "color": "#00CC96"},
         )
     )
@@ -177,9 +180,41 @@ try:
             marker={"symbol": "diamond", "size": 13, "color": "#636EFA"},
         )
     )
+    figure.update_layout(
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "left", "x": 0},
+        margin={"t": 110, "r": 100, "b": 60},
+        coloraxis_colorbar={"title": "Sharpe", "x": 1.02, "y": 0.5, "len": 0.7},
+    )
     figure.update_xaxes(tickformat=".1%")
     figure.update_yaxes(tickformat=".1%")
     st.plotly_chart(figure, use_container_width=True)
+    st.caption(
+        "Los puntos coloreados son asignaciones aleatorias factibles; pueden incluir carteras dominadas. "
+        "No representan simulaciones de precios futuros."
+    )
+    if len(frontier) == 1:
+        st.info("Bajo estas restricciones, la frontera eficiente se reduce a un punto.")
+    if np.allclose(max_sharpe.weights, min_volatility.weights, atol=1e-6, rtol=0):
+        st.caption("Máximo Sharpe y mínima volatilidad coinciden; sus marcadores se superponen.")
+    st.caption(
+        "La media anualizada no es el rendimiento acumulado del periodo. "
+        "La tasa libre de riesgo es un supuesto del usuario, sin verificación automática."
+    )
+    with st.expander("Datos utilizados para contrastar el cálculo"):
+        st.write("Descarga las series y compáralas con una fuente independiente.")
+        st.download_button(
+            "Precios originales CSV", download.prices.to_csv().encode("utf-8"),
+            "precios_originales.csv", "text/csv",
+        )
+        st.download_button(
+            "Precios en moneda base CSV", prices.to_csv().encode("utf-8"),
+            "precios_moneda_base.csv", "text/csv",
+        )
+        if fx:
+            st.download_button(
+                "Tipos de cambio CSV", pd.DataFrame(fx).to_csv().encode("utf-8"),
+                "tipos_cambio.csv", "text/csv",
+            )
 
     weights = pd.DataFrame(
         {
