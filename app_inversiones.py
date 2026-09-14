@@ -14,6 +14,7 @@ from currencies import convert_prices, currency_map, download_fx
 from fx_comparison import render_comparison
 from portfolio_core import (
     PortfolioError,
+    PortfolioMetrics,
     annualized_moments,
     calculate_returns,
     calculate_risk_metrics,
@@ -21,9 +22,11 @@ from portfolio_core import (
     efficient_frontier,
     normalize_tickers,
     optimize_portfolio,
+    parse_current_weights,
+    portfolio_statistics,
     random_portfolios,
 )
-from reporting import create_pdf_report
+from reporting import PortfolioAlternative, create_comparison_pdf_report, create_pdf_report
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOGGER = logging.getLogger(__name__)
@@ -76,6 +79,13 @@ with st.sidebar:
     portfolio_value = st.number_input(
         f"Valor del portafolio ({base_currency})", min_value=0.0, value=100_000.0, step=10_000.0
     )
+    current_weights_input = st.text_input(
+        "Cartera actual, pesos en % (opcional)",
+        help=(
+            "Un porcentaje por ticker, en el mismo orden; deben sumar 100. "
+            "No se guarda en una base de datos."
+        ),
+    )
     analyze = st.button("Analizar portafolio", type="primary", use_container_width=True)
 
 settings = (
@@ -89,6 +99,7 @@ settings = (
     portfolio_value,
     quote_input,
     base_currency,
+    current_weights_input,
 )
 if analyze:
     st.session_state["analysis_settings"] = settings
@@ -131,6 +142,32 @@ try:
         frontier = efficient_frontier(mean_returns, covariance, max_weight)
         random_set = random_portfolios(mean_returns, covariance, risk_free_rate, max_weight=max_weight)
         risk = calculate_risk_metrics(returns, max_sharpe.weights, confidence, horizon)
+        alternatives = [
+            PortfolioAlternative("Máximo Sharpe", max_sharpe, risk),
+            PortfolioAlternative(
+                "Mínima volatilidad", min_volatility,
+                calculate_risk_metrics(returns, min_volatility.weights, confidence, horizon),
+            ),
+        ]
+        equal_weights = np.full(len(tickers), 1 / len(tickers))
+        equal_return, equal_volatility, equal_sharpe = portfolio_statistics(
+            equal_weights, mean_returns, covariance, risk_free_rate
+        )
+        alternatives.append(PortfolioAlternative(
+            "Pesos iguales",
+            PortfolioMetrics(equal_weights, equal_return, equal_volatility, equal_sharpe),
+            calculate_risk_metrics(returns, equal_weights, confidence, horizon),
+        ))
+        if current_weights_input.strip():
+            current_weights = parse_current_weights(current_weights_input, len(tickers))
+            current_return, current_volatility, current_sharpe = portfolio_statistics(
+                current_weights, mean_returns, covariance, risk_free_rate
+            )
+            alternatives.append(PortfolioAlternative(
+                "Cartera actual",
+                PortfolioMetrics(current_weights, current_return, current_volatility, current_sharpe),
+                calculate_risk_metrics(returns, current_weights, confidence, horizon),
+            ))
 
     if download.rejected_tickers:
         st.warning("Tickers excluidos por falta de datos: " + ", ".join(download.rejected_tickers))
@@ -281,6 +318,21 @@ try:
     )
     st.download_button(
         "Descargar reporte metodológico PDF", pdf, f"reporte_portafolio_{date.today()}.pdf", "application/pdf"
+    )
+    comparison_pdf = create_comparison_pdf_report(
+        download.valid_tickers,
+        prices.index.min().date(),
+        prices.index.max().date(),
+        tuple(alternatives),
+        portfolio_value,
+        base_currency=base_currency,
+        risk_free_rate=risk_free_rate,
+        observations=len(returns),
+        quotes=quotes,
+    )
+    st.download_button(
+        "Descargar comparativo de carteras PDF", comparison_pdf,
+        f"comparativo_carteras_{date.today()}.pdf", "application/pdf",
     )
     st.warning(
         "Los resultados dependen de datos históricos y supuestos estadísticos. No incorporan impuestos, "
