@@ -148,6 +148,20 @@ def validate_weights(weights, asset_count, max_weight=1.0):
     return weights
 
 
+def parse_current_weights(raw: str, asset_count: int) -> np.ndarray:
+    """Parse optional current-portfolio weights entered as percentages."""
+    try:
+        values = [float(part.strip()) for part in raw.split(",")]
+    except ValueError as exc:
+        raise PortfolioError("Ingresa los pesos actuales como porcentajes separados por comas.") from exc
+    if len(values) != asset_count:
+        raise PortfolioError(f"Ingresa exactamente {asset_count} pesos actuales, en el orden de los activos.")
+    weights = np.asarray(values, dtype=float) / 100
+    if not np.isfinite(weights).all() or (weights < 0).any() or abs(weights.sum() - 1) > 0.0005:
+        raise PortfolioError("Los pesos actuales deben ser no negativos y sumar 100%.")
+    return validate_weights(weights / weights.sum(), asset_count)
+
+
 def validate_model(mean_returns, covariance, risk_free_rate):
     if (
         len(mean_returns) == 0

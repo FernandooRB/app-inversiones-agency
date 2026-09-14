@@ -25,6 +25,13 @@ def test_normalize_tickers_rejects_unsafe_characters():
         core.normalize_tickers("AAPL; DROP TABLE")
 
 
+def test_current_weights_accepts_rounding_and_rejects_bad_totals():
+    weights = core.parse_current_weights("33.33, 33.33, 33.33", 3)
+    assert weights.sum() == pytest.approx(1.0)
+    with pytest.raises(core.PortfolioError, match="sumar 100"):
+        core.parse_current_weights("60, 30, 5", 3)
+
+
 def test_download_uses_adjusted_prices_and_reports_rejected(monkeypatch):
     index = pd.date_range("2024-01-01", periods=80, freq="B")
     columns = pd.MultiIndex.from_product([["Close"], ["AAA", "BAD"]])

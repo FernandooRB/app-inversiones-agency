@@ -29,3 +29,7 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     app.run()
     assert not app.exception
     assert len(app.metric) == 4
+    app.text_input[2].set_value("25,25,25,25").run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error
