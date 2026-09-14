@@ -1,0 +1,11 @@
+[server]
+enableCORS = true
+enableXsrfProtection = true
+headless = true
+maxUploadSize = 10
+
+[browser]
+gatherUsageStats = false
+
+[logger]
+level = "info"

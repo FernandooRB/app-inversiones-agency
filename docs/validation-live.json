@@ -1,0 +1,13 @@
+{
+  "checked_at": "2026-09-14T01:35:05.990569+00:00",
+  "source": "Yahoo Finance / yfinance",
+  "base_currency": "MXN",
+  "quotes": {
+    "AAPL": "USD",
+    "MSFT": "USD"
+  },
+  "start": "2024-01-01",
+  "end": "2024-06-30",
+  "status": "blocked",
+  "reason": "El proveedor no devolvi\u00f3 precios para los activos solicitados."
+}

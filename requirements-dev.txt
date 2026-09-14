@@ -1,0 +1,4 @@
+-c constraints-tested.txt
+pytest>=8.3,<10
+pytest-cov>=5,<8
+ruff>=0.9,<1
