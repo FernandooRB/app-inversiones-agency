@@ -71,6 +71,7 @@ def test_access_gate_denies_before_analysis(monkeypatch, logged_in, claims, expe
         pass
 
     buttons = []
+    errors = []
 
     def stop():
         raise Stopped
@@ -81,7 +82,7 @@ def test_access_gate_denies_before_analysis(monkeypatch, logged_in, claims, expe
             "access": {"identities": [{"issuer": "issuer", "subject": "123"}]},
         },
         user=SimpleNamespace(is_logged_in=logged_in, to_dict=lambda: claims),
-        error=lambda message: None,
+        error=errors.append,
         stop=stop,
         button=lambda label: buttons.append(label) or False,
     )
@@ -89,3 +90,47 @@ def test_access_gate_denies_before_analysis(monkeypatch, logged_in, claims, expe
     with pytest.raises(Stopped):
         access.require_access()
     assert buttons == [expected]
+    if logged_in and claims["exp"] > 1:
+        assert "[[access.identities]]" in errors[-1]
+        assert 'subject = "123"' in errors[-1]
+    elif logged_in:
+        assert "expiración válida" in errors[0]
+        assert not any("[[access.identities]]" in error for error in errors)
+    else:
+        assert not errors
+
+
+
+def test_enrollment_message_does_not_disclose_tokens(monkeypatch):
+    from types import SimpleNamespace
+
+    import access
+
+    class Stopped(Exception):
+        pass
+
+    def stop():
+        raise Stopped
+
+    errors = []
+    claims = {
+        "iss": "https://accounts.google.com",
+        "sub": "12345",
+        "exp": 9999999999,
+        "access_token": "NEVER_DISPLAY_THIS",
+        "email": "private@example.com",
+    }
+    fake = SimpleNamespace(
+        secrets={"auth": {"client_id": "configured"}},
+        user=SimpleNamespace(is_logged_in=True, to_dict=lambda: claims),
+        error=errors.append,
+        stop=stop,
+        button=lambda label: False,
+    )
+    monkeypatch.setattr(access, "st", fake)
+    with pytest.raises(Stopped):
+        access.require_access()
+    message = "\n".join(errors)
+    assert 'subject = "12345"' in message
+    assert "NEVER_DISPLAY_THIS" not in message
+    assert "private@example.com" not in message
