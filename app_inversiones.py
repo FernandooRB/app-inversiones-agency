@@ -64,7 +64,9 @@ with st.sidebar:
         )
         / 100
     )
-    st.caption("Supuesto manual: verifica la tasa para la moneda base y el periodo; no se consulta una fuente.")
+    st.caption(
+        "Supuesto manual: verifica la tasa para la moneda base y el periodo; no se consulta una fuente."
+    )
     max_weight = st.slider("Peso máximo por activo", 10, 100, 60, 5) / 100
     confidence = st.select_slider("Confianza de VaR", options=[0.90, 0.95, 0.975, 0.99], value=0.95)
     horizon = st.selectbox(
