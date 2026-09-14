@@ -26,7 +26,12 @@ from portfolio_core import (
     portfolio_statistics,
     random_portfolios,
 )
-from reporting import PortfolioAlternative, create_comparison_pdf_report, create_pdf_report
+from reporting import (
+    PortfolioAlternative,
+    SimulationReport,
+    create_comparison_pdf_report,
+    create_pdf_report,
+)
 from simulation import simulate_portfolio_paths
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -299,6 +304,7 @@ try:
         st.write(f"**Tasa libre de riesgo:** {risk_free_rate:.2%}")
         st.write(f"**Límite por activo:** {max_weight:.0%}")
 
+    simulation_report = None
     with st.expander("Monte Carlo: escenarios hipotéticos del patrimonio"):
         st.caption(
             "Las trayectorias usan retornos históricos remuestreados en bloques o una distribución "
@@ -354,6 +360,12 @@ try:
                     annual_fee=fee, transaction_cost_bps=trading_cost,
                     rebalance_months=rebalance_months, inflation_rate=inflation,
                     method=method, seed=int(seed), block_days=block_days,
+                )
+                simulation_report = SimulationReport(
+                    alternative_name=selected, result=simulated,
+                    monthly_contribution=contribution, annual_fee=fee,
+                    transaction_cost_bps=trading_cost, inflation_rate=inflation,
+                    rebalance_months=rebalance_months, block_days=block_days,
                 )
                 bands = simulated.bands()
                 end = bands.iloc[-1]
@@ -431,9 +443,13 @@ try:
         risk_free_rate=risk_free_rate,
         observations=len(returns),
         quotes=quotes,
+        simulation=simulation_report,
     )
     st.download_button(
-        "Descargar comparativo de carteras PDF", comparison_pdf,
+        (
+            "Descargar comparativo con Monte Carlo PDF"
+            if simulation_report is not None else "Descargar comparativo de carteras PDF"
+        ), comparison_pdf,
         f"comparativo_carteras_{date.today()}.pdf", "application/pdf",
     )
     st.warning(
