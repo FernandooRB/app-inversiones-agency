@@ -27,7 +27,9 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     assert not app.exception
     assert not app.error
     assert len(app.metric) == 4
-    app.checkbox[0].set_value(True).run()
+    next(
+        item for item in app.checkbox if item.label == "Calcular trayectorias hipotéticas"
+    ).set_value(True).run()
     assert not app.exception
     assert not app.error
     assert len(app.metric) == 8
@@ -37,10 +39,14 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     assert not app.exception
     assert not app.error
     assert any(item.label == "Con retiro no cubierto" for item in app.metric)
-    app.checkbox[1].set_value(True).run()
+    next(
+        item for item in app.checkbox if item.label == "Calcular pruebas de estrés"
+    ).set_value(True).run()
     assert not app.exception
     assert not app.error
-    app.checkbox[2].set_value(True).run()
+    next(
+        item for item in app.checkbox if item.label == "Añadir shock hipotético por activo"
+    ).set_value(True).run()
     shocks = next(item for item in app.text_input if item.label.startswith("Cambios por activo"))
     shocks.set_value("-20,-10,-5,0").run()
     assert not app.exception
@@ -124,3 +130,9 @@ def test_holdout_panel_runs_with_disjoint_dates(monkeypatch):
     assert not app.exception
     assert not app.error
     assert any("Estimación inicial hasta:" in item.value for item in app.markdown)
+    sensitivity = next(
+        item for item in app.checkbox if item.label == "Comparar ventanas de estimación"
+    )
+    sensitivity.set_value(True).run()
+    assert not app.exception
+    assert not app.error
