@@ -6,6 +6,7 @@ import pandas as pd
 from pypdf import PdfReader
 
 from portfolio_core import PortfolioMetrics, RiskMetrics
+from price_quality import PriceQualityIssue
 from reporting import (
     PortfolioAlternative,
     SimulationReport,
@@ -23,6 +24,54 @@ def test_pdf_report_is_created():
     report = create_pdf_report(("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1), metrics, risk, 100_000)
     assert report.startswith(b"%PDF")
     assert len(report) > 1_000
+
+
+def test_both_pdfs_include_heuristic_price_review_with_original_quote_context():
+    metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    issue = PriceQualityIssue("AAA", "Salto de precio", "2024-01-02", "2024-01-03", "+40.00%")
+    basic = create_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1), metrics, risk,
+        100_000, price_quality_issues=(issue,),
+    )
+    comparison = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (PortfolioAlternative("Máximo Sharpe", metrics, risk),
+         PortfolioAlternative("Pesos iguales", metrics, risk)),
+        100_000, base_currency="MXN", risk_free_rate=0.05,
+        observations=252, quotes={"AAA": "MXN", "BBB": "USD"},
+        price_quality_issues=(issue,),
+    )
+    for report in (basic, comparison):
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+        assert "Revisión de precios originales" in text
+        assert "moneda de cotización" in text
+        assert "Salto de precio" in text
+    basic_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(basic)).pages)
+    assert "+40.00%" in basic_text
+
+
+def test_price_review_stays_with_its_detail_at_small_and_large_alert_counts():
+    metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    issue = PriceQualityIssue("AAA", "Salto de precio", "2024-01-02", "2024-01-03", "+40.00%")
+
+    for issues in ((), (issue,)):
+        report = create_pdf_report(
+            ("AAA", "BBB"), date(2023, 1, 1), date(2024, 12, 31),
+            metrics, risk, 100_000, price_quality_issues=issues,
+        )
+        assert len(PdfReader(BytesIO(report)).pages) == 1
+
+    report = create_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 12, 31),
+        metrics, risk, 100_000, price_quality_issues=(issue,) * 12,
+    )
+    pages = [page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages]
+    assert len(pages) == 2
+    assert "Revisión de precios originales" not in pages[0]
+    assert "Revisión de precios originales" in pages[1]
+    assert pages[1].count("Salto de precio") == 12
 
 
 def test_pdf_report_records_prepared_cetes_source():

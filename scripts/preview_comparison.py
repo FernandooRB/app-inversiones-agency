@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from portfolio_core import PortfolioMetrics, RiskMetrics
+from price_quality import PriceQualityIssue
 from reporting import (
     PortfolioAlternative,
     SimulationReport,
@@ -60,13 +61,20 @@ def main() -> None:
         )
         for alternative in alternatives
     }
-    output = Path("output/pdf/comparativo_ficticio_retiros_mxn.pdf")
+    output = Path("output/pdf/comparativo_ficticio_revision_precios_mxn.pdf")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(create_comparison_pdf_report(
         labels, date(2021, 1, 4), date(2025, 12, 31), alternatives, 1_000_000,
         base_currency="MXN", risk_free_rate=0.06, observations=1_200,
         quotes=dict.fromkeys(labels, "MXN"),
         data_source="datos ficticios para revisión visual; no son cotizaciones de mercado",
+        price_quality_issues=(
+            PriceQualityIssue("ETF_SIC", "Salto de precio", "2024-06-10", "2024-06-11", "+35.40%"),
+            PriceQualityIssue(
+                "ACCION_MX", "Cierre sin cambio", "2024-08-01", "2024-08-08",
+                "5 sesiones consecutivas sin variación",
+            ),
+        ),
         simulation=SimulationReport(
             "Máximo Sharpe", result, 0, 40_000, 0.01, 10, 0.04, 6, 21,
         ),

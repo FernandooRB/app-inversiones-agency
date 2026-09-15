@@ -12,9 +12,18 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    KeepTogether,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 from portfolio_core import PortfolioMetrics, RiskMetrics, validate_weights
+from price_quality import PriceQualityIssue
 from simulation import SimulationResult
 from stress import ShockResult
 
@@ -44,6 +53,73 @@ class StressReport:
     historical: pd.DataFrame
     shocks: pd.Series | None = None
     shock_results: dict[str, ShockResult] | None = None
+
+
+def _price_quality_story(
+    issues: tuple[PriceQualityIssue, ...], styles, *, compact: bool = False
+) -> list:
+    story = [Paragraph("Revisión de precios originales", styles["Heading2"])]
+    if compact:
+        if issues:
+            shown = "; ".join(
+                f"{escape(issue.ticker)}: {escape(issue.kind)}"
+                for issue in issues[:2]
+            )
+            story.append(Paragraph(
+                f"En moneda de cotización: {len(issues)} alerta(s) ({shown}). "
+                "Umbrales: 30% / 5 sesiones; no verifican ajustes. Detalle: CSV de la aplicación.",
+                styles["Normal"],
+            ))
+        else:
+            story.append(Paragraph(
+                "En moneda de cotización: sin alertas con los umbrales 30% / 5 sesiones; "
+                "esto no verifica ajustes.", styles["Normal"],
+            ))
+        return story
+    if not issues:
+        story.append(Paragraph(
+            "En moneda de cotización: sin alertas con los umbrales 30% / 5 sesiones; "
+            "esto no verifica ajustes.", styles["Normal"],
+        ))
+        return story
+    if 0 < len(issues) <= 3:
+        story.append(Paragraph(
+            f"En moneda de cotización: {len(issues)} alerta(s). Umbrales 30% / 5 sesiones; "
+            "ajustes no verificados.",
+            styles["Normal"],
+        ))
+        for issue in issues:
+            story.append(Paragraph(
+                f"{escape(issue.ticker)}: {escape(issue.kind)}, "
+                f"{issue.first_date} a {issue.last_date}, {escape(issue.detail)}.",
+                styles["Normal"],
+            ))
+        return [KeepTogether(story), Spacer(1, 4 * mm)]
+    story.append(Paragraph(
+        "Cierres en moneda de cotización, antes del FX: cambio de al menos 30% o cinco "
+        "sesiones consecutivas sin variar. Una alerta puede ser un evento real; su ausencia "
+        "no verifica ajustes, moneda, integridad ni derechos de uso.", styles["Normal"],
+    ))
+    story.append(Paragraph(
+        f"{len(issues)} alerta(s); hasta 12 visibles aquí. Listado completo: CSV de la aplicación.",
+        styles["Normal"],
+    ))
+    rows = [["Activo", "Tipo", "Periodo", "Detalle"]]
+    for issue in issues[:12]:
+        rows.append([
+            Paragraph(escape(issue.ticker), styles["Normal"]),
+            Paragraph(escape(issue.kind), styles["Normal"]),
+            Paragraph(f"{issue.first_date} a {issue.last_date}", styles["Normal"]),
+            Paragraph(escape(issue.detail), styles["Normal"]),
+        ])
+    table = Table(rows, colWidths=[30 * mm, 42 * mm, 42 * mm, 67 * mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEBF1")),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
+    ]))
+    return [KeepTogether(story + [Spacer(1, 2 * mm), table]), Spacer(1, 4 * mm)]
 
 
 def _simulation_chart(result: SimulationResult, withdrawal_mode: bool) -> Drawing:
@@ -107,6 +183,7 @@ def create_comparison_pdf_report(
     data_source: str = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico",
     simulation: SimulationReport | None = None,
     stress: StressReport | None = None,
+    price_quality_issues: tuple[PriceQualityIssue, ...] = (),
 ) -> bytes:
     """Compare historical portfolio alternatives on one sample and set of assumptions."""
     if not 2 <= len(alternatives) <= 4 or len({item.name for item in alternatives}) != len(alternatives):
@@ -216,22 +293,22 @@ def create_comparison_pdf_report(
     ]))
     story.extend([
         allocation_table,
-        Spacer(1, 5 * mm),
+        Spacer(1, 2 * mm),
+    ])
+    story.extend(_price_quality_story(price_quality_issues, styles, compact=True))
+    story.extend([
         Paragraph("Método y límites", styles["Heading2"]),
         Paragraph(
             f"Fuente: {escape(data_source)}. "
-            "Retornos aritméticos diarios y anualización con 252 sesiones. Máximo Sharpe y mínima "
-            "volatilidad se optimizan con posiciones largas y el límite de concentración elegido. "
-            "La cartera actual, si aparece, es una referencia ingresada por el usuario y puede superar "
-            "ese límite. El cálculo histórico de riesgo supone rebalanceo diario.",
+            "Retornos diarios anualizados con 252 sesiones. Se optimizan pesos largos con el "
+            "límite elegido. La cartera actual es una referencia ingresada y el riesgo histórico "
+            "supone rebalanceo diario.",
             styles["Normal"],
         ),
-        Spacer(1, 2 * mm),
         Paragraph(
-            "No se incluyen comisiones, diferenciales, impuestos ni restricciones de liquidez. "
-            "Los resultados usan la misma muestra con la que se estimaron los pesos optimizados; "
-            "no son una prueba fuera de muestra ni una recomendación personalizada. "
-            "La entrega a terceros requiere revisión legal de su contenido y contexto.",
+            "Sin comisiones, diferenciales, impuestos ni liquidez. Los pesos usan la misma "
+            "muestra que los resultados: no es una prueba fuera de muestra ni una recomendación "
+            "personalizada. La entrega a terceros requiere revisión legal.",
             styles["Normal"],
         ),
     ])
@@ -453,6 +530,7 @@ def create_pdf_report(
     observations: int | None = None,
     quotes: dict | None = None,
     data_source: str = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico",
+    price_quality_issues: tuple[PriceQualityIssue, ...] = (),
 ) -> bytes:
     """Create a compact, methodology-first report."""
     validate_weights(metrics.weights, len(tickers), max_weight)
@@ -565,6 +643,8 @@ def create_pdf_report(
             ),
         ]
     )
+
+    story.extend(_price_quality_story(price_quality_issues, styles))
 
     def footer(canvas, doc):
         canvas.saveState()
