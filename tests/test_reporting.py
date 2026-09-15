@@ -25,6 +25,19 @@ def test_pdf_report_is_created():
     assert len(report) > 1_000
 
 
+def test_pdf_report_records_prepared_cetes_source():
+    metrics = PortfolioMetrics(np.array([0.7, 0.3]), 0.09, 0.10, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.01, 0.015, 0.02)
+    source = "Yahoo Finance; CETES28: CSV preparado, SHA-256 abc123"
+    report = create_pdf_report(
+        ("ETF_SIC", "CETES28"), date(2023, 1, 1), date(2024, 1, 1),
+        metrics, risk, 100_000, base_currency="MXN",
+        quotes={"ETF_SIC": "USD", "CETES28": "MXN"}, data_source=source,
+    )
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+    assert source in text
+
+
 def test_comparison_pdf_uses_same_risk_horizon_and_builds():
     first = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
     second = PortfolioMetrics(np.array([0.5, 0.5]), 0.09, 0.12, 0.33)

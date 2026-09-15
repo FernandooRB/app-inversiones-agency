@@ -2,6 +2,7 @@
 
 import logging
 from datetime import date
+from hashlib import sha256
 
 import numpy as np
 import pandas as pd
@@ -11,6 +12,7 @@ import streamlit as st
 
 from access import require_access
 from currencies import convert_prices, currency_map, download_fx
+from fixed_income import merge_cetes_index, read_banxico_cetes_csv
 from fx_comparison import render_comparison
 from instruments import analysis_inputs, display_catalog, load_catalog
 from portfolio_core import (
@@ -72,8 +74,8 @@ with st.expander("Catálogo piloto de instrumentos México y SIC"):
     st.caption(
         "Compatibles hoy con el motor histórico: " + examples + ". "
         "En SIC se usa una aproximación con la serie del mercado de origen convertida a MXN; "
-        "no representa el precio local ejecutable. CETES, bonos, efectivo y fondos permanecen "
-        "fuera del optimizador hasta integrar su valoración específica."
+        "no representa el precio local ejecutable. CETES puede añadirse mediante un CSV validado; "
+        "bonos, efectivo y fondos permanecen fuera hasta integrar su valoración específica."
     )
     st.download_button(
         "Descargar catálogo y notas CSV",
@@ -112,12 +114,29 @@ with st.sidebar:
     current_weights_input = st.text_input(
         "Cartera actual, pesos en % (opcional)",
         help=(
-            "Un porcentaje por ticker, en el mismo orden; deben sumar 100. "
+            "Un porcentaje por activo, en el mismo orden; si cargas CETES, su peso va al final. "
+            "Deben sumar 100. "
             "No se guarda en una base de datos."
         ),
     )
+    cetes_upload = st.file_uploader(
+        "Serie CETES de Banxico (opcional)",
+        type=["csv"],
+        help="CSV con columnas Fecha, Precio y Plazo. Máximo 5 MB; sólo para análisis en MXN.",
+    )
+    cetes_name_input = st.text_input(
+        "Nombre de la serie CETES", "CETES28", help="Etiqueta que aparecerá en tablas y reportes."
+    )
+    st.download_button(
+        "Descargar plantilla CETES CSV",
+        b"Fecha,Precio,Plazo\n2026-01-02,9.9500000,28\n",
+        "plantilla_cetes.csv",
+        "text/csv",
+    )
     analyze = st.button("Analizar portafolio", type="primary", use_container_width=True)
 
+cetes_contents = cetes_upload.getvalue() if cetes_upload is not None else b""
+cetes_fingerprint = sha256(cetes_contents).hexdigest() if cetes_contents else None
 settings = (
     tickers_input,
     start_date,
@@ -130,6 +149,8 @@ settings = (
     quote_input,
     base_currency,
     current_weights_input,
+    cetes_fingerprint,
+    cetes_name_input,
 )
 if analyze:
     st.session_state["analysis_settings"] = settings
@@ -150,10 +171,12 @@ if st.session_state.get("analysis_settings") != settings:
 try:
     tickers = tuple(normalize_tickers(tickers_input))
     quotes = currency_map(tickers, quote_input)
-    if len(tickers) * max_weight < 1:
+    asset_count = len(tickers) + bool(cetes_contents)
+    if asset_count * max_weight < 1:
         raise PortfolioError(
-            f"Con {len(tickers)} activos, el peso máximo debe ser al menos {1 / len(tickers):.1%}."
+            f"Con {asset_count} activos, el peso máximo debe ser al menos {1 / asset_count:.1%}."
         )
+    cetes_result = None
     with st.spinner("Descargando y validando datos..."):
         download = cached_prices(tickers, start_date, end_date)
         if download.rejected_tickers:
@@ -163,6 +186,31 @@ try:
         removed = len(download.prices) - len(prices)
         if removed:
             st.warning(f"Se excluyeron {removed} fechas sin tipo de cambio; no se rellenaron precios.")
+        if cetes_contents:
+            if base_currency != "MXN":
+                raise PortfolioError("La serie CETES sólo puede añadirse con moneda base MXN.")
+            cetes_name = normalize_tickers([cetes_name_input])[0]
+            if cetes_name in prices.columns:
+                raise PortfolioError("El nombre de la serie CETES coincide con otro ticker.")
+            cetes_result = read_banxico_cetes_csv(
+                cetes_contents,
+                date_column="Fecha",
+                price_column="Precio",
+                term_column="Plazo",
+                name=cetes_name,
+            )
+            prepared_index = cetes_result.index.loc[
+                pd.Timestamp(start_date):pd.Timestamp(end_date)
+            ]
+            prices = merge_cetes_index(prices, prepared_index)
+        analysis_tickers = tuple(str(column) for column in prices.columns)
+        analysis_quotes = quotes | ({cetes_name: "MXN"} if cetes_result is not None else {})
+        data_source = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico"
+        if cetes_result is not None:
+            data_source += (
+                f"; {cetes_name}: CSV aportado por el usuario y preparado desde precio/plazo, "
+                f"SHA-256 {cetes_fingerprint[:12]}"
+            )
         returns = calculate_returns(prices)
         mean_returns, covariance = annualized_moments(returns)
         max_sharpe = optimize_portfolio(mean_returns, covariance, risk_free_rate, "max_sharpe", max_weight)
@@ -179,7 +227,7 @@ try:
                 calculate_risk_metrics(returns, min_volatility.weights, confidence, horizon),
             ),
         ]
-        equal_weights = np.full(len(tickers), 1 / len(tickers))
+        equal_weights = np.full(len(analysis_tickers), 1 / len(analysis_tickers))
         equal_return, equal_volatility, equal_sharpe = portfolio_statistics(
             equal_weights, mean_returns, covariance, risk_free_rate
         )
@@ -189,7 +237,7 @@ try:
             calculate_risk_metrics(returns, equal_weights, confidence, horizon),
         ))
         if current_weights_input.strip():
-            current_weights = parse_current_weights(current_weights_input, len(tickers))
+            current_weights = parse_current_weights(current_weights_input, len(analysis_tickers))
             current_return, current_volatility, current_sharpe = portfolio_statistics(
                 current_weights, mean_returns, covariance, risk_free_rate
             )
@@ -205,6 +253,20 @@ try:
         f"Análisis realizado con {len(returns):,} observaciones, del "
         f"{prices.index.min().date()} al {prices.index.max().date()}. Moneda: {base_currency}."
     )
+    if cetes_result is not None:
+        relevant_rolls = [
+            item for item in cetes_result.roll_dates if prices.index.min() <= item <= prices.index.max()
+        ]
+        relevant_maturities = [
+            item
+            for item in cetes_result.maturity_dates
+            if prices.index.min() <= item <= prices.index.max()
+        ]
+        st.info(
+            f"Serie {cetes_name} integrada desde archivo: {len(relevant_rolls)} cambio(s) de emisión, "
+            f"{len(relevant_maturities)} vencimiento(s) reconocido(s). Revisa las fechas antes de "
+            "usar los resultados."
+        )
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Media histórica anualizada", percent(max_sharpe.annual_return))
@@ -283,10 +345,17 @@ try:
                 "Tipos de cambio CSV", pd.DataFrame(fx).to_csv().encode("utf-8"),
                 "tipos_cambio.csv", "text/csv",
             )
+        if cetes_result is not None:
+            st.download_button(
+                "Índice CETES preparado CSV",
+                cetes_result.index.rename("Indice retorno total").to_csv().encode("utf-8"),
+                "cetes_indice_preparado.csv",
+                "text/csv",
+            )
 
     weights = pd.DataFrame(
         {
-            "Ticker": download.valid_tickers,
+            "Ticker": analysis_tickers,
             "Peso máximo Sharpe": max_sharpe.weights,
             "Peso mínima volatilidad": min_volatility.weights,
             "Contribución al retorno": max_sharpe.weights * mean_returns.to_numpy(),
@@ -323,7 +392,7 @@ try:
         st.caption(f"Horizonte: {horizon} día(s) hábil(es). Las cifras son magnitudes positivas de pérdida.")
     with right:
         st.subheader("Calidad de la estimación")
-        st.write(f"**Activos válidos:** {len(download.valid_tickers)}")
+        st.write(f"**Activos válidos:** {len(analysis_tickers)}")
         st.write(f"**Observaciones comunes:** {len(returns):,}")
         st.write(f"**Tasa libre de riesgo:** {risk_free_rate:.2%}")
         st.write(f"**Límite por activo:** {max_weight:.0%}")
@@ -492,15 +561,15 @@ try:
             if st.checkbox("Añadir shock hipotético por activo"):
                 raw_shocks = st.text_input(
                     "Cambios por activo en %, en el mismo orden",
-                    value=", ".join("-10" for _ in download.valid_tickers),
+                    value=", ".join("-10" for _ in analysis_tickers),
                     help="Ejemplo para dos activos: -20, -5. El mínimo por activo es -100%.",
                 )
-                shocks_array = parse_asset_shocks(raw_shocks, len(download.valid_tickers))
-                shocks = pd.Series(shocks_array, index=download.valid_tickers, name="Shock")
+                shocks_array = parse_asset_shocks(raw_shocks, len(analysis_tickers))
+                shocks = pd.Series(shocks_array, index=analysis_tickers, name="Shock")
                 shock_results = {
                     alternative.name: deterministic_shock(
                         alternative.metrics.weights, shocks_array, portfolio_value,
-                        labels=download.valid_tickers,
+                        labels=analysis_tickers,
                     )
                     for alternative in alternatives
                 }
@@ -531,12 +600,12 @@ try:
             )
 
     render_comparison(
-        download.prices, quotes, base_currency, fx, max_sharpe.weights,
+        download.prices, analysis_quotes, base_currency, fx, max_sharpe.weights,
         risk_free_rate, max_weight, confidence, horizon,
     )
 
     pdf = create_pdf_report(
-        download.valid_tickers,
+        analysis_tickers,
         prices.index.min().date(),
         prices.index.max().date(),
         max_sharpe,
@@ -546,13 +615,14 @@ try:
         risk_free_rate=risk_free_rate,
         max_weight=max_weight,
         observations=len(returns),
-        quotes=quotes,
+        quotes=analysis_quotes,
+        data_source=data_source,
     )
     st.download_button(
         "Descargar reporte metodológico PDF", pdf, f"reporte_portafolio_{date.today()}.pdf", "application/pdf"
     )
     comparison_pdf = create_comparison_pdf_report(
-        download.valid_tickers,
+        analysis_tickers,
         prices.index.min().date(),
         prices.index.max().date(),
         tuple(alternatives),
@@ -560,7 +630,8 @@ try:
         base_currency=base_currency,
         risk_free_rate=risk_free_rate,
         observations=len(returns),
-        quotes=quotes,
+        quotes=analysis_quotes,
+        data_source=data_source,
         simulation=simulation_report,
         stress=stress_report,
     )

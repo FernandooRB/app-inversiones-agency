@@ -452,6 +452,7 @@ def create_pdf_report(
     max_weight: float = 1.0,
     observations: int | None = None,
     quotes: dict | None = None,
+    data_source: str = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico",
 ) -> bytes:
     """Create a compact, methodology-first report."""
     validate_weights(metrics.weights, len(tickers), max_weight)
@@ -483,7 +484,7 @@ def create_pdf_report(
             f"Moneda base: {escape(base_currency)} | Capital: {portfolio_value:,.2f}<br/>"
             f"Tasa libre de riesgo: {risk_free_rate:.2%} | Peso máximo: {max_weight:.2%}<br/>"
             f"Observaciones de retornos: {observations if observations is not None else 'No indicadas'}<br/>"
-            "Fuente: Yahoo Finance mediante yfinance; precios ajustados y FX histórico.",
+            f"Fuente: {escape(data_source)}.",
             styles["Normal"],
         ),
         Spacer(1, 3 * mm),

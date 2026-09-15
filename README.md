@@ -6,9 +6,9 @@ Incluye [escenarios Monte Carlo](docs/monte_carlo.md) para investigación intern
 con métodos histórico por bloques y lognormal correlacionado, y
 [pruebas de estrés](docs/stress_testing.md) históricas e hipotéticas. El
 [catálogo piloto México/SIC](docs/instrument_catalog.md) distingue el instrumento negociable de
-la serie utilizada por el motor y bloquea deuda, efectivo y fondos hasta contar con su valoración.
+la serie utilizada por el motor y bloquea bonos, efectivo y fondos hasta contar con su valoración.
 El [preparador de CETES](docs/cetes_adapter.md) convierte archivos de precio y plazo en un índice
-revisable, todavía separado del optimizador mixto.
+revisable que puede añadirse al optimizador mixto en MXN.
 
 > **Importante:** los resultados son estimaciones históricas y no constituyen asesoría, una recomendación
 > personalizada ni una garantía de rendimiento futuro.

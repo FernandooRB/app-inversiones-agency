@@ -10,6 +10,7 @@ un retorno total comparable.
 | --- | --- |
 | `DIRECTO_ACTUAL` | El motor puede descargar una serie ajustada en la misma moneda declarada. |
 | `DIRECTO_CON_PROXY` | El motor usa la serie del mercado de origen y la convierte a la moneda base. |
+| `PREPARACION_ARCHIVO` | El usuario aporta precio y plazo; la app prepara y valida el índice antes del análisis. |
 | `REQUIERE_ADAPTADOR` | Falta valoración específica, flujos, NAV o una fuente oficial integrada. |
 | `REFERENCIA_NO_INVERTIBLE` | La serie sirve para conversión o contraste, no como posición. |
 
