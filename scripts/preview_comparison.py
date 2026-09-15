@@ -7,8 +7,14 @@ import numpy as np
 import pandas as pd
 
 from portfolio_core import PortfolioMetrics, RiskMetrics
-from reporting import PortfolioAlternative, SimulationReport, create_comparison_pdf_report
+from reporting import (
+    PortfolioAlternative,
+    SimulationReport,
+    StressReport,
+    create_comparison_pdf_report,
+)
 from simulation import simulate_portfolio_paths
+from stress import deterministic_shock, historical_worst_windows
 
 
 def main() -> None:
@@ -31,6 +37,7 @@ def main() -> None:
     fictional_returns = pd.DataFrame(
         rng.normal([0.0002, 0.0005, 0.0006, 0.0001], [0.001, 0.009, 0.012, 0.0005],
                    size=(600, 4)),
+        index=pd.date_range("2023-08-01", periods=600, freq="B"),
         columns=labels,
     )
     result = simulate_portfolio_paths(
@@ -40,6 +47,19 @@ def main() -> None:
         transaction_cost_bps=10, inflation_rate=0.04,
         rebalance_months=6, seed=42,
     )
+    historical_parts = []
+    for alternative in alternatives:
+        history = historical_worst_windows(fictional_returns, alternative.metrics.weights)
+        history.insert(0, "Escenario", alternative.name)
+        historical_parts.append(history)
+    stress_history = pd.concat(historical_parts, ignore_index=True)
+    shocks = pd.Series([-0.02, -0.25, -0.18, 0.0], index=labels, name="Shock")
+    shock_results = {
+        alternative.name: deterministic_shock(
+            alternative.metrics.weights, shocks, 1_000_000, labels=labels
+        )
+        for alternative in alternatives
+    }
     output = Path("output/pdf/comparativo_ficticio_retiros_mxn.pdf")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(create_comparison_pdf_report(
@@ -50,6 +70,7 @@ def main() -> None:
         simulation=SimulationReport(
             "Máximo Sharpe", result, 0, 40_000, 0.01, 10, 0.04, 6, 21,
         ),
+        stress=StressReport(stress_history, shocks, shock_results),
     ))
     print(output.resolve())
 

@@ -29,10 +29,12 @@ from portfolio_core import (
 from reporting import (
     PortfolioAlternative,
     SimulationReport,
+    StressReport,
     create_comparison_pdf_report,
     create_pdf_report,
 )
 from simulation import simulate_portfolio_paths
+from stress import deterministic_shock, historical_worst_windows, parse_asset_shocks
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOGGER = logging.getLogger(__name__)
@@ -439,6 +441,73 @@ try:
                     "la inflación supuesta. No se modelan impuestos, spreads ni liquidez."
                 )
 
+    stress_report = None
+    with st.expander("Pruebas de estrés históricas e hipotéticas"):
+        st.caption(
+            "Las ventanas históricas identifican pérdidas observadas en esta muestra. "
+            "El escenario hipotético aplica cambios simultáneos elegidos por ti."
+        )
+        if st.checkbox("Calcular pruebas de estrés"):
+            historical_parts = []
+            for alternative in alternatives:
+                history = historical_worst_windows(
+                    returns, alternative.metrics.weights, horizons=(1, 5, 21)
+                )
+                history.insert(0, "Escenario", alternative.name)
+                historical_parts.append(history)
+            stress_history = pd.concat(historical_parts, ignore_index=True)
+            display_history = stress_history.copy()
+            display_history["Inicio"] = display_history["Inicio"].dt.date
+            display_history["Fin"] = display_history["Fin"].dt.date
+            display_history["Peor retorno"] = display_history["Peor retorno"].map(
+                lambda value: f"{value:.2%}"
+            )
+            st.write("Peores ventanas históricas con rebalanceo diario:")
+            st.dataframe(display_history, hide_index=True, use_container_width=True)
+
+            shocks = None
+            shock_results = None
+            if st.checkbox("Añadir shock hipotético por activo"):
+                raw_shocks = st.text_input(
+                    "Cambios por activo en %, en el mismo orden",
+                    value=", ".join("-10" for _ in download.valid_tickers),
+                    help="Ejemplo para dos activos: -20, -5. El mínimo por activo es -100%.",
+                )
+                shocks_array = parse_asset_shocks(raw_shocks, len(download.valid_tickers))
+                shocks = pd.Series(shocks_array, index=download.valid_tickers, name="Shock")
+                shock_results = {
+                    alternative.name: deterministic_shock(
+                        alternative.metrics.weights, shocks_array, portfolio_value,
+                        labels=download.valid_tickers,
+                    )
+                    for alternative in alternatives
+                }
+                shock_table = pd.DataFrame({
+                    "Escenario": list(shock_results),
+                    "Cambio de cartera": [
+                        f"{item.portfolio_return:.2%}" for item in shock_results.values()
+                    ],
+                    f"Valor estresado ({base_currency})": [
+                        f"{item.stressed_value:,.0f}" for item in shock_results.values()
+                    ],
+                    f"Pérdida ({base_currency})": [
+                        f"{item.loss_amount:,.0f}" for item in shock_results.values()
+                    ],
+                })
+                st.write("Resultado del shock simultáneo:")
+                st.dataframe(shock_table, hide_index=True, use_container_width=True)
+                contributions = pd.DataFrame({
+                    name: result.contributions for name, result in shock_results.items()
+                })
+                st.write("Contribución de cada activo al cambio total:")
+                st.dataframe(contributions.style.format("{:.2%}"), use_container_width=True)
+            stress_report = StressReport(stress_history, shocks, shock_results)
+            st.caption(
+                "El estrés histórico usa pesos constantes al cierre de cada sesión. El shock "
+                "hipotético es estático, no tiene probabilidad asignada y no modela recuperación, "
+                "liquidez, suspensiones ni incumplimientos."
+            )
+
     render_comparison(
         download.prices, quotes, base_currency, fx, max_sharpe.weights,
         risk_free_rate, max_weight, confidence, horizon,
@@ -471,11 +540,13 @@ try:
         observations=len(returns),
         quotes=quotes,
         simulation=simulation_report,
+        stress=stress_report,
     )
     st.download_button(
         (
-            "Descargar comparativo con Monte Carlo PDF"
-            if simulation_report is not None else "Descargar comparativo de carteras PDF"
+            "Descargar comparativo ampliado PDF"
+            if simulation_report is not None or stress_report is not None
+            else "Descargar comparativo de carteras PDF"
         ), comparison_pdf,
         f"comparativo_carteras_{date.today()}.pdf", "application/pdf",
     )

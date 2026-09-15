@@ -60,7 +60,8 @@ recuerda que las proyecciones hipotéticas no son desempeño real.
 
 ## Siguientes controles
 
-Agregar escenarios de estrés explícitos, retiros crecientes con inflación,
+Agregar retiros crecientes con inflación y ampliar las
+[pruebas de estrés](stress_testing.md) a escenarios nombrados por clase de activo,
 comparaciones fuera de muestra y tratamiento de impuestos por instrumento y
 régimen. Para CETES y bonos se necesita un modelo de flujos y valoración propio;
 no se deben introducir rendimientos a vencimiento como si fueran retornos diarios.

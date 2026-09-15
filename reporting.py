@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime
 from xml.sax.saxutils import escape
 
 import numpy as np
+import pandas as pd
 from reportlab.graphics.shapes import Drawing, Line, Polygon, PolyLine, String
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -15,6 +16,7 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, 
 
 from portfolio_core import PortfolioMetrics, RiskMetrics, validate_weights
 from simulation import SimulationResult
+from stress import ShockResult
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,13 @@ class SimulationReport:
     inflation_rate: float
     rebalance_months: int | None
     block_days: int
+
+
+@dataclass(frozen=True)
+class StressReport:
+    historical: pd.DataFrame
+    shocks: pd.Series | None = None
+    shock_results: dict[str, ShockResult] | None = None
 
 
 def _simulation_chart(result: SimulationResult, withdrawal_mode: bool) -> Drawing:
@@ -97,6 +106,7 @@ def create_comparison_pdf_report(
     quotes: dict[str, str],
     data_source: str = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico",
     simulation: SimulationReport | None = None,
+    stress: StressReport | None = None,
 ) -> bytes:
     """Compare historical portfolio alternatives on one sample and set of assumptions."""
     if not 2 <= len(alternatives) <= 4 or len({item.name for item in alternatives}) != len(alternatives):
@@ -328,6 +338,90 @@ def create_comparison_pdf_report(
                 "El valor real descuenta "
                 "inflación supuesta; comisión diaria y costos de operación afectan los resultados. "
                 "La muestra puede omitir cambios de régimen. No incluye impuestos ni liquidez.",
+                styles["Normal"],
+            ),
+        ])
+
+    if stress is not None:
+        required = {"Escenario", "Horizonte", "Inicio", "Fin", "Peor retorno"}
+        if stress.historical.empty or not required.issubset(stress.historical.columns):
+            raise ValueError("El estrés histórico no contiene las columnas requeridas.")
+        stress_rows = [["Escenario", "Ventana", "Inicio", "Fin", "Peor retorno"]]
+        for row in stress.historical.to_dict("records"):
+            stress_rows.append([
+                Paragraph(escape(str(row["Escenario"])), styles["Normal"]),
+                f"{row['Horizonte']} sesión(es)",
+                pd.Timestamp(row["Inicio"]).date().isoformat(),
+                pd.Timestamp(row["Fin"]).date().isoformat(),
+                f"{row['Peor retorno']:.2%}",
+            ])
+        stress_table = Table(
+            stress_rows, colWidths=[48 * mm, 32 * mm, 34 * mm, 34 * mm, 32 * mm],
+            repeatRows=1,
+        )
+        stress_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEBF1")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ]))
+        story.extend([
+            PageBreak(),
+            Paragraph("Pruebas de estrés", styles["Title"]),
+            Paragraph(
+                "Las peores ventanas corresponden a hechos observados en la muestra. Se calculan "
+                "con pesos constantes al cierre de cada sesión y rendimientos compuestos.",
+                styles["Normal"],
+            ),
+            Spacer(1, 2 * mm),
+            Paragraph("Peores ventanas históricas", styles["Heading2"]),
+            stress_table,
+        ])
+        if stress.shocks is not None and stress.shock_results:
+            shock_rows = [["Activo", "Cambio hipotético"]] + [
+                [escape(str(label)), f"{value:.2%}"] for label, value in stress.shocks.items()
+            ]
+            outcome_rows = [["Escenario", "Cambio", f"Valor ({base_currency})", "Pérdida"]] + [
+                [
+                    Paragraph(escape(name), styles["Normal"]),
+                    f"{result.portfolio_return:.2%}",
+                    f"{result.stressed_value:,.0f}",
+                    f"{result.loss_amount:,.0f}",
+                ]
+                for name, result in stress.shock_results.items()
+            ]
+            shock_table = Table(shock_rows, colWidths=[90 * mm, 90 * mm], repeatRows=1)
+            outcome_table = Table(
+                outcome_rows, colWidths=[60 * mm, 35 * mm, 48 * mm, 42 * mm], repeatRows=1,
+            )
+            for table in (shock_table, outcome_table):
+                table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEBF1")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                     [colors.white, colors.HexColor("#F4F7FA")]),
+                    ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                ]))
+            story.extend([
+                Spacer(1, 3 * mm),
+                Paragraph("Shock hipotético simultáneo", styles["Heading2"]),
+                Paragraph(
+                    "Cambios definidos por activo sobre posiciones valuadas en la moneda base. "
+                    "Es un cálculo estático de un paso; no asigna probabilidad ni modela recuperación.",
+                    styles["Normal"],
+                ),
+                Spacer(1, 1 * mm), shock_table, Spacer(1, 2 * mm), outcome_table,
+            ])
+        story.extend([
+            Spacer(1, 2 * mm),
+            Paragraph(
+                "Una pérdida histórica no es la máxima posible. El resultado depende del periodo, "
+                "los instrumentos y el rebalanceo; no incorpora liquidez, suspensiones ni incumplimientos.",
                 styles["Normal"],
             ),
         ])

@@ -37,10 +37,19 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     assert not app.exception
     assert not app.error
     assert any(item.label == "Con retiro no cubierto" for item in app.metric)
+    app.checkbox[1].set_value(True).run()
+    assert not app.exception
+    assert not app.error
+    app.checkbox[2].set_value(True).run()
+    shocks = next(item for item in app.text_input if item.label.startswith("Cambios por activo"))
+    shocks.set_value("-20,-10,-5,0").run()
+    assert not app.exception
+    assert not app.error
     app.run()
     assert not app.exception
     assert len(app.metric) == 8
-    app.text_input[2].set_value("25,25,25,25").run()
+    current = next(item for item in app.text_input if item.label.startswith("Cartera actual"))
+    current.set_value("25,25,25,25").run()
     app.button[0].click().run()
     assert not app.exception
     assert not app.error
