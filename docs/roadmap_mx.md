@@ -25,7 +25,7 @@
 | Etapa | Entrega | Criterio de aceptación |
 | --- | --- | --- |
 | 1. Comparativo | Máximo Sharpe, mínima volatilidad, pesos iguales y cartera actual opcional en un PDF | Mismos activos, fechas, moneda y supuestos; pesos válidos; PDF legible; pruebas automatizadas |
-| 2. Datos mexicanos | Catálogo de instrumentos, serie FX independiente y referencias de tasas | Fuente, licencia, moneda, horario, ajustes y fechas documentados; sin retornos diarios falsos por huecos |
+| 2. Datos mexicanos | [Catálogo piloto](instrument_catalog.md), serie FX independiente y referencias de tasas | Fuente, licencia, moneda, horario, ajustes y fechas documentados; sin retornos diarios falsos por huecos |
 | 3. Instrumentos | Acciones/ETF mexicanos y SIC; CETES, fondos y efectivo con modelos propios | Valoración y flujos apropiados por tipo; no tratar rendimiento a vencimiento como retorno total diario |
 | 4. Optimización | Objetivos y límites de escenarios de investigación, referencias y sensibilidad | Restricciones factibles; comparación con alternativas simples; diagnósticos de estabilidad; asignación por perfil solo después de resolver las condiciones legales y laborales |
 | 5. Simulación | [Trayectorias Monte Carlo](monte_carlo.md) y [pruebas de estrés](stress_testing.md) históricas/manuales en app y PDF | Supuestos visibles; resultados hipotéticos; trayectorias sin patrimonio negativo; escenarios nombrados por clase de activo pendientes del catálogo |
@@ -69,8 +69,8 @@
 1. Obtener dictamen jurídico sobre los productos y entregables permitidos sin registro CNBV y
    respuesta del empleador sobre la actividad externa. Constituir una persona moral no sustituye ninguna
    de estas dos evaluaciones.
-2. Elegir un vehículo real del SIC, una acción mexicana y un producto de deuda para el piloto
-   interno, usando escenarios genéricos y datos ficticios.
+2. Ampliar el catálogo piloto con ISIN y claves oficiales, y construir el adaptador de CETES con
+   precios de Banxico y una regla de vencimiento documentada.
 3. Obtener tarifarios reales de los intermediarios usados; elegir uno para la primera importación.
 4. Seleccionar un proveedor de datos apropiado para el uso comercial dentro del presupuesto o
    delimitar un flujo con datos aportados por el intermediario y fuentes oficiales.
