@@ -117,3 +117,10 @@ def test_holdout_panel_runs_with_disjoint_dates(monkeypatch):
     assert not app.exception
     assert not app.error
     assert any("Estimación:" in item.value and "Evaluación:" in item.value for item in app.markdown)
+    successive = next(
+        item for item in app.checkbox if item.label == "Evaluar revisiones sucesivas"
+    )
+    successive.set_value(True).run()
+    assert not app.exception
+    assert not app.error
+    assert any("Estimación inicial hasta:" in item.value for item in app.markdown)

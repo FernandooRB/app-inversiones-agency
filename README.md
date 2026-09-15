@@ -9,8 +9,9 @@ con métodos histórico por bloques y lognormal correlacionado, y
 la serie utilizada por el motor y bloquea bonos, efectivo y fondos hasta contar con su valoración.
 El [preparador de CETES](docs/cetes_adapter.md) convierte archivos de precio y plazo en un índice
 revisable que puede añadirse al optimizador mixto en MXN.
-La [validación fuera de muestra](docs/backtesting.md) separa estimación y evaluación y compara
-Markowitz con pesos iguales y una cartera actual opcional.
+La [validación fuera de muestra](docs/backtesting.md) compara Markowitz, pesos iguales y una
+cartera actual opcional, tanto con asignación fija como con revisiones de 3, 6 o 12 meses
+y costos supuestos.
 
 > **Importante:** los resultados son estimaciones históricas y no constituyen asesoría, una recomendación
 > personalizada ni una garantía de rendimiento futuro.
