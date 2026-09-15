@@ -12,6 +12,7 @@ import streamlit as st
 
 from access import require_access
 from backtesting import run_holdout_backtest
+from covariance_calibration import select_diagonal_shrinkage
 from currencies import convert_prices, currency_map, download_fx
 from fixed_income import merge_cetes_index, read_banxico_cetes_csv
 from fx_comparison import render_comparison
@@ -58,13 +59,19 @@ def percent(value: float) -> str:
     return f"{value:.2%}"
 
 
-def render_covariance_comparison(sample, diagonal):
+def render_covariance_comparison(sample, diagonal, calibrated=None):
     scenarios = ("Máximo Sharpe", "Mínima volatilidad")
+    variants = {"Muestral": sample, "Diagonal 50%": diagonal}
+    if calibrated is not None:
+        label = (
+            f"Calibrada {calibrated.covariance_shrinkage:.0%}"
+            if hasattr(calibrated, "covariance_shrinkage")
+            else "Calibrada en cada revisión"
+        )
+        variants[label] = calibrated
     rows = pd.concat(
-        {
-            "Muestral": sample.summary.loc[list(scenarios)],
-            "Diagonal 50%": diagonal.summary.loc[list(scenarios)],
-        }, names=["Covarianza", "Escenario"]
+        {label: result.summary.loc[list(scenarios)] for label, result in variants.items()},
+        names=["Covarianza", "Escenario"],
     )
     overview = rows[[
         "Retorno total neto", "Volatilidad anualizada", "Sharpe realizado",
@@ -80,16 +87,15 @@ def render_covariance_comparison(sample, diagonal):
             overview[column] = overview[column].map(lambda value: f"{value:.2%}")
     st.dataframe(overview, use_container_width=True)
     curves = {
-        f"Muestral · {name}": sample.equity_curves[name] for name in scenarios
+        f"{label} · {name}": result.equity_curves[name]
+        for label, result in variants.items() for name in scenarios
     }
-    curves.update({
-        f"Diagonal 50% · {name}": diagonal.equity_curves[name] for name in scenarios
-    })
     curves["Pesos iguales"] = sample.equity_curves["Pesos iguales"]
     st.line_chart(pd.DataFrame(curves), y_label="Capital relativo (1 = inicio)")
     st.caption(
-        "Ambos estimadores usan idénticos retornos, fechas, restricciones y costos supuestos. "
-        "El 50% es un escenario fijo; elegirlo tras ver las curvas puede sesgar la comparación."
+        "Los estimadores usan idénticos retornos, fechas, restricciones y costos supuestos. "
+        "El 50% es fijo; la opción calibrada usa sólo bloques anteriores a cada evaluación. "
+        "Elegir después de ver las curvas puede sesgar la comparación."
     )
 
 
@@ -731,12 +737,48 @@ try:
                         trading_cost_bps=entry_cost_bps,
                         covariance_shrinkage=0.5,
                     )
-                    render_covariance_comparison(backtest, diagonal)
-                    with st.expander("Pesos estimados con ambos estimadores"):
-                        st.dataframe(pd.concat({
+                    variants = {
                             "Muestral": backtest.allocations,
                             "Diagonal 50%": diagonal.allocations,
-                        }, names=["Covarianza", "Activo"]).style.format("{:.2%}"))
+                    }
+                    calibrated = None
+                    if st.checkbox("Añadir intensidad calibrada (corte único)"):
+                        if backtest.training_observations < 100:
+                            st.info("Se necesitan 100 retornos iniciales para calibrar.")
+                        else:
+                            calibrated = run_holdout_backtest(
+                                returns, training_fraction=training_percent / 100,
+                                risk_free_rate=risk_free_rate, max_weight=max_weight,
+                                current_weights=(
+                                    current_weights if current_weights_input.strip() else None
+                                ),
+                                trading_cost_bps=entry_cost_bps,
+                                covariance_shrinkage="cv",
+                            )
+                            calibration = select_diagonal_shrinkage(
+                                returns.iloc[:backtest.training_observations]
+                            )
+                            st.write(
+                                f"**Contracción elegida con bloques iniciales:** "
+                                f"{calibrated.covariance_shrinkage:.0%}."
+                            )
+                            with st.expander("Bloques y errores de calibración"):
+                                st.dataframe(
+                                    calibration.fold_scores, hide_index=True,
+                                    use_container_width=True,
+                                )
+                                st.caption(
+                                    "Menor error cuadrático de covarianza = mejor "
+                                    "en los bloques internos."
+                                )
+                            variants[f"Calibrada {calibrated.covariance_shrinkage:.0%}"] = (
+                                calibrated.allocations
+                            )
+                    render_covariance_comparison(backtest, diagonal, calibrated)
+                    with st.expander("Pesos estimados por cada estimador"):
+                        st.dataframe(pd.concat(
+                            variants, names=["Covarianza", "Activo"]
+                        ).style.format("{:.2%}"))
                 with st.expander("Pesos estimados antes de la evaluación"):
                     st.dataframe(
                         backtest.allocations.style.format("{:.2%}"),
@@ -812,7 +854,27 @@ try:
                         trading_cost_bps=cost_bps,
                         covariance_shrinkage=0.5,
                     )
-                    render_covariance_comparison(walk, diagonal_walk)
+                    calibrated_walk = None
+                    if st.checkbox("Añadir intensidad calibrada (revisiones)"):
+                        if int(len(returns) * train_percent / 100) < 100:
+                            st.info("Se necesitan 100 retornos iniciales para calibrar.")
+                        else:
+                            calibrated_walk = run_walk_forward_backtest(
+                                returns, training_fraction=train_percent / 100,
+                                cadence_months=cadence, risk_free_rate=risk_free_rate,
+                                max_weight=max_weight,
+                                current_weights=(
+                                    current_weights if current_weights_input.strip() else None
+                                ),
+                                trading_cost_bps=cost_bps,
+                                covariance_shrinkage="cv",
+                            )
+                            st.download_button(
+                                "Descargar revisiones con intensidad calibrada CSV",
+                                calibrated_walk.allocation_history.to_csv().encode("utf-8-sig"),
+                                "revisiones_covarianza_calibrada.csv", "text/csv",
+                            )
+                    render_covariance_comparison(walk, diagonal_walk, calibrated_walk)
                     st.download_button(
                         "Descargar revisiones con covarianza diagonal CSV",
                         diagonal_walk.allocation_history.to_csv().encode("utf-8-sig"),

@@ -15,8 +15,8 @@ y costos supuestos.
 La [sensibilidad de asignaciones](docs/allocation_sensitivity.md) reestima los pesos con
 ventanas históricas de 60, 126 y 252 retornos para mostrar cuánto dependen de la muestra.
 Las pruebas fuera de muestra permiten comparar la covarianza muestral con una
-[contracción diagonal fija del 50 %](docs/covariance_shrinkage.md), sin seleccionar
-automáticamente el estimador que rindió mejor.
+[contracción diagonal fija del 50 % o una intensidad calibrada con bloques anteriores](docs/covariance_shrinkage.md),
+sin seleccionar el estimador que rindió mejor en la evaluación externa.
 
 > **Importante:** los resultados son estimaciones históricas y no constituyen asesoría, una recomendación
 > personalizada ni una garantía de rendimiento futuro.
@@ -116,7 +116,7 @@ tests/               Pruebas unitarias
 
 ## Próximas fases
 
-- Calibración y comparación de estimadores de covarianza; Black-Litterman.
+- Validar estimadores de covarianza en más regímenes y universos; Black-Litterman.
 - Perfiles IR1–IR5 y restricciones por clase de activo.
 - Cobertura cambiaria y validación de metadatos de instrumentos.
 - Costos, impuestos y rebalanceo.
