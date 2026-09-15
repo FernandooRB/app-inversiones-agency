@@ -12,6 +12,8 @@ revisable que puede añadirse al optimizador mixto en MXN.
 La [validación fuera de muestra](docs/backtesting.md) compara Markowitz, pesos iguales y una
 cartera actual opcional, tanto con asignación fija como con revisiones de 3, 6 o 12 meses
 y costos supuestos.
+La [sensibilidad de asignaciones](docs/allocation_sensitivity.md) reestima los pesos con
+ventanas históricas de 60, 126 y 252 retornos para mostrar cuánto dependen de la muestra.
 
 > **Importante:** los resultados son estimaciones históricas y no constituyen asesoría, una recomendación
 > personalizada ni una garantía de rendimiento futuro.
@@ -89,7 +91,8 @@ pytest
 
 - Yahoo Finance no debe asumirse como fuente contractual para un servicio de inversión en producción.
 - Las monedas se declaran explícitamente; no hay detección automática de unidades.
-- No se incorporan costos, impuestos, spreads, liquidez ni restricciones regulatorias.
+- Las simulaciones y pruebas de rebalanceo aceptan costos supuestos en puntos base; la
+  optimización principal y el PDF no descuentan tarifarios reales, impuestos, spreads ni liquidez.
 - La media histórica no es un pronóstico.
 - No existe gestión de clientes ni persistencia de información personal.
 - Antes de un uso comercial deben revisarse licenciamiento de datos, privacidad y cumplimiento aplicable.
@@ -102,13 +105,14 @@ portfolio_core.py    Datos, métricas, optimización y riesgo
 instruments.py       Catálogo y reglas de integración por tipo de instrumento
 fixed_income.py       Valuación y preparación de series de CETES
 backtesting.py         Evaluación hipotética con fecha de corte
+walk_forward.py        Evaluación con revisiones sucesivas
+sensitivity.py         Diagnóstico de estabilidad de pesos
 reporting.py         Reporte PDF
 tests/               Pruebas unitarias
 ```
 
 ## Próximas fases
 
-- Backtesting fuera de muestra y benchmarks.
 - Covarianza robusta y Black-Litterman.
 - Perfiles IR1–IR5 y restricciones por clase de activo.
 - Cobertura cambiaria y validación de metadatos de instrumentos.

@@ -37,6 +37,7 @@ from reporting import (
     create_comparison_pdf_report,
     create_pdf_report,
 )
+from sensitivity import analyze_allocation_sensitivity
 from simulation import simulate_portfolio_paths
 from stress import deterministic_shock, historical_worst_windows, parse_asset_shocks
 from walk_forward import run_walk_forward_backtest
@@ -379,6 +380,40 @@ try:
         use_container_width=True,
         hide_index=True,
     )
+
+    with st.expander("Sensibilidad de pesos a la longitud de la muestra"):
+        st.caption(
+            "Reestima máximo Sharpe y mínima volatilidad con los últimos 60, 126 y 252 "
+            "retornos disponibles y los compara con la muestra completa. Todas las ventanas "
+            "terminan en la misma fecha; diferencias grandes indican sensibilidad histórica."
+        )
+        if st.checkbox("Comparar ventanas de estimación"):
+            sensitivity = analyze_allocation_sensitivity(
+                returns, risk_free_rate=risk_free_rate, max_weight=max_weight
+            )
+            overview = sensitivity.summary.reset_index().copy()
+            overview["Mayor peso"] = overview["Mayor peso"].map(
+                lambda value: f"{value:.2%}"
+            )
+            overview["Cambio de pesos vs. muestra completa"] = overview[
+                "Cambio de pesos vs. muestra completa"
+            ].map(lambda value: f"{value:.2%}")
+            st.dataframe(overview, hide_index=True, use_container_width=True)
+            with st.expander("Pesos de cada activo por ventana"):
+                st.dataframe(
+                    sensitivity.weights.style.format({"Peso": "{:.2%}"}),
+                    use_container_width=True,
+                )
+            st.download_button(
+                "Descargar sensibilidad de pesos CSV",
+                sensitivity.weights.to_csv().encode("utf-8-sig"),
+                "sensibilidad_pesos.csv", "text/csv",
+            )
+            st.caption(
+                "El cambio de pesos es la mitad de la suma de diferencias absolutas frente "
+                "a la muestra completa. No es un costo ni una validación fuera de muestra; "
+                "las ventanas comparten datos y la media histórica sigue sin ser un pronóstico."
+            )
 
     left, right = st.columns(2)
     with left:
