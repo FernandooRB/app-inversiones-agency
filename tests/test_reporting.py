@@ -9,10 +9,12 @@ from portfolio_core import PortfolioMetrics, RiskMetrics
 from reporting import (
     PortfolioAlternative,
     SimulationReport,
+    StressReport,
     create_comparison_pdf_report,
     create_pdf_report,
 )
 from simulation import simulate_portfolio_paths
+from stress import deterministic_shock, historical_worst_windows
 
 
 def test_pdf_report_is_created():
@@ -90,3 +92,32 @@ def test_comparison_pdf_reports_unfunded_withdrawals():
     assert "Retiros programados" in text
     assert "1,200" in text
     assert "retiro no cubierto" in text
+
+
+def test_comparison_pdf_reports_historical_and_hypothetical_stress():
+    metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 5, 0.02, 0.025, 0.035)
+    index = pd.date_range("2023-01-02", periods=80, freq="B")
+    returns = pd.DataFrame({
+        "AAA": np.linspace(-0.02, 0.02, 80),
+        "BBB": np.linspace(0.01, -0.01, 80),
+    }, index=index)
+    history = historical_worst_windows(returns, metrics.weights)
+    history.insert(0, "Escenario", "Máximo Sharpe")
+    shocks = pd.Series([-0.20, -0.05], index=["AAA", "BBB"], name="Shock")
+    result = deterministic_shock(metrics.weights, shocks, 1000, labels=shocks.index)
+    report = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (PortfolioAlternative("Máximo Sharpe", metrics, risk),
+         PortfolioAlternative("Pesos iguales", metrics, risk)),
+        1000, base_currency="MXN", risk_free_rate=0.05, observations=80,
+        quotes={"AAA": "MXN", "BBB": "MXN"},
+        stress=StressReport(history, shocks, {"Máximo Sharpe": result}),
+    )
+    pdf = PdfReader(BytesIO(report))
+    assert len(pdf.pages) >= 2
+    text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    assert "Pruebas de estrés" in text
+    assert "Peores ventanas históricas" in text
+    assert "Shock hipotético simultáneo" in text
+    assert "-14.00%" in text
