@@ -129,6 +129,12 @@ def test_holdout_panel_runs_with_disjoint_dates(monkeypatch):
     ).set_value(True).run()
     assert not app.exception
     assert not app.error
+    next(
+        item for item in app.checkbox
+        if item.label == "Añadir intensidad calibrada (corte único)"
+    ).set_value(True).run()
+    assert not app.exception
+    assert not app.error
     successive = next(
         item for item in app.checkbox if item.label == "Evaluar revisiones sucesivas"
     )
@@ -139,6 +145,12 @@ def test_holdout_panel_runs_with_disjoint_dates(monkeypatch):
     next(
         item for item in app.checkbox
         if item.label == "Comparar estimadores de covarianza (revisiones)"
+    ).set_value(True).run()
+    assert not app.exception
+    assert not app.error
+    next(
+        item for item in app.checkbox
+        if item.label == "Añadir intensidad calibrada (revisiones)"
     ).set_value(True).run()
     assert not app.exception
     assert not app.error

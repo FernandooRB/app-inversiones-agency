@@ -50,6 +50,7 @@ restricciones de lotes ni disponibilidad histórica de cada instrumento. Las tre
 escenarios de investigación, no instrucciones operativas para un cliente.
 
 Ambas pruebas pueden repetir la misma evaluación con una
-[covarianza contraída hacia la diagonal](covariance_shrinkage.md). El 50 % es fijo y la
-comparación comparte fechas, precios y costos; elegir el estimador después de mirar
+[covarianza contraída hacia la diagonal](covariance_shrinkage.md). El 50 % es fijo; la
+tercera opción calibra su intensidad con bloques anteriores a la evaluación externa.
+La comparación comparte fechas, precios y costos; elegir el estimador después de mirar
 el resultado fuera de muestra introduce sesgo de selección.

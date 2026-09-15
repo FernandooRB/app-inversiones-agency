@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from backtesting import run_holdout_backtest
+from covariance_calibration import select_diagonal_shrinkage
 from portfolio_core import annualized_moments, optimize_portfolio
 
 
@@ -29,7 +30,7 @@ def run_walk_forward_backtest(
     max_weight: float = 1.0,
     current_weights: np.ndarray | None = None,
     trading_cost_bps: float = 0.0,
-    covariance_shrinkage: float = 0.0,
+    covariance_shrinkage: float | str = 0.0,
 ) -> WalkForwardBacktest:
     """Re-estimate using prior observations only; trade before each review day's return.
 
@@ -70,8 +71,12 @@ def run_walk_forward_backtest(
         review = initial or day >= next_review
         if review:
             history = returns.iloc[:training_count + position]
+            shrinkage = (
+                select_diagonal_shrinkage(history).intensity
+                if covariance_shrinkage == "cv" else covariance_shrinkage
+            )
             mean, covariance = annualized_moments(
-                history, covariance_shrinkage=covariance_shrinkage
+                history, covariance_shrinkage=shrinkage
             )
             targets = {
                 "Máximo Sharpe": optimize_portfolio(
@@ -99,6 +104,7 @@ def run_walk_forward_backtest(
                     "Escenario": name, "Fecha de revisión": day,
                     "Estimación hasta": history.index[-1],
                     "Observaciones de estimación": len(history),
+                    "Contracción de covarianza": shrinkage,
                     "Rotación": turnover,
                     "Costo sobre capital en fecha": cost_fraction,
                     **dict(zip(returns.columns, target, strict=True)),

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from covariance_calibration import select_diagonal_shrinkage
 from portfolio_core import (
     PortfolioError,
     annualized_moments,
@@ -24,6 +25,7 @@ class HoldoutBacktest:
     allocations: pd.DataFrame
     summary: pd.DataFrame
     equity_curves: pd.DataFrame
+    covariance_shrinkage: float = 0.0
 
 
 def _evaluate_buy_and_hold(
@@ -69,7 +71,7 @@ def run_holdout_backtest(
     max_weight: float = 1.0,
     current_weights: np.ndarray | None = None,
     trading_cost_bps: float = 0.0,
-    covariance_shrinkage: float = 0.0,
+    covariance_shrinkage: float | str = 0.0,
 ) -> HoldoutBacktest:
     """Estimate allocations once, then evaluate the untouched later sample."""
     if not isinstance(returns.index, pd.DatetimeIndex) or (
@@ -100,8 +102,14 @@ def run_holdout_backtest(
         validate_weights(current_weights, returns.shape[1])
         if current_weights is not None else None
     )
+    if isinstance(covariance_shrinkage, str):
+        if covariance_shrinkage != "cv":
+            raise PortfolioError("Método de contracción de covarianza no reconocido.")
+        selected_shrinkage = select_diagonal_shrinkage(training).intensity
+    else:
+        selected_shrinkage = covariance_shrinkage
     mean, covariance = annualized_moments(
-        training, covariance_shrinkage=covariance_shrinkage
+        training, covariance_shrinkage=selected_shrinkage
     )
     allocations = {
         "Máximo Sharpe": optimize_portfolio(
@@ -133,4 +141,5 @@ def run_holdout_backtest(
         pd.DataFrame(allocations, index=returns.columns),
         pd.DataFrame.from_dict(rows, orient="index").rename_axis("Escenario"),
         pd.DataFrame(curves),
+        selected_shrinkage,
     )
