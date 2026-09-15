@@ -17,6 +17,7 @@ from currencies import convert_prices, currency_map, download_fx
 from fixed_income import merge_cetes_index, read_banxico_cetes_csv
 from fx_comparison import render_comparison
 from instruments import analysis_inputs, display_catalog, load_catalog
+from multi_cut import run_multi_cut_backtest
 from portfolio_core import (
     PortfolioError,
     PortfolioMetrics,
@@ -795,6 +796,88 @@ try:
                     "No se modelan rebalanceos, comisiones continuas, spreads, impuestos, "
                     "deslizamiento ni liquidez. El resultado es hipotético, no una operación real."
                 )
+
+    with st.expander("Sensibilidad a cuatro fechas de corte"):
+        st.caption(
+            "Compara cortes iniciales fijos de 50%, 60%, 70% y 80%. Cada cartera se estima "
+            "antes de su evaluación y se mantiene después. La diferencia frente a pesos "
+            "iguales se calcula sólo dentro del mismo periodo."
+        )
+        if st.checkbox("Evaluar cuatro cortes predefinidos"):
+            if len(returns) < 120:
+                st.info("Se necesitan 120 retornos para evaluar los cuatro cortes.")
+            elif removed:
+                st.warning(
+                    "Hay fechas omitidas por falta de FX; resuelve los huecos antes de "
+                    "comparar periodos con retornos supuestamente diarios."
+                )
+            else:
+                estimator = st.selectbox(
+                    "Covarianza para los cuatro cortes",
+                    ("Muestral", "Diagonal 50%", "Calibrada con bloques previos"),
+                )
+                multi_cost = st.number_input(
+                    "Costo inicial por rotación en los cuatro cortes (puntos base)",
+                    min_value=0.0, max_value=500.0, value=0.0, step=5.0,
+                )
+                if estimator == "Calibrada con bloques previos" and len(returns) < 200:
+                    st.info("La opción calibrada requiere 200 retornos para los cuatro cortes.")
+                else:
+                    method = {
+                        "Muestral": 0.0, "Diagonal 50%": 0.5,
+                        "Calibrada con bloques previos": "cv",
+                    }[estimator]
+                    multi = run_multi_cut_backtest(
+                        returns, risk_free_rate=risk_free_rate, max_weight=max_weight,
+                        current_weights=(
+                            current_weights if current_weights_input.strip() else None
+                        ),
+                        trading_cost_bps=multi_cost,
+                        covariance_shrinkage=method,
+                    )
+                    overview = multi.summary.reset_index()[[
+                        "Corte inicial", "Escenario", "Estimación hasta",
+                        "Retornos de estimación", "Evaluación desde", "Evaluación hasta",
+                        "Retornos de evaluación", "Contracción de covarianza",
+                        "Retorno total neto", "Retorno anualizado neto",
+                        "Diferencia total neta vs pesos iguales",
+                        "Volatilidad anualizada", "Sharpe realizado", "Máxima caída",
+                        "Rotación inicial", "Costo inicial sobre capital",
+                    ]].copy()
+                    for column in (
+                        "Contracción de covarianza", "Retorno total neto",
+                        "Retorno anualizado neto", "Diferencia total neta vs pesos iguales",
+                        "Volatilidad anualizada", "Máxima caída", "Rotación inicial",
+                        "Costo inicial sobre capital",
+                    ):
+                        overview[column] = overview[column].map(lambda value: f"{value:.2%}")
+                    overview["Sharpe realizado"] = overview["Sharpe realizado"].map(
+                        lambda value: f"{value:.2f}"
+                    )
+                    st.dataframe(overview, hide_index=True, use_container_width=True)
+                    selected_cut = st.selectbox(
+                        "Corte para ver la trayectoria", tuple(multi.results)
+                    )
+                    st.line_chart(
+                        multi.results[selected_cut].equity_curves,
+                        y_label="Capital relativo (1 = inicio)",
+                    )
+                    st.download_button(
+                        "Descargar resumen de cuatro cortes CSV",
+                        multi.summary.to_csv().encode("utf-8-sig"),
+                        "validacion_cuatro_cortes.csv", "text/csv",
+                    )
+                    st.download_button(
+                        "Descargar pesos de cuatro cortes CSV",
+                        multi.allocations.to_csv().encode("utf-8-sig"),
+                        "pesos_cuatro_cortes.csv", "text/csv",
+                    )
+                    st.caption(
+                        "Las evaluaciones se solapan y tienen distinta duración; no se suman "
+                        "sus retornos ni se interpretan como cuatro pruebas independientes. "
+                        "El costo supuesto se aplica sólo al cambio inicial desde la cartera "
+                        "actual; sin cartera actual se supone posición ya asignada."
+                    )
 
     with st.expander("Validación con revisiones sucesivas"):
         st.caption(

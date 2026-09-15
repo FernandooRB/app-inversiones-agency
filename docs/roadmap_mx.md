@@ -29,7 +29,7 @@
 | 3. Instrumentos | Acciones/ETF mexicanos y SIC; CETES, fondos y efectivo con modelos propios | Valoración y flujos apropiados por tipo; no tratar rendimiento a vencimiento como retorno total diario |
 | 4. Optimización | Objetivos, límites, referencias, [sensibilidad histórica](allocation_sensitivity.md) y [covarianza diagonal fija o calibrada](covariance_shrinkage.md) | Restricciones factibles; comparación con alternativas simples; calibración interna sin datos externos disponibles; falta validarla en más regímenes y universos; asignación por perfil solo después de resolver las condiciones legales y laborales |
 | 5. Simulación | [Trayectorias Monte Carlo](monte_carlo.md) y [pruebas de estrés](stress_testing.md) históricas/manuales en app y PDF | Supuestos visibles; resultados hipotéticos; trayectorias sin patrimonio negativo; escenarios nombrados por clase de activo pendientes del catálogo |
-| 6. Validación | [Fecha de corte y revisiones sucesivas](backtesting.md), referencias y costos supuestos | Fechas de estimación/evaluación separadas; rebalanceos de 3, 6 o 12 meses sin datos futuros; límites y fallos comunicados |
+| 6. Validación | [Fecha de corte y revisiones sucesivas](backtesting.md), [cuatro cortes predefinidos](multi_cut_validation.md), referencias y costos supuestos | Fechas de estimación/evaluación separadas; rebalanceos de 3, 6 o 12 meses sin datos futuros; sensibilidad al corte sin promediar evaluaciones solapadas; límites y fallos comunicados |
 | 7. Datos de clientes | Etapa condicionada a la definición legal del servicio | No guardar perfiles, carteras identificables ni historial de propuestas para clientes hasta definir finalidad, privacidad, autorización laboral y alcance regulatorio |
 
 ## Decisiones metodológicas iniciales
