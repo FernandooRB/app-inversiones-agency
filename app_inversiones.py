@@ -39,6 +39,7 @@ from reporting import (
 )
 from simulation import simulate_portfolio_paths
 from stress import deterministic_shock, historical_worst_windows, parse_asset_shocks
+from walk_forward import run_walk_forward_backtest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOGGER = logging.getLogger(__name__)
@@ -665,6 +666,68 @@ try:
                     "sin cartera actual se supone una posición inicial ya asignada y costo cero. "
                     "No se modelan rebalanceos, comisiones continuas, spreads, impuestos, "
                     "deslizamiento ni liquidez. El resultado es hipotético, no una operación real."
+                )
+
+    with st.expander("Validación con revisiones sucesivas"):
+        st.caption(
+            "La primera parte estima los pesos iniciales. Después, cada revisión de 3, 6 o 12 "
+            "meses utiliza sólo retornos observados hasta la sesión anterior. Pesos iguales "
+            "se rebalancea en las mismas fechas; la cartera actual opcional se mantiene."
+        )
+        if st.checkbox("Evaluar revisiones sucesivas"):
+            if removed:
+                st.warning(
+                    "Hay fechas omitidas por falta de FX; resuelve esos huecos antes de "
+                    "usar retornos supuestamente diarios en la validación."
+                )
+            else:
+                cadence = st.selectbox("Revisión cada (meses)", (3, 6, 12))
+                train_percent = st.slider(
+                    "Muestra inicial para estimación (%)", 50, 90, 70, 5
+                )
+                cost_bps = st.number_input(
+                    "Costo por rotación en cada revisión (puntos base)",
+                    min_value=0.0, max_value=500.0, value=0.0, step=5.0,
+                )
+                walk = run_walk_forward_backtest(
+                    returns, training_fraction=train_percent / 100,
+                    cadence_months=cadence, risk_free_rate=risk_free_rate,
+                    max_weight=max_weight,
+                    current_weights=(
+                        current_weights if current_weights_input.strip() else None
+                    ),
+                    trading_cost_bps=cost_bps,
+                )
+                st.write(
+                    f"**Estimación inicial hasta:** {walk.training_end.date()}. "
+                    f"**Evaluación:** {walk.evaluation_start.date()} a "
+                    f"{walk.evaluation_end.date()}."
+                )
+                display = walk.summary.copy()
+                for column in (
+                    "Retorno total neto", "Retorno anualizado neto",
+                    "Volatilidad anualizada", "Máxima caída", "Rotación acumulada",
+                    "Costo pagado sobre capital inicial",
+                ):
+                    display[column] = display[column].map(lambda value: f"{value:.2%}")
+                display["Sharpe realizado"] = display["Sharpe realizado"].map(
+                    lambda value: f"{value:.2f}"
+                )
+                st.dataframe(display, use_container_width=True)
+                st.line_chart(walk.equity_curves, y_label="Capital relativo (1 = inicio)")
+                with st.expander("Fechas, ventanas y pesos de cada revisión"):
+                    st.dataframe(walk.allocation_history, use_container_width=True)
+                st.download_button(
+                    "Descargar historial de revisiones CSV",
+                    walk.allocation_history.to_csv().encode("utf-8-sig"),
+                    "revisiones_sucesivas.csv", "text/csv",
+                )
+                st.caption(
+                    "El costo supuesto se descuenta del capital al iniciar y en cada revisión; "
+                    "sin cartera actual se supone una posición inicial ya asignada. "
+                    "No se incluyen impuestos, comisiones fijas, spreads, deslizamiento ni "
+                    "restricciones de ejecución. La evaluación es hipotética y depende de "
+                    "la muestra y de los parámetros elegidos."
                 )
 
     render_comparison(

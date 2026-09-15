@@ -1,4 +1,4 @@
-# Validación fuera de muestra con una fecha de corte
+# Validación fuera de muestra y revisiones sucesivas
 
 La aplicación separa los retornos cronológicamente en dos ventanas sin superposición. La primera
 estima medias, covarianza y pesos de máximo Sharpe y mínima volatilidad. La segunda evalúa esos pesos
@@ -25,3 +25,26 @@ en sus siete conjuntos de datos. Este resultado motiva comparar el optimizador c
 no determina cuál cartera conviene a un cliente concreto.
 
 Fuente: [DeMiguel, Garlappi y Uppal, *Optimal Versus Naive Diversification*](https://academic.oup.com/rfs/article-abstract/22/5/1915/1592901?login=false).
+
+## Revisiones sucesivas
+
+El segundo panel conserva el corte inicial y revisa la asignación cada 3, 6 o 12 meses naturales.
+Si la fecha prevista no tiene observación, opera en la primera sesión posterior y mantiene la
+programación de calendario original. En cada revisión recalcula media y covarianza con una ventana
+expansiva que termina en la sesión anterior; la sesión de la revisión y todas las posteriores quedan
+fuera de esa estimación. El historial CSV indica fecha, última sesión utilizada, observaciones,
+pesos, rotación y costo supuesto. Para evitar seleccionar retrospectivamente el mejor resultado,
+conviene fijar corte, frecuencia, universo y costo antes de inspeccionar las curvas.
+
+Cada estrategia invierte en los pesos calculados antes del retorno de la sesión. Entre revisiones,
+las posiciones se mantienen y sus pesos cambian con el mercado. La rotación es la mitad de la suma
+de cambios absolutos desde esos pesos efectivos; se descuenta del capital en puntos base al inicio
+y en cada revisión. Pesos iguales se rebalancea en las mismas fechas. Si se proporciona la cartera
+actual, ésta se compara como referencia sin rebalanceo; si no, se supone que la posición inicial ya
+está asignada y su costo inicial es cero. El costo pagado acumulado se expresa como fracción del
+capital inicial, no como suma de tasas ni como estimación de una tarifa real de la casa de bolsa.
+
+Esta prueba supone retornos diarios continuos y ejecución al cierre indicado por los datos. No
+modela spreads, impuestos, comisiones fijas, cambios de composición del universo, liquidez,
+restricciones de lotes ni disponibilidad histórica de cada instrumento. Las tres frecuencias son
+escenarios de investigación, no instrucciones operativas para un cliente.
