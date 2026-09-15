@@ -114,6 +114,8 @@ def read_banxico_cetes_csv(
     """Read a user-supplied Banxico export without requiring an API token."""
     if not contents:
         raise PortfolioError("El archivo CETES está vacío.")
+    if len(contents) > 5_000_000:
+        raise PortfolioError("El archivo CETES debe ocupar menos de 5 MB.")
     try:
         frame = pd.read_csv(BytesIO(contents))
     except (UnicodeDecodeError, pd.errors.ParserError) as exc:
@@ -131,3 +133,43 @@ def read_banxico_cetes_csv(
         nominal_value=nominal_value,
         name=name,
     )
+
+
+def merge_cetes_index(market_prices: pd.DataFrame, cetes_index: pd.Series) -> pd.DataFrame:
+    """Align a prepared CETES index without hiding internal observation gaps."""
+    if market_prices.empty or cetes_index.empty:
+        raise PortfolioError("Las series de mercado y CETES no pueden estar vacías.")
+    if not isinstance(market_prices.index, pd.DatetimeIndex) or not isinstance(
+        cetes_index.index, pd.DatetimeIndex
+    ):
+        raise PortfolioError("Las series de mercado y CETES requieren fechas.")
+    if (
+        market_prices.index.has_duplicates
+        or cetes_index.index.has_duplicates
+        or not market_prices.index.is_monotonic_increasing
+        or not cetes_index.index.is_monotonic_increasing
+    ):
+        raise PortfolioError("Las series mixtas requieren fechas únicas y ordenadas.")
+    if cetes_index.name is None or not str(cetes_index.name).strip():
+        raise PortfolioError("La serie CETES requiere un nombre.")
+    if cetes_index.name in market_prices.columns:
+        raise PortfolioError("El nombre de CETES coincide con otro activo del análisis.")
+    start = max(market_prices.index.min(), cetes_index.index.min())
+    end = min(market_prices.index.max(), cetes_index.index.max())
+    if start > end:
+        raise PortfolioError("La serie CETES no coincide con el periodo de los demás activos.")
+    market_window = market_prices.loc[start:end]
+    missing = market_window.index.difference(cetes_index.index)
+    if len(missing):
+        raise PortfolioError(
+            f"La serie CETES omite {len(missing)} fecha(s) de mercado dentro del periodo común. "
+            "Corrige el archivo; no se rellenan huecos."
+        )
+    combined = market_window.join(cetes_index.rename(str(cetes_index.name)), how="left")
+    if len(combined) < 60:
+        raise PortfolioError(
+            f"Solo hay {len(combined)} observaciones mixtas; se requieren al menos 60."
+        )
+    if not np.isfinite(combined.to_numpy()).all() or (combined <= 0).any().any():
+        raise PortfolioError("Las series mixtas deben contener valores positivos y finitos.")
+    return combined

@@ -23,9 +23,14 @@ donde `VN` es el valor nominal, `r` la tasa anual en decimal y `t` el plazo en d
   intradía de la fecha del cambio.
 - No se rellenan observaciones faltantes ni se calculan retornos directamente a partir de tasas.
 
-La serie resultante todavía requiere una revisión de sus fechas de cambio y su posterior unión con los
-otros activos para entrar al optimizador. Los costos, impuestos, spread y reglas particulares del
-intermediario se incorporarán después.
+La aplicación permite cargar un CSV con columnas exactas `Fecha`, `Precio` y `Plazo`. El nombre de la
+serie se agrega al final del orden de activos. La moneda base debe ser MXN y deben existir al menos 60
+fechas comunes. Se aceptan recortes al inicio o final del periodo, pero se rechaza cualquier fecha de
+mercado omitida dentro del intervalo común para no tratar retornos de varios días como diarios.
+
+La aplicación muestra cuántos cambios de emisión y vencimientos reconoce y permite descargar el índice
+preparado. Estas fechas requieren revisión humana contra la fuente oficial. Los costos, impuestos, spread
+y reglas particulares del intermediario se incorporarán después.
 
 Fuentes:
 

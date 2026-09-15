@@ -2,7 +2,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from fixed_income import cetes_price, prepare_cetes_total_return, read_banxico_cetes_csv
+from fixed_income import (
+    cetes_price,
+    merge_cetes_index,
+    prepare_cetes_total_return,
+    read_banxico_cetes_csv,
+)
 from portfolio_core import PortfolioError
 
 
@@ -69,3 +74,20 @@ def test_csv_adapter_reads_banxico_style_columns():
 def test_total_return_rejects_invalid_observations(frame, message):
     with pytest.raises(PortfolioError, match=message):
         prepare_cetes_total_return(frame, price_column="p", term_column="t")
+
+
+def test_merge_cetes_index_allows_only_leading_and_trailing_truncation():
+    dates = pd.date_range("2025-01-01", periods=70, freq="B")
+    market = pd.DataFrame({"A": np.linspace(100, 110, 70)}, index=dates)
+    cetes = pd.Series(np.linspace(100, 101, 65), index=dates[3:68], name="CETES28")
+    combined = merge_cetes_index(market, cetes)
+    assert combined.index.equals(dates[3:68])
+    assert list(combined.columns) == ["A", "CETES28"]
+
+
+def test_merge_cetes_index_rejects_internal_gap():
+    dates = pd.date_range("2025-01-01", periods=70, freq="B")
+    market = pd.DataFrame({"A": np.linspace(100, 110, 70)}, index=dates)
+    cetes = pd.Series(np.linspace(100, 101, 69), index=dates.delete(20), name="CETES28")
+    with pytest.raises(PortfolioError, match="omite 1 fecha"):
+        merge_cetes_index(market, cetes)
