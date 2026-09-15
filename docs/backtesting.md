@@ -54,3 +54,8 @@ Ambas pruebas pueden repetir la misma evaluación con una
 tercera opción calibra su intensidad con bloques anteriores a la evaluación externa.
 La comparación comparte fechas, precios y costos; elegir el estimador después de mirar
 el resultado fuera de muestra introduce sesgo de selección.
+
+Para examinar la dependencia del corte inicial, el panel de
+[cuatro fechas predefinidas](multi_cut_validation.md) ejecuta varias pruebas de
+compra y mantenimiento. Sus tramos de evaluación se solapan y se reportan por
+separado, sin combinar resultados como si fueran independientes.

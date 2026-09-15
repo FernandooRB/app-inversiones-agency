@@ -17,6 +17,8 @@ ventanas históricas de 60, 126 y 252 retornos para mostrar cuánto dependen de 
 Las pruebas fuera de muestra permiten comparar la covarianza muestral con una
 [contracción diagonal fija del 50 % o una intensidad calibrada con bloques anteriores](docs/covariance_shrinkage.md),
 sin seleccionar el estimador que rindió mejor en la evaluación externa.
+La [sensibilidad a cuatro cortes](docs/multi_cut_validation.md) comprueba cómo cambia
+el resultado al iniciar la evaluación después del 50 %, 60 %, 70 % u 80 % de la historia.
 
 > **Importante:** los resultados son estimaciones históricas y no constituyen asesoría, una recomendación
 > personalizada ni una garantía de rendimiento futuro.
@@ -108,6 +110,7 @@ portfolio_core.py    Datos, métricas, optimización y riesgo
 instruments.py       Catálogo y reglas de integración por tipo de instrumento
 fixed_income.py       Valuación y preparación de series de CETES
 backtesting.py         Evaluación hipotética con fecha de corte
+multi_cut.py           Sensibilidad a cuatro cortes predefinidos
 walk_forward.py        Evaluación con revisiones sucesivas
 sensitivity.py         Diagnóstico de estabilidad de pesos
 reporting.py         Reporte PDF
