@@ -32,6 +32,7 @@ from portfolio_core import (
     portfolio_statistics,
     random_portfolios,
 )
+from price_upload import read_adjusted_price_csv
 from reporting import (
     PortfolioAlternative,
     SimulationReport,
@@ -164,6 +165,24 @@ with st.sidebar:
             "No se guarda en una base de datos."
         ),
     )
+    price_upload = st.file_uploader(
+        "Precios ajustados CSV aportados por el equipo (opcional)",
+        type=["csv"],
+        help=(
+            "Tabla con Fecha y una columna por ticker; UTF-8, YYYY-MM-DD, máximo 5 MB. "
+            "No cargues posiciones ni datos personales. Confirma ajustes, moneda y derechos "
+            "de uso con la fuente antes de interpretar o distribuir resultados."
+        ),
+    )
+    price_source_input = st.text_input(
+        "Fuente declarada de precios CSV",
+        help="Nombre del proveedor o exportación; aparecerá en el PDF si cargas precios.",
+    )
+    st.download_button(
+        "Descargar plantilla de precios CSV",
+        b"Fecha,AAPL,MSFT\n",
+        "plantilla_precios_ajustados.csv", "text/csv",
+    )
     cetes_upload = st.file_uploader(
         "Serie CETES de Banxico (opcional)",
         type=["csv"],
@@ -183,6 +202,8 @@ with st.sidebar:
     )
     analyze = st.button("Analizar portafolio", type="primary", use_container_width=True)
 
+price_contents = price_upload.getvalue() if price_upload is not None else b""
+price_fingerprint = sha256(price_contents).hexdigest() if price_contents else None
 cetes_contents = cetes_upload.getvalue() if cetes_upload is not None else b""
 cetes_fingerprint = sha256(cetes_contents).hexdigest() if cetes_contents else None
 settings = (
@@ -197,6 +218,8 @@ settings = (
     quote_input,
     base_currency,
     current_weights_input,
+    price_fingerprint,
+    price_source_input,
     cetes_fingerprint,
     cetes_name_input,
 )
@@ -225,8 +248,19 @@ try:
             f"Con {asset_count} activos, el peso máximo debe ser al menos {1 / asset_count:.1%}."
         )
     cetes_result = None
-    with st.spinner("Descargando y validando datos..."):
-        download = cached_prices(tickers, start_date, end_date)
+    with st.spinner("Preparando y validando datos..."):
+        if price_contents:
+            price_source = price_source_input.strip()
+            if (
+                not price_source or len(price_source) > 120
+                or any(ord(char) < 32 for char in price_source)
+            ):
+                raise PortfolioError("Declara una fuente de precios CSV de 1 a 120 caracteres.")
+            download = read_adjusted_price_csv(
+                price_contents, tickers, start_date, end_date
+            )
+        else:
+            download = cached_prices(tickers, start_date, end_date)
         if download.rejected_tickers:
             raise PortfolioError("Corrige los tickers sin datos: " + ", ".join(download.rejected_tickers))
         fx = cached_fx(quotes, base_currency, start_date, end_date)
@@ -253,7 +287,15 @@ try:
             prices = merge_cetes_index(prices, prepared_index)
         analysis_tickers = tuple(str(column) for column in prices.columns)
         analysis_quotes = quotes | ({cetes_name: "MXN"} if cetes_result is not None else {})
-        data_source = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico"
+        if price_contents:
+            data_source = (
+                f"CSV aportado por el equipo; fuente declarada: {price_source}; "
+                f"ajustes no verificados; SHA-256 {price_fingerprint[:12]}"
+            )
+            if any(quotes[ticker] != base_currency for ticker in tickers):
+                data_source += "; FX histórico Yahoo mediante yfinance"
+        else:
+            data_source = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico"
         if cetes_result is not None:
             data_source += (
                 f"; {cetes_name}: CSV aportado por el usuario y preparado desde precio/plazo, "
@@ -301,6 +343,13 @@ try:
         f"Análisis realizado con {len(returns):,} observaciones, del "
         f"{prices.index.min().date()} al {prices.index.max().date()}. Moneda: {base_currency}."
     )
+    if price_contents:
+        st.info(
+            f"Precios CSV aportados por el equipo · Fuente declarada: {price_source} · "
+            f"SHA-256 {price_fingerprint[:12]}. "
+            "Confirma con la fuente que son cierres ajustados comparables, su moneda, "
+            "calendario y derechos de uso; la app no puede verificar esos extremos."
+        )
     if cetes_result is not None:
         relevant_rolls = [
             item for item in cetes_result.roll_dates if prices.index.min() <= item <= prices.index.max()
