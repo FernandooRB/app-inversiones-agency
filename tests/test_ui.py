@@ -123,6 +123,12 @@ def test_holdout_panel_runs_with_disjoint_dates(monkeypatch):
     assert not app.exception
     assert not app.error
     assert any("Estimación:" in item.value and "Evaluación:" in item.value for item in app.markdown)
+    next(
+        item for item in app.checkbox
+        if item.label == "Comparar estimadores de covarianza (corte único)"
+    ).set_value(True).run()
+    assert not app.exception
+    assert not app.error
     successive = next(
         item for item in app.checkbox if item.label == "Evaluar revisiones sucesivas"
     )
@@ -130,6 +136,12 @@ def test_holdout_panel_runs_with_disjoint_dates(monkeypatch):
     assert not app.exception
     assert not app.error
     assert any("Estimación inicial hasta:" in item.value for item in app.markdown)
+    next(
+        item for item in app.checkbox
+        if item.label == "Comparar estimadores de covarianza (revisiones)"
+    ).set_value(True).run()
+    assert not app.exception
+    assert not app.error
     sensitivity = next(
         item for item in app.checkbox if item.label == "Comparar ventanas de estimación"
     )

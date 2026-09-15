@@ -29,6 +29,7 @@ def run_walk_forward_backtest(
     max_weight: float = 1.0,
     current_weights: np.ndarray | None = None,
     trading_cost_bps: float = 0.0,
+    covariance_shrinkage: float = 0.0,
 ) -> WalkForwardBacktest:
     """Re-estimate using prior observations only; trade before each review day's return.
 
@@ -45,6 +46,7 @@ def run_walk_forward_backtest(
         returns, training_fraction=training_fraction,
         risk_free_rate=risk_free_rate, max_weight=max_weight,
         current_weights=current_weights, trading_cost_bps=trading_cost_bps,
+        covariance_shrinkage=covariance_shrinkage,
     )
     training_count = holdout.training_observations
     evaluation = returns.iloc[training_count:]
@@ -68,7 +70,9 @@ def run_walk_forward_backtest(
         review = initial or day >= next_review
         if review:
             history = returns.iloc[:training_count + position]
-            mean, covariance = annualized_moments(history)
+            mean, covariance = annualized_moments(
+                history, covariance_shrinkage=covariance_shrinkage
+            )
             targets = {
                 "Máximo Sharpe": optimize_portfolio(
                     mean, covariance, risk_free_rate, "max_sharpe", max_weight

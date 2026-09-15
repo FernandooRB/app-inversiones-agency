@@ -69,6 +69,7 @@ def run_holdout_backtest(
     max_weight: float = 1.0,
     current_weights: np.ndarray | None = None,
     trading_cost_bps: float = 0.0,
+    covariance_shrinkage: float = 0.0,
 ) -> HoldoutBacktest:
     """Estimate allocations once, then evaluate the untouched later sample."""
     if not isinstance(returns.index, pd.DatetimeIndex) or (
@@ -99,7 +100,9 @@ def run_holdout_backtest(
         validate_weights(current_weights, returns.shape[1])
         if current_weights is not None else None
     )
-    mean, covariance = annualized_moments(training)
+    mean, covariance = annualized_moments(
+        training, covariance_shrinkage=covariance_shrinkage
+    )
     allocations = {
         "Máximo Sharpe": optimize_portfolio(
             mean, covariance, risk_free_rate, "max_sharpe", max_weight
