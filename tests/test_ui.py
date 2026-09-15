@@ -1,8 +1,10 @@
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 import portfolio_core as core
@@ -122,6 +124,8 @@ def test_holdout_panel_runs_with_disjoint_dates(monkeypatch):
     holdout.set_value(True).run()
     assert not app.exception
     assert not app.error
+
+
     assert any("Estimación:" in item.value and "Evaluación:" in item.value for item in app.markdown)
     next(
         item for item in app.checkbox if item.label == "Evaluar cuatro cortes predefinidos"
@@ -165,3 +169,34 @@ def test_holdout_panel_runs_with_disjoint_dates(monkeypatch):
     sensitivity.set_value(True).run()
     assert not app.exception
     assert not app.error
+
+
+def test_uploaded_prices_run_without_yahoo_price_download(monkeypatch):
+    import access
+
+    monkeypatch.setattr(access, "require_access", lambda: None)
+    rng = np.random.default_rng(251)
+    dates = pd.date_range("2024-01-02", periods=140, freq="B")
+    values = 100 * np.cumprod(1 + rng.normal(0.0006, 0.01, (140, 4)), axis=0)
+    table = pd.DataFrame(values, columns=["AAPL", "MSFT", "GOOG", "TSLA"])
+    table.insert(0, "Fecha", dates.strftime("%Y-%m-%d"))
+    upload = BytesIO(table.to_csv(index=False).encode("utf-8-sig"))
+    monkeypatch.setattr(
+        st, "file_uploader",
+        lambda label, **_kwargs: upload if label.startswith("Precios ajustados CSV") else None,
+    )
+    monkeypatch.setattr(
+        core.yf, "download",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Yahoo no debe consultarse")),
+    )
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
+    ).run()
+    source = next(
+        item for item in app.text_input if item.label == "Fuente declarada de precios CSV"
+    )
+    source.set_value("Archivo de investigación").run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error
+    assert any("Precios CSV aportados" in item.value for item in app.info)
