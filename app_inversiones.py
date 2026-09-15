@@ -12,6 +12,7 @@ import streamlit as st
 from access import require_access
 from currencies import convert_prices, currency_map, download_fx
 from fx_comparison import render_comparison
+from instruments import analysis_inputs, display_catalog, load_catalog
 from portfolio_core import (
     PortfolioError,
     PortfolioMetrics,
@@ -59,6 +60,27 @@ def cached_fx(quotes, base, start, end):
 
 st.title("Optimizador de Portafolios V2")
 st.caption("Análisis histórico educativo · No constituye una recomendación personalizada de inversión")
+
+instrument_catalog = load_catalog()
+with st.expander("Catálogo piloto de instrumentos México y SIC"):
+    st.dataframe(display_catalog(instrument_catalog), hide_index=True, use_container_width=True)
+    available_inputs = analysis_inputs(instrument_catalog)
+    examples = ", ".join(
+        f"{row.analysis_symbol} ({row.analysis_currency})"
+        for row in available_inputs.itertuples(index=False)
+    )
+    st.caption(
+        "Compatibles hoy con el motor histórico: " + examples + ". "
+        "En SIC se usa una aproximación con la serie del mercado de origen convertida a MXN; "
+        "no representa el precio local ejecutable. CETES, bonos, efectivo y fondos permanecen "
+        "fuera del optimizador hasta integrar su valoración específica."
+    )
+    st.download_button(
+        "Descargar catálogo y notas CSV",
+        instrument_catalog.to_csv(index=False).encode("utf-8-sig"),
+        "catalogo_instrumentos_mx_sic.csv",
+        "text/csv",
+    )
 
 with st.sidebar:
     st.header("Configuración")

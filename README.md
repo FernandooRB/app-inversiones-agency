@@ -4,7 +4,9 @@ Aplicación educativa de uso interno en Streamlit para analizar asignaciones de 
 portafolios de máximo Sharpe y mínima volatilidad, una frontera eficiente, VaR, CVaR y un reporte PDF.
 Incluye [escenarios Monte Carlo](docs/monte_carlo.md) para investigación interna,
 con métodos histórico por bloques y lognormal correlacionado, y
-[pruebas de estrés](docs/stress_testing.md) históricas e hipotéticas.
+[pruebas de estrés](docs/stress_testing.md) históricas e hipotéticas. El
+[catálogo piloto México/SIC](docs/instrument_catalog.md) distingue el instrumento negociable de
+la serie utilizada por el motor y bloquea deuda, efectivo y fondos hasta contar con su valoración.
 
 > **Importante:** los resultados son estimaciones históricas y no constituyen asesoría, una recomendación
 > personalizada ni una garantía de rendimiento futuro.
@@ -92,6 +94,7 @@ pytest
 ```text
 app_inversiones.py   Interfaz Streamlit
 portfolio_core.py    Datos, métricas, optimización y riesgo
+instruments.py       Catálogo y reglas de integración por tipo de instrumento
 reporting.py         Reporte PDF
 tests/               Pruebas unitarias
 ```
