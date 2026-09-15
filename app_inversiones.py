@@ -58,6 +58,41 @@ def percent(value: float) -> str:
     return f"{value:.2%}"
 
 
+def render_covariance_comparison(sample, diagonal):
+    scenarios = ("Máximo Sharpe", "Mínima volatilidad")
+    rows = pd.concat(
+        {
+            "Muestral": sample.summary.loc[list(scenarios)],
+            "Diagonal 50%": diagonal.summary.loc[list(scenarios)],
+        }, names=["Covarianza", "Escenario"]
+    )
+    overview = rows[[
+        "Retorno total neto", "Volatilidad anualizada", "Sharpe realizado",
+        "Máxima caída",
+        "Rotación inicial" if "Rotación inicial" in rows else "Rotación acumulada",
+        "Costo inicial sobre capital" if "Costo inicial sobre capital" in rows
+        else "Costo pagado sobre capital inicial",
+    ]].copy()
+    for column in overview:
+        if column == "Sharpe realizado":
+            overview[column] = overview[column].map(lambda value: f"{value:.2f}")
+        else:
+            overview[column] = overview[column].map(lambda value: f"{value:.2%}")
+    st.dataframe(overview, use_container_width=True)
+    curves = {
+        f"Muestral · {name}": sample.equity_curves[name] for name in scenarios
+    }
+    curves.update({
+        f"Diagonal 50% · {name}": diagonal.equity_curves[name] for name in scenarios
+    })
+    curves["Pesos iguales"] = sample.equity_curves["Pesos iguales"]
+    st.line_chart(pd.DataFrame(curves), y_label="Capital relativo (1 = inicio)")
+    st.caption(
+        "Ambos estimadores usan idénticos retornos, fechas, restricciones y costos supuestos. "
+        "El 50% es un escenario fijo; elegirlo tras ver las curvas puede sesgar la comparación."
+    )
+
+
 @st.cache_data(ttl=3_600, show_spinner=False)
 def cached_fx(quotes, base, start, end):
     return download_fx(quotes, base, start, end)
@@ -686,6 +721,22 @@ try:
                 )
                 st.dataframe(display, use_container_width=True)
                 st.line_chart(backtest.equity_curves, y_label="Capital relativo (1 = inicio)")
+                if st.checkbox("Comparar estimadores de covarianza (corte único)"):
+                    diagonal = run_holdout_backtest(
+                        returns, training_fraction=training_percent / 100,
+                        risk_free_rate=risk_free_rate, max_weight=max_weight,
+                        current_weights=(
+                            current_weights if current_weights_input.strip() else None
+                        ),
+                        trading_cost_bps=entry_cost_bps,
+                        covariance_shrinkage=0.5,
+                    )
+                    render_covariance_comparison(backtest, diagonal)
+                    with st.expander("Pesos estimados con ambos estimadores"):
+                        st.dataframe(pd.concat({
+                            "Muestral": backtest.allocations,
+                            "Diagonal 50%": diagonal.allocations,
+                        }, names=["Covarianza", "Activo"]).style.format("{:.2%}"))
                 with st.expander("Pesos estimados antes de la evaluación"):
                     st.dataframe(
                         backtest.allocations.style.format("{:.2%}"),
@@ -750,6 +801,23 @@ try:
                 )
                 st.dataframe(display, use_container_width=True)
                 st.line_chart(walk.equity_curves, y_label="Capital relativo (1 = inicio)")
+                if st.checkbox("Comparar estimadores de covarianza (revisiones)"):
+                    diagonal_walk = run_walk_forward_backtest(
+                        returns, training_fraction=train_percent / 100,
+                        cadence_months=cadence, risk_free_rate=risk_free_rate,
+                        max_weight=max_weight,
+                        current_weights=(
+                            current_weights if current_weights_input.strip() else None
+                        ),
+                        trading_cost_bps=cost_bps,
+                        covariance_shrinkage=0.5,
+                    )
+                    render_covariance_comparison(walk, diagonal_walk)
+                    st.download_button(
+                        "Descargar revisiones con covarianza diagonal CSV",
+                        diagonal_walk.allocation_history.to_csv().encode("utf-8-sig"),
+                        "revisiones_covarianza_diagonal.csv", "text/csv",
+                    )
                 with st.expander("Fechas, ventanas y pesos de cada revisión"):
                     st.dataframe(walk.allocation_history, use_container_width=True)
                 st.download_button(
@@ -810,8 +878,10 @@ try:
         f"comparativo_carteras_{date.today()}.pdf", "application/pdf",
     )
     st.warning(
-        "Los resultados dependen de datos históricos y supuestos estadísticos. No incorporan impuestos, "
-        "comisiones, liquidez ni situación personal. La conversión cambiaria no constituye una cobertura."
+        "Los resultados dependen de datos históricos y supuestos estadísticos. Los costos "
+        "configurables de simulación y rebalanceo son hipotéticos; la optimización y el PDF "
+        "no descuentan impuestos, tarifas reales, spreads, liquidez ni situación personal. "
+        "La conversión cambiaria no constituye una cobertura."
     )
 except PortfolioError as exc:
     st.error(str(exc))

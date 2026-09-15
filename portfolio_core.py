@@ -121,13 +121,24 @@ def calculate_returns(prices: pd.DataFrame) -> pd.DataFrame:
     return returns
 
 
-def annualized_moments(returns: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame]:
+def annualized_moments(
+    returns: pd.DataFrame, *, covariance_shrinkage: float = 0.0
+) -> tuple[pd.Series, pd.DataFrame]:
+    if not np.isfinite(covariance_shrinkage) or not 0 <= covariance_shrinkage <= 1:
+        raise PortfolioError("La contracción de covarianza debe estar entre 0% y 100%.")
     if len(returns) < 2 or not np.isfinite(returns.to_numpy()).all():
         raise PortfolioError("Retornos insuficientes o no finitos.")
     if (returns.std() <= 1e-10).any():
         raise PortfolioError("Hay activos sin variación suficiente; revisa los datos.")
     mean_returns = returns.mean() * TRADING_DAYS
     covariance = returns.cov() * TRADING_DAYS
+    if covariance_shrinkage:
+        matrix = covariance.to_numpy()
+        covariance = pd.DataFrame(
+            (1 - covariance_shrinkage) * matrix
+            + covariance_shrinkage * np.diag(np.diag(matrix)),
+            index=covariance.index, columns=covariance.columns,
+        )
     ridge = max(float(np.trace(covariance.to_numpy())), 1.0) * 1e-10
     covariance = covariance + np.eye(len(covariance)) * ridge
     if not np.isfinite(mean_returns).all() or not np.isfinite(covariance).all().all():

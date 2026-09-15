@@ -14,6 +14,9 @@ cartera actual opcional, tanto con asignación fija como con revisiones de 3, 6 
 y costos supuestos.
 La [sensibilidad de asignaciones](docs/allocation_sensitivity.md) reestima los pesos con
 ventanas históricas de 60, 126 y 252 retornos para mostrar cuánto dependen de la muestra.
+Las pruebas fuera de muestra permiten comparar la covarianza muestral con una
+[contracción diagonal fija del 50 %](docs/covariance_shrinkage.md), sin seleccionar
+automáticamente el estimador que rindió mejor.
 
 > **Importante:** los resultados son estimaciones históricas y no constituyen asesoría, una recomendación
 > personalizada ni una garantía de rendimiento futuro.
@@ -113,7 +116,7 @@ tests/               Pruebas unitarias
 
 ## Próximas fases
 
-- Covarianza robusta y Black-Litterman.
+- Calibración y comparación de estimadores de covarianza; Black-Litterman.
 - Perfiles IR1–IR5 y restricciones por clase de activo.
 - Cobertura cambiaria y validación de metadatos de instrumentos.
 - Costos, impuestos y rebalanceo.

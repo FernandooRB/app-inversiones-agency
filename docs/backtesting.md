@@ -48,3 +48,8 @@ Esta prueba supone retornos diarios continuos y ejecución al cierre indicado po
 modela spreads, impuestos, comisiones fijas, cambios de composición del universo, liquidez,
 restricciones de lotes ni disponibilidad histórica de cada instrumento. Las tres frecuencias son
 escenarios de investigación, no instrucciones operativas para un cliente.
+
+Ambas pruebas pueden repetir la misma evaluación con una
+[covarianza contraída hacia la diagonal](covariance_shrinkage.md). El 50 % es fijo y la
+comparación comparte fechas, precios y costos; elegir el estimador después de mirar
+el resultado fuera de muestra introduce sesgo de selección.
