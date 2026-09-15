@@ -122,14 +122,17 @@ with st.sidebar:
     cetes_upload = st.file_uploader(
         "Serie CETES de Banxico (opcional)",
         type=["csv"],
-        help="CSV con columnas Fecha, Precio y Plazo. Máximo 5 MB; sólo para análisis en MXN.",
+        help=(
+            "CSV con Fecha, Precio, Plazo y Tasa opcional en % anual. Máximo 5 MB; "
+            "sólo para análisis en MXN. Se rechazan cambios anticipados de emisión."
+        ),
     )
     cetes_name_input = st.text_input(
         "Nombre de la serie CETES", "CETES28", help="Etiqueta que aparecerá en tablas y reportes."
     )
     st.download_button(
         "Descargar plantilla CETES CSV",
-        b"Fecha,Precio,Plazo\n2026-01-02,9.9500000,28\n",
+        b"Fecha,Precio,Plazo,Tasa\n",
         "plantilla_cetes.csv",
         "text/csv",
     )
@@ -263,7 +266,8 @@ try:
             if prices.index.min() <= item <= prices.index.max()
         ]
         st.info(
-            f"Serie {cetes_name} integrada desde archivo: {len(relevant_rolls)} cambio(s) de emisión, "
+            f"Serie {cetes_name} integrada desde archivo: {len(relevant_rolls)} renovación(es) "
+            "por vencimiento, "
             f"{len(relevant_maturities)} vencimiento(s) reconocido(s). Revisa las fechas antes de "
             "usar los resultados."
         )
