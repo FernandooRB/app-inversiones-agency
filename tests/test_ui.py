@@ -92,3 +92,28 @@ def test_builtin_h10_comparison_runs_on_common_dates(monkeypatch):
     app.radio[0].set_value("Reserva Federal H.10 (enero-junio 2024)").run()
     assert not app.exception
     assert not app.error
+
+
+def test_holdout_panel_runs_with_disjoint_dates(monkeypatch):
+    import access
+
+    monkeypatch.setattr(access, "require_access", lambda: None)
+    rng = np.random.default_rng(101)
+    prices = 100 * np.cumprod(1 + rng.normal(0.0005, 0.01, (180, 4)), axis=0)
+    supplied = pd.DataFrame(
+        prices,
+        index=pd.date_range("2024-01-01", periods=180, freq="B"),
+        columns=pd.MultiIndex.from_product([["Close"], ["AAPL", "MSFT", "GOOG", "TSLA"]]),
+    )
+    monkeypatch.setattr(core.yf, "download", lambda *args, **kwargs: supplied)
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
+    ).run()
+    app.button[0].click().run()
+    holdout = next(
+        item for item in app.checkbox if item.label == "Comparar resultados fuera de muestra"
+    )
+    holdout.set_value(True).run()
+    assert not app.exception
+    assert not app.error
+    assert any("Estimación:" in item.value and "Evaluación:" in item.value for item in app.markdown)

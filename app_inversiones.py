@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from access import require_access
+from backtesting import run_holdout_backtest
 from currencies import convert_prices, currency_map, download_fx
 from fixed_income import merge_cetes_index, read_banxico_cetes_csv
 from fx_comparison import render_comparison
@@ -602,6 +603,69 @@ try:
                 "hipotético es estático, no tiene probabilidad asignada y no modela recuperación, "
                 "liquidez, suspensiones ni incumplimientos."
             )
+
+    with st.expander("Validación fuera de muestra: una fecha de corte"):
+        st.caption(
+            "Los pesos se estiman una sola vez con la primera parte de la muestra. "
+            "La parte posterior evalúa una cartera hipotética mantenida sin rebalanceo. "
+            "Cambiar la fecha de corte después de ver resultados puede sesgar la conclusión."
+        )
+        if st.checkbox("Comparar resultados fuera de muestra"):
+            if removed:
+                st.warning(
+                    "Hay fechas omitidas por falta de FX; resuelve esos huecos antes de "
+                    "usar retornos supuestamente diarios en la validación."
+                )
+            else:
+                training_percent = st.slider("Muestra para estimación (%)", 50, 90, 70, 5)
+                entry_cost_bps = st.number_input(
+                    "Costo inicial por rotación (puntos base)",
+                    min_value=0.0, max_value=500.0, value=0.0, step=5.0,
+                )
+                backtest = run_holdout_backtest(
+                    returns, training_fraction=training_percent / 100,
+                    risk_free_rate=risk_free_rate, max_weight=max_weight,
+                    current_weights=(
+                        current_weights if current_weights_input.strip() else None
+                    ),
+                    trading_cost_bps=entry_cost_bps,
+                )
+                st.write(
+                    f"**Estimación:** {backtest.training_start.date()} a "
+                    f"{backtest.training_end.date()} "
+                    f"({backtest.training_observations} retornos). "
+                    f"**Evaluación:** {backtest.evaluation_start.date()} a "
+                    f"{backtest.evaluation_end.date()} "
+                    f"({backtest.evaluation_observations} retornos)."
+                )
+                display = backtest.summary.copy()
+                for column in (
+                    "Retorno total neto", "Retorno anualizado neto",
+                    "Volatilidad anualizada", "Máxima caída", "Rotación inicial",
+                    "Costo inicial sobre capital",
+                ):
+                    display[column] = display[column].map(lambda value: f"{value:.2%}")
+                display["Sharpe realizado"] = display["Sharpe realizado"].map(
+                    lambda value: f"{value:.2f}"
+                )
+                st.dataframe(display, use_container_width=True)
+                st.line_chart(backtest.equity_curves, y_label="Capital relativo (1 = inicio)")
+                with st.expander("Pesos estimados antes de la evaluación"):
+                    st.dataframe(
+                        backtest.allocations.style.format("{:.2%}"),
+                        use_container_width=True,
+                    )
+                st.download_button(
+                    "Descargar resultados fuera de muestra CSV",
+                    backtest.summary.to_csv().encode("utf-8-sig"),
+                    "validacion_fuera_de_muestra.csv", "text/csv",
+                )
+                st.caption(
+                    "El costo se aplica sólo a la rotación inicial desde la cartera actual ingresada; "
+                    "sin cartera actual se supone una posición inicial ya asignada y costo cero. "
+                    "No se modelan rebalanceos, comisiones continuas, spreads, impuestos, "
+                    "deslizamiento ni liquidez. El resultado es hipotético, no una operación real."
+                )
 
     render_comparison(
         download.prices, analysis_quotes, base_currency, fx, max_sharpe.weights,
