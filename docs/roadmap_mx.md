@@ -69,8 +69,8 @@
 1. Obtener dictamen jurídico sobre los productos y entregables permitidos sin registro CNBV y
    respuesta del empleador sobre la actividad externa. Constituir una persona moral no sustituye ninguna
    de estas dos evaluaciones.
-2. Ampliar el catálogo piloto con ISIN y claves oficiales, y construir el adaptador de CETES con
-   precios de Banxico y una regla de vencimiento documentada.
+2. Integrar el [preparador de CETES](cetes_adapter.md) al optimizador mixto, contrastar sus cambios
+   de emisión con datos oficiales y ampliar el catálogo con ISIN y claves oficiales.
 3. Obtener tarifarios reales de los intermediarios usados; elegir uno para la primera importación.
 4. Seleccionar un proveedor de datos apropiado para el uso comercial dentro del presupuesto o
    delimitar un flujo con datos aportados por el intermediario y fuentes oficiales.
