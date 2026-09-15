@@ -57,10 +57,10 @@ def prepare_cetes_total_return(
 ) -> CetesTotalReturn:
     """Create an index from Banxico price/term observations.
 
-    A rising remaining term signals a change in the representative issue. If the
-    prior issue could have matured between observations, the final factor uses
-    the nominal redemption. An earlier reference change is return-neutral on the
-    switch date because the two prices refer to different securities.
+    The same issue must lose exactly the calendar days elapsed. A reference
+    switch is only modeled if the previous issue reached maturity: it redeems
+    at nominal value. A switch before maturity has no observable sale price in
+    an on-the-run price/term pair and must be rejected.
     """
     if price_column not in observations or term_column not in observations:
         raise PortfolioError("El archivo debe contener las columnas de precio y plazo indicadas.")
@@ -70,23 +70,39 @@ def prepare_cetes_total_return(
     if frame.index.has_duplicates:
         raise PortfolioError("La serie CETES contiene fechas duplicadas.")
     frame.columns = ["price", "term"]
-    frame = frame.apply(pd.to_numeric, errors="coerce").dropna()
+    frame = frame.apply(pd.to_numeric, errors="coerce")
+    if frame.isna().any().any():
+        raise PortfolioError(
+            "El archivo CETES contiene precio o plazo no numérico o faltante. "
+            "Corrige las observaciones; no se eliminan filas silenciosamente."
+        )
     if len(frame) < 3:
         raise PortfolioError("Se requieren al menos tres observaciones válidas de CETES.")
-    if (frame["price"] <= 0).any():
-        raise PortfolioError("Los precios de CETES deben ser positivos.")
-    if (frame["term"] < 0).any() or not np.allclose(frame["term"], np.round(frame["term"])):
-        raise PortfolioError("Los plazos de CETES deben ser días enteros no negativos.")
     if nominal_value <= 0 or not np.isfinite(nominal_value):
         raise PortfolioError("El valor nominal del CETE debe ser positivo.")
+    if (frame["price"] <= 0).any():
+        raise PortfolioError("Los precios de CETES deben ser positivos.")
+    if (frame["price"] > nominal_value * 2).any():
+        raise PortfolioError("El precio CETES excede el doble del valor nominal; revisa las unidades.")
+    if (frame["term"] < 0).any() or not np.allclose(frame["term"], np.round(frame["term"])):
+        raise PortfolioError("Los plazos de CETES deben ser días enteros no negativos.")
 
     elapsed = frame.index.to_series().diff().dt.days
     previous_term = frame["term"].shift(1)
-    roll = frame["term"].gt(previous_term)
+    expected_term = previous_term - elapsed
+    roll = frame["term"].ne(expected_term)
+    roll.iloc[0] = False
     maturity = roll & previous_term.le(elapsed)
+    early_switch = roll & ~maturity
+    if early_switch.any():
+        first = frame.index[early_switch][0].date().isoformat()
+        raise PortfolioError(
+            f"La emisión representativa de CETES cambió antes de vencer el {first}. "
+            "Precio y plazo no identifican el precio de venta de la emisión anterior; "
+            "se necesitan cotizaciones por emisión para calcular el retorno realizado."
+        )
 
     gross = frame["price"].div(frame["price"].shift(1))
-    gross.loc[roll] = 1.0
     gross.loc[maturity] = nominal_value / frame["price"].shift(1).loc[maturity]
     gross.iloc[0] = 1.0
     if (~np.isfinite(gross)).any() or (gross <= 0).any():
@@ -122,10 +138,35 @@ def read_banxico_cetes_csv(
         raise PortfolioError("No se pudo leer el CSV de CETES.") from exc
     if date_column not in frame:
         raise PortfolioError("El archivo no contiene la columna de fecha indicada.")
-    dates = pd.to_datetime(frame.pop(date_column), errors="coerce", dayfirst=True)
+    if price_column not in frame or term_column not in frame:
+        raise PortfolioError("El archivo no contiene las columnas de precio y plazo indicadas.")
+    raw_dates = frame.pop(date_column).astype(str).str.strip()
+    iso = raw_dates.str.fullmatch(r"\d{4}-\d{2}-\d{2}").all()
+    spanish = raw_dates.str.fullmatch(r"\d{2}/\d{2}/\d{4}").all()
+    if not iso and not spanish:
+        raise PortfolioError("Usa fechas únicas YYYY-MM-DD o DD/MM/YYYY en el archivo CETES.")
+    dates = pd.to_datetime(
+        raw_dates,
+        format="%Y-%m-%d" if iso else "%d/%m/%Y",
+        errors="coerce",
+    )
     if dates.isna().any():
         raise PortfolioError("El archivo CETES contiene fechas inválidas.")
     frame.index = pd.DatetimeIndex(dates)
+    if "Tasa" in frame:
+        annual_yield = pd.to_numeric(frame["Tasa"], errors="coerce")
+        if annual_yield.isna().any():
+            raise PortfolioError("La columna Tasa CETES contiene observaciones inválidas.")
+        term = pd.to_numeric(frame[term_column], errors="coerce")
+        if term.isna().any():
+            raise PortfolioError("El archivo CETES contiene plazos faltantes o inválidos.")
+        implied = cetes_price(annual_yield / 100, term)
+        reported = pd.to_numeric(frame[price_column], errors="coerce")
+        if not np.isfinite(reported).all() or (abs(implied - reported) > 0.0001).any():
+            raise PortfolioError(
+                "Precio, plazo y tasa CETES no coinciden con la fórmula actual/360; "
+                "revisa serie, unidades y fechas."
+            )
     return prepare_cetes_total_return(
         frame,
         price_column=price_column,

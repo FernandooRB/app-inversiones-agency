@@ -32,17 +32,32 @@ def test_total_return_accrues_and_redeems_at_maturity():
     assert result.returns.name == "CETES28"
 
 
-def test_early_reference_change_does_not_create_artificial_price_loss():
+def test_early_reference_change_requires_issue_level_sale_price():
     dates = pd.date_range("2026-01-05", periods=3, freq="B")
     observations = pd.DataFrame(
         {"price": [9.80, 9.81, 9.60], "term": [20, 19, 28]}, index=dates
     )
-    result = prepare_cetes_total_return(
-        observations, price_column="price", term_column="term"
+    with pytest.raises(PortfolioError, match="antes de vencer"):
+        prepare_cetes_total_return(observations, price_column="price", term_column="term")
+
+
+def test_shorter_term_can_also_signal_an_early_issue_change():
+    dates = pd.date_range("2026-01-05", periods=3, freq="B")
+    observations = pd.DataFrame(
+        {"price": [9.80, 9.81, 9.90], "term": [28, 27, 20]}, index=dates
     )
-    assert result.index.iloc[-1] == pytest.approx(100 * 9.81 / 9.80)
-    assert result.roll_dates == (dates[-1],)
-    assert not result.maturity_dates
+    with pytest.raises(PortfolioError, match="2026-01-07"):
+        prepare_cetes_total_return(observations, price_column="price", term_column="term")
+
+
+def test_missing_cetes_calendar_day_does_not_mimic_early_switch():
+    dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-09"])
+    observations = pd.DataFrame(
+        {"price": [9.80, 9.81, 9.84], "term": [28, 27, 24]}, index=dates
+    )
+    result = prepare_cetes_total_return(observations, price_column="price", term_column="term")
+    assert result.index.iloc[-1] == pytest.approx(100 * 9.84 / 9.80)
+    assert not result.roll_dates
 
 
 def test_csv_adapter_reads_banxico_style_columns():
@@ -56,6 +71,44 @@ def test_csv_adapter_reads_banxico_style_columns():
         contents, date_column="Fecha", price_column="Precio Limpio", term_column="Plazo"
     )
     assert len(result.index) == 3
+
+
+def test_official_cf300_28_day_observations_match_valuation_and_calendar():
+    # Transcription of Banxico CF300, observed 2026-09-10, 11 and 14.
+    official = (
+        b"Fecha,Precio,Plazo,Tasa\n"
+        b"10/09/2026,9.949391,28,6.539970\n"
+        b"11/09/2026,9.951346,27,6.518917\n"
+        b"14/09/2026,9.956812,24,6.506299\n"
+    )
+    result = read_banxico_cetes_csv(
+        official, date_column="Fecha", price_column="Precio", term_column="Plazo"
+    )
+    assert result.index.iloc[-1] == pytest.approx(100 * 9.956812 / 9.949391)
+    assert result.roll_dates == ()
+
+
+def test_csv_adapter_rejects_wrong_rate_units_and_missing_price():
+    wrong_rate = (
+        b"Fecha,Precio,Plazo,Tasa\n"
+        b"2026-01-05,9.95,28,0.06\n"
+        b"2026-01-06,9.96,27,0.06\n"
+        b"2026-01-07,9.97,26,0.06\n"
+    )
+    with pytest.raises(PortfolioError, match="no coinciden"):
+        read_banxico_cetes_csv(
+            wrong_rate, date_column="Fecha", price_column="Precio", term_column="Plazo"
+        )
+    missing_price = (
+        b"Fecha,Precio,Plazo\n"
+        b"2026-01-05,9.95,28\n"
+        b"2026-01-06,N/E,27\n"
+        b"2026-01-07,9.97,26\n"
+    )
+    with pytest.raises(PortfolioError, match="no numérico o faltante"):
+        read_banxico_cetes_csv(
+            missing_price, date_column="Fecha", price_column="Precio", term_column="Plazo"
+        )
 
 
 @pytest.mark.parametrize(
