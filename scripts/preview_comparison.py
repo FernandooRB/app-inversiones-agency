@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from implementation_costs import ImplementationCostAssumptions, estimate_implementation_cost
 from portfolio_core import PortfolioMetrics, RiskMetrics
 from price_quality import PriceQualityIssue
 from reporting import (
@@ -61,7 +62,18 @@ def main() -> None:
         )
         for alternative in alternatives
     }
-    output = Path("output/pdf/comparativo_ficticio_revision_precios_mxn.pdf")
+    cost_assumptions = ImplementationCostAssumptions(
+        commission_bps=25, market_cost_bps=8, vat_rate=0.16, minimum_commission=20,
+    )
+    current_weights = alternatives[-1].metrics.weights
+    implementation_costs = tuple(
+        estimate_implementation_cost(
+            labels, alternative.metrics.weights, 1_000_000, cost_assumptions,
+            alternative_name=alternative.name, current_weights=current_weights,
+        )
+        for alternative in alternatives
+    )
+    output = Path("output/pdf/comparativo_ficticio_costos_mxn.pdf")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(create_comparison_pdf_report(
         labels, date(2021, 1, 4), date(2025, 12, 31), alternatives, 1_000_000,
@@ -75,6 +87,10 @@ def main() -> None:
                 "5 sesiones consecutivas sin variación",
             ),
         ),
+        implementation_costs=implementation_costs,
+        implementation_cost_assumptions=cost_assumptions,
+        implementation_cost_source="Tarifario ficticio para revisión visual",
+        implementation_cost_source_date=date(2026, 9, 16),
         simulation=SimulationReport(
             "Máximo Sharpe", result, 0, 40_000, 0.01, 10, 0.04, 6, 21,
         ),

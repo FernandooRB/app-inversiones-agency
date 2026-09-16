@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from pypdf import PdfReader
 
+from implementation_costs import ImplementationCostAssumptions, estimate_implementation_cost
 from portfolio_core import PortfolioMetrics, RiskMetrics
 from price_quality import PriceQualityIssue
 from reporting import (
@@ -24,6 +25,41 @@ def test_pdf_report_is_created():
     report = create_pdf_report(("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1), metrics, risk, 100_000)
     assert report.startswith(b"%PDF")
     assert len(report) > 1_000
+
+
+def test_both_pdfs_report_explicit_implementation_cost_assumptions():
+    metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    assumptions = ImplementationCostAssumptions(25, 10, 0.16, 20)
+    estimate = estimate_implementation_cost(
+        ("AAA", "BBB"), metrics.weights, 100_000, assumptions,
+        alternative_name="Máximo Sharpe",
+    )
+    basic = create_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        metrics, risk, 100_000, base_currency="MXN",
+        implementation_costs=(estimate,), implementation_cost_assumptions=assumptions,
+        implementation_cost_source="Tarifario de prueba",
+        implementation_cost_source_date=date(2026, 9, 16),
+    )
+    comparison = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (PortfolioAlternative("Máximo Sharpe", metrics, risk),
+         PortfolioAlternative("Pesos iguales", metrics, risk)),
+        100_000, base_currency="MXN", risk_free_rate=0.05,
+        observations=252, quotes={"AAA": "MXN", "BBB": "MXN"},
+        implementation_costs=(estimate,), implementation_cost_assumptions=assumptions,
+        implementation_cost_source="Tarifario de prueba",
+        implementation_cost_source_date=date(2026, 9, 16),
+    )
+    for report in (basic, comparison):
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+        assert "Costo estimado de implementación" in text
+        assert "25.0 pb por orden" in text
+        assert "IVA sobre" in text
+        assert "comisión: 16.00%" in text
+        assert "390.00" in text
+        assert "Tarifario de prueba" in text
 
 
 def test_both_pdfs_include_heuristic_price_review_with_original_quote_context():

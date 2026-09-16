@@ -12,6 +12,11 @@ base se aplica sólo a esa rotación inicial. Sin cartera actual, se supone que 
 pesos iniciales y no se aplica costo. El cálculo no incluye spreads, impuestos, comisiones continuas,
 liquidez ni ejecución real.
 
+En estas pruebas, «rotación» conserva la convención de media suma absoluta y el costo en puntos base
+se aplica a esa magnitud agregada. No equivale a una factura que cobre por separado compras y ventas.
+Para esa comparación utiliza el [estimador de costo de implementación](implementation_costs.md),
+que muestra ambos nominales y no altera retrospectivamente las pruebas históricas.
+
 El resultado presenta retorno total neto, retorno anualizado neto según días naturales, volatilidad
 anualizada con 252 sesiones, Sharpe realizado, máxima caída, rotación inicial y trayectoria de capital.
 Las fechas y pesos usados se muestran para que se pueda comprobar que la evaluación no entró en la

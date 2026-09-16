@@ -22,6 +22,10 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from implementation_costs import (
+    ImplementationCostAssumptions,
+    ImplementationCostEstimate,
+)
 from portfolio_core import PortfolioMetrics, RiskMetrics, validate_weights
 from price_quality import PriceQualityIssue
 from simulation import SimulationResult
@@ -53,6 +57,77 @@ class StressReport:
     historical: pd.DataFrame
     shocks: pd.Series | None = None
     shock_results: dict[str, ShockResult] | None = None
+
+
+def _implementation_cost_story(
+    estimates: tuple[ImplementationCostEstimate, ...],
+    assumptions: ImplementationCostAssumptions | None,
+    portfolio_value: float,
+    currency: str,
+    source: str | None,
+    source_date: date | None,
+    styles,
+) -> list:
+    if not estimates:
+        return []
+    if assumptions is None:
+        raise ValueError("Faltan los supuestos del costo de implementación.")
+    if (
+        not source or len(source) > 120 or any(ord(char) < 32 for char in source)
+        or source_date is None or source_date > date.today()
+    ):
+        raise ValueError("Falta la referencia fechada del costo de implementación.")
+    if not np.isfinite(portfolio_value) or portfolio_value < 0:
+        raise ValueError("Capital inválido para el costo de implementación.")
+    if len({item.alternative_name for item in estimates}) != len(estimates):
+        raise ValueError("Las alternativas de costos deben tener nombres únicos.")
+    for item in estimates:
+        components = np.array([
+            item.buy_notional, item.sell_notional, item.commission,
+            item.vat, item.market_cost, item.total_cost,
+        ])
+        if (
+            not np.isfinite(components).all() or (components < 0).any()
+            or not np.isclose(
+                item.total_cost, item.commission + item.vat + item.market_cost,
+                atol=0.005, rtol=0,
+            )
+        ):
+            raise ValueError("Estimación de costos inválida.")
+    rows = [["Alternativa", "Compras", "Ventas", "Costo total", "% capital"]]
+    for item in estimates:
+        rows.append([
+            Paragraph(escape(item.alternative_name), styles["Normal"]),
+            f"{item.buy_notional:,.0f}", f"{item.sell_notional:,.0f}",
+            f"{item.total_cost:,.2f}",
+            f"{item.total_cost / portfolio_value:.3%}" if portfolio_value else "N/A",
+        ])
+    table = Table(rows, colWidths=[49 * mm, 34 * mm, 34 * mm, 38 * mm, 26 * mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEBF1")),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
+    ]))
+    assumptions_text = (
+        f"Referencia: {escape(source)}; consulta: {source_date.isoformat()}. "
+        f"Moneda: {escape(currency)}. Comisión: {assumptions.commission_bps:.1f} pb por orden; "
+        f"IVA sobre comisión: {assumptions.vat_rate:.2%}; costo de mercado: "
+        f"{assumptions.market_cost_bps:.1f} pb sobre nominal; mínimo por orden: "
+        f"{assumptions.minimum_commission:,.2f}."
+    )
+    section = [
+        Paragraph("Costo estimado de implementación", styles["Heading2"]),
+        Paragraph(assumptions_text, styles["Normal"]),
+        Spacer(1, 2 * mm), table, Spacer(1, 1 * mm),
+        Paragraph(
+            "Cada compra y venta se cobra por separado. El costo se suma al nominal objetivo; "
+            "no incluye lotes, impuestos sobre ganancias ni una ejecución autofinanciada.",
+            styles["Normal"],
+        ),
+        Spacer(1, 3 * mm),
+    ]
+    return [KeepTogether(section)]
 
 
 def _price_quality_story(
@@ -184,6 +259,10 @@ def create_comparison_pdf_report(
     simulation: SimulationReport | None = None,
     stress: StressReport | None = None,
     price_quality_issues: tuple[PriceQualityIssue, ...] = (),
+    implementation_costs: tuple[ImplementationCostEstimate, ...] = (),
+    implementation_cost_assumptions: ImplementationCostAssumptions | None = None,
+    implementation_cost_source: str | None = None,
+    implementation_cost_source_date: date | None = None,
 ) -> bytes:
     """Compare historical portfolio alternatives on one sample and set of assumptions."""
     if not 2 <= len(alternatives) <= 4 or len({item.name for item in alternatives}) != len(alternatives):
@@ -197,6 +276,9 @@ def create_comparison_pdf_report(
             first_risk.confidence_level, first_risk.horizon_days
         ):
             raise ValueError("Todas las alternativas deben usar el mismo horizonte y confianza.")
+    alternative_names = {item.name for item in alternatives}
+    if any(item.alternative_name not in alternative_names for item in implementation_costs):
+        raise ValueError("El costo de implementación no pertenece al comparativo.")
 
     buffer = io.BytesIO()
     document = SimpleDocTemplate(
@@ -296,6 +378,11 @@ def create_comparison_pdf_report(
         Spacer(1, 2 * mm),
     ])
     story.extend(_price_quality_story(price_quality_issues, styles, compact=True))
+    story.extend(_implementation_cost_story(
+        implementation_costs, implementation_cost_assumptions,
+        portfolio_value, base_currency,
+        implementation_cost_source, implementation_cost_source_date, styles,
+    ))
     story.extend([
         Paragraph("Método y límites", styles["Heading2"]),
         Paragraph(
@@ -306,7 +393,8 @@ def create_comparison_pdf_report(
             styles["Normal"],
         ),
         Paragraph(
-            "Sin comisiones, diferenciales, impuestos ni liquidez. Los pesos usan la misma "
+            "Las métricas anteriores no descuentan comisiones, diferenciales ni impuestos, y no "
+            "modelan liquidez. Los pesos usan la misma "
             "muestra que los resultados: no es una prueba fuera de muestra ni una recomendación "
             "personalizada. La entrega a terceros requiere revisión legal.",
             styles["Normal"],
@@ -531,6 +619,10 @@ def create_pdf_report(
     quotes: dict | None = None,
     data_source: str = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico",
     price_quality_issues: tuple[PriceQualityIssue, ...] = (),
+    implementation_costs: tuple[ImplementationCostEstimate, ...] = (),
+    implementation_cost_assumptions: ImplementationCostAssumptions | None = None,
+    implementation_cost_source: str | None = None,
+    implementation_cost_source_date: date | None = None,
 ) -> bytes:
     """Create a compact, methodology-first report."""
     validate_weights(metrics.weights, len(tickers), max_weight)
@@ -637,14 +729,19 @@ def create_pdf_report(
                 "se descartan fechas sin FX, sin rellenarlas. No constituye cobertura cambiaria. "
                 "El riesgo histórico capitaliza retornos con rebalanceo diario y ventanas solapadas; "
                 "el paramétrico usa una aproximación normal aditiva. "
-                "Limitaciones: no incluye costos, impuestos, liquidez, "
-                "situación financiera del cliente ni cambios estructurales futuros.",
+                "Las métricas anteriores no descuentan costos ni impuestos, y no modelan liquidez, "
+                "situación financiera del cliente o cambios estructurales futuros.",
                 styles["Normal"],
             ),
         ]
     )
 
     story.extend(_price_quality_story(price_quality_issues, styles))
+    story.extend(_implementation_cost_story(
+        implementation_costs, implementation_cost_assumptions,
+        portfolio_value, base_currency,
+        implementation_cost_source, implementation_cost_source_date, styles,
+    ))
 
     def footer(canvas, doc):
         canvas.saveState()
