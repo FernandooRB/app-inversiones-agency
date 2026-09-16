@@ -32,6 +32,7 @@ from portfolio_core import (
     portfolio_statistics,
     random_portfolios,
 )
+from price_quality import assess_price_quality
 from price_upload import read_adjusted_price_csv
 from reporting import (
     PortfolioAlternative,
@@ -263,6 +264,7 @@ try:
             download = cached_prices(tickers, start_date, end_date)
         if download.rejected_tickers:
             raise PortfolioError("Corrige los tickers sin datos: " + ", ".join(download.rejected_tickers))
+        price_quality_issues = assess_price_quality(download.prices)
         fx = cached_fx(quotes, base_currency, start_date, end_date)
         prices = convert_prices(download.prices, quotes, base_currency, fx)
         removed = len(download.prices) - len(prices)
@@ -350,6 +352,30 @@ try:
             "Confirma con la fuente que son cierres ajustados comparables, su moneda, "
             "calendario y derechos de uso; la app no puede verificar esos extremos."
         )
+    with st.expander("Revisión heurística de precios originales", expanded=bool(price_quality_issues)):
+        st.caption(
+            "Se revisan cierres en su moneda de cotización antes del FX: cambios de al menos "
+            "30% entre sesiones y cinco sesiones consecutivas sin variación. "
+            "Revisa eventos corporativos, calendario y fuente; una alerta no prueba un error "
+            "y su ausencia no verifica los ajustes."
+        )
+        if price_quality_issues:
+            st.warning(f"Se detectaron {len(price_quality_issues)} alerta(s) para revisión humana.")
+            quality_rows = pd.DataFrame([
+                {
+                    "Activo": issue.ticker, "Tipo": issue.kind,
+                    "Desde": issue.first_date, "Hasta": issue.last_date,
+                    "Detalle": issue.detail,
+                }
+                for issue in price_quality_issues
+            ])
+            st.dataframe(quality_rows.head(100), hide_index=True, use_container_width=True)
+            st.download_button(
+                "Descargar todas las alertas CSV", quality_rows.to_csv(index=False).encode("utf-8-sig"),
+                "revision_precios.csv", "text/csv",
+            )
+        else:
+            st.info("No se detectaron alertas con estos umbrales.")
     if cetes_result is not None:
         relevant_rolls = [
             item for item in cetes_result.roll_dates if prices.index.min() <= item <= prices.index.max()
@@ -1045,6 +1071,7 @@ try:
         observations=len(returns),
         quotes=analysis_quotes,
         data_source=data_source,
+        price_quality_issues=price_quality_issues,
     )
     st.download_button(
         "Descargar reporte metodológico PDF", pdf, f"reporte_portafolio_{date.today()}.pdf", "application/pdf"
@@ -1060,6 +1087,7 @@ try:
         observations=len(returns),
         quotes=analysis_quotes,
         data_source=data_source,
+        price_quality_issues=price_quality_issues,
         simulation=simulation_report,
         stress=stress_report,
     )

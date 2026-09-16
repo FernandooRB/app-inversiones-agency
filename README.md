@@ -12,6 +12,9 @@ revisable que puede añadirse al optimizador mixto en MXN.
 La [importación manual de precios ajustados](docs/price_upload.md) acepta un CSV
 aportado por el equipo y documenta su fuente y huella, sin verificar por sí sola
 ajustes corporativos, moneda ni derechos de uso.
+La [revisión heurística de precios](docs/price_quality.md) identifica saltos de al menos
+30 % y tramos sin variación en las series originales; deja alertas en la app, un CSV
+descargable y ambos PDF para que el equipo compruebe la fuente.
 La [validación fuera de muestra](docs/backtesting.md) compara Markowitz, pesos iguales y una
 cartera actual opcional, tanto con asignación fija como con revisiones de 3, 6 o 12 meses
 y costos supuestos.
@@ -81,7 +84,8 @@ pytest
 
 ## Metodología
 
-1. Se descargan precios de cierre ajustados mediante `yfinance` con `auto_adjust=True`.
+1. Se descargan precios de cierre ajustados mediante `yfinance` con `auto_adjust=True` o se
+   importa un CSV aportado por el equipo. Se señalan saltos y cierres repetidos antes del FX.
 2. Se alinean las fechas y se requieren al menos 60 observaciones comunes.
 3. Se calculan rendimientos aritméticos diarios.
 4. La media y covarianza se anualizan usando 252 sesiones.
@@ -111,6 +115,7 @@ pytest
 app_inversiones.py   Interfaz Streamlit
 portfolio_core.py    Datos, métricas, optimización y riesgo
 price_upload.py       Importación estricta de precios ajustados CSV
+price_quality.py      Alertas heurísticas sobre precios originales
 instruments.py       Catálogo y reglas de integración por tipo de instrumento
 fixed_income.py       Valuación y preparación de series de CETES
 backtesting.py         Evaluación hipotética con fecha de corte
