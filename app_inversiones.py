@@ -16,6 +16,10 @@ from covariance_calibration import select_diagonal_shrinkage
 from currencies import convert_prices, currency_map, download_fx
 from fixed_income import merge_cetes_index, read_banxico_cetes_csv
 from fx_comparison import render_comparison
+from implementation_costs import (
+    ImplementationCostAssumptions,
+    estimate_implementation_cost,
+)
 from instruments import analysis_inputs, display_catalog, load_catalog
 from multi_cut import run_multi_cut_backtest
 from portfolio_core import (
@@ -166,6 +170,35 @@ with st.sidebar:
             "No se guarda en una base de datos."
         ),
     )
+    with st.expander("Supuestos de costo de implementación"):
+        st.caption(
+            "Escenario manual por compra o venta. Los valores iniciales son cero; usa el tarifario "
+            "vigente del contrato y no incluyas impuestos sobre ganancias."
+        )
+        implementation_commission_percent = st.number_input(
+            "Comisión sobre cada operación (%)", min_value=0.0, max_value=5.0,
+            value=0.0, step=0.01, format="%.3f",
+        )
+        implementation_vat_percent = st.number_input(
+            "IVA aplicado a la comisión (%)", min_value=0.0, max_value=100.0,
+            value=0.0, step=1.0,
+        )
+        implementation_market_bps = st.number_input(
+            "Costo de mercado sobre nominal (pb)", min_value=0.0, max_value=500.0,
+            value=0.0, step=1.0,
+            help="Supuesto conjunto de medio spread, deslizamiento e impacto por cada compra o venta.",
+        )
+        implementation_minimum = st.number_input(
+            f"Comisión mínima por orden ({base_currency})", min_value=0.0,
+            max_value=100_000.0, value=0.0, step=1.0,
+        )
+        implementation_source_input = st.text_input(
+            "Referencia del tarifario",
+            help="Institución, producto, contrato o nombre del documento; máximo 120 caracteres.",
+        )
+        implementation_source_date = st.date_input(
+            "Fecha de consulta del tarifario", value=date.today(), max_value=date.today(),
+        )
     price_upload = st.file_uploader(
         "Precios ajustados CSV aportados por el equipo (opcional)",
         type=["csv"],
@@ -219,6 +252,12 @@ settings = (
     quote_input,
     base_currency,
     current_weights_input,
+    implementation_commission_percent,
+    implementation_vat_percent,
+    implementation_market_bps,
+    implementation_minimum,
+    implementation_source_input,
+    implementation_source_date,
     price_fingerprint,
     price_source_input,
     cetes_fingerprint,
@@ -328,6 +367,7 @@ try:
             PortfolioMetrics(equal_weights, equal_return, equal_volatility, equal_sharpe),
             calculate_risk_metrics(returns, equal_weights, confidence, horizon),
         ))
+        current_weights = None
         if current_weights_input.strip():
             current_weights = parse_current_weights(current_weights_input, len(analysis_tickers))
             current_return, current_volatility, current_sharpe = portfolio_statistics(
@@ -338,6 +378,36 @@ try:
                 PortfolioMetrics(current_weights, current_return, current_volatility, current_sharpe),
                 calculate_risk_metrics(returns, current_weights, confidence, horizon),
             ))
+        implementation_assumptions = ImplementationCostAssumptions(
+            commission_bps=implementation_commission_percent * 100,
+            market_cost_bps=implementation_market_bps,
+            vat_rate=implementation_vat_percent / 100,
+            minimum_commission=implementation_minimum,
+        )
+        has_implementation_cost = any((
+            implementation_assumptions.commission_bps,
+            implementation_assumptions.market_cost_bps,
+            implementation_assumptions.vat_rate,
+            implementation_assumptions.minimum_commission,
+        ))
+        implementation_source = implementation_source_input.strip()
+        if has_implementation_cost and (
+            not implementation_source or len(implementation_source) > 120
+            or any(ord(char) < 32 for char in implementation_source)
+        ):
+            raise PortfolioError(
+                "Declara la referencia del tarifario de costos en 1 a 120 caracteres."
+            )
+        if not has_implementation_cost:
+            implementation_source = "Sin tarifario; supuestos de costo en cero"
+        implementation_estimates = tuple(
+            estimate_implementation_cost(
+                analysis_tickers, alternative.metrics.weights, portfolio_value,
+                implementation_assumptions, alternative_name=alternative.name,
+                current_weights=current_weights,
+            )
+            for alternative in alternatives
+        )
 
     if download.rejected_tickers:
         st.warning("Tickers excluidos por falta de datos: " + ", ".join(download.rejected_tickers))
@@ -497,6 +567,59 @@ try:
         use_container_width=True,
         hide_index=True,
     )
+
+    with st.expander("Costo estimado para implementar cada asignación"):
+        starting_point = "cartera actual" if current_weights is not None else "efectivo"
+        st.caption(
+            f"Punto de partida: {starting_point}. Se cobra cada compra y venta por separado. "
+            "El costo se suma al nominal objetivo; no se resuelven órdenes autofinanciadas, lotes, "
+            "retenciones ni impuestos sobre ganancias. Verifica el tarifario vigente del contrato."
+        )
+        st.caption(
+            f"Referencia: {implementation_source} · Consulta: "
+            f"{implementation_source_date.isoformat()}."
+        )
+        cost_summary = pd.DataFrame([
+            {
+                "Alternativa": item.alternative_name,
+                "Compras": item.buy_notional,
+                "Ventas": item.sell_notional,
+                "Nominal negociado": item.traded_notional,
+                "Comisión": item.commission,
+                "IVA sobre comisión": item.vat,
+                "Costo de mercado": item.market_cost,
+                "Costo total": item.total_cost,
+                "Costo / capital": item.total_cost / portfolio_value if portfolio_value else np.nan,
+            }
+            for item in implementation_estimates
+        ])
+        st.dataframe(
+            cost_summary.style.format({
+                "Compras": "{:,.2f}", "Ventas": "{:,.2f}",
+                "Nominal negociado": "{:,.2f}", "Comisión": "{:,.2f}",
+                "IVA sobre comisión": "{:,.2f}", "Costo de mercado": "{:,.2f}",
+                "Costo total": "{:,.2f}", "Costo / capital": "{:.3%}",
+            }), use_container_width=True, hide_index=True,
+        )
+        detail_parts = []
+        for item in implementation_estimates:
+            part = item.detail.copy()
+            part.insert(0, "Alternativa", item.alternative_name)
+            detail_parts.append(part)
+        cost_detail = pd.concat(detail_parts, ignore_index=True) if detail_parts else pd.DataFrame()
+        if not cost_detail.empty:
+            selected_cost_alternative = st.selectbox(
+                "Ver órdenes estimadas", [item.alternative_name for item in implementation_estimates]
+            )
+            st.dataframe(
+                cost_detail[cost_detail["Alternativa"] == selected_cost_alternative],
+                hide_index=True, use_container_width=True,
+            )
+            st.download_button(
+                "Descargar detalle de costos CSV",
+                cost_detail.to_csv(index=False).encode("utf-8-sig"),
+                "costos_implementacion.csv", "text/csv",
+            )
 
     with st.expander("Sensibilidad de pesos a la longitud de la muestra"):
         st.caption(
@@ -1072,6 +1195,10 @@ try:
         quotes=analysis_quotes,
         data_source=data_source,
         price_quality_issues=price_quality_issues,
+        implementation_costs=(implementation_estimates[0],),
+        implementation_cost_assumptions=implementation_assumptions,
+        implementation_cost_source=implementation_source,
+        implementation_cost_source_date=implementation_source_date,
     )
     st.download_button(
         "Descargar reporte metodológico PDF", pdf, f"reporte_portafolio_{date.today()}.pdf", "application/pdf"
@@ -1088,6 +1215,10 @@ try:
         quotes=analysis_quotes,
         data_source=data_source,
         price_quality_issues=price_quality_issues,
+        implementation_costs=implementation_estimates,
+        implementation_cost_assumptions=implementation_assumptions,
+        implementation_cost_source=implementation_source,
+        implementation_cost_source_date=implementation_source_date,
         simulation=simulation_report,
         stress=stress_report,
     )
@@ -1101,8 +1232,8 @@ try:
     )
     st.warning(
         "Los resultados dependen de datos históricos y supuestos estadísticos. Los costos "
-        "configurables de simulación y rebalanceo son hipotéticos; la optimización y el PDF "
-        "no descuentan impuestos, tarifas reales, spreads, liquidez ni situación personal. "
+        "configurables de simulación, rebalanceo e implementación son hipotéticos; las métricas "
+        "optimizadas no descuentan esos costos, impuestos, liquidez ni situación personal. "
         "La conversión cambiaria no constituye una cobertura."
     )
 except PortfolioError as exc:

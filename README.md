@@ -18,6 +18,9 @@ descargable y ambos PDF para que el equipo compruebe la fuente.
 La [validación fuera de muestra](docs/backtesting.md) compara Markowitz, pesos iguales y una
 cartera actual opcional, tanto con asignación fija como con revisiones de 3, 6 o 12 meses
 y costos supuestos.
+El [estimador de costo de implementación](docs/implementation_costs.md) separa compras y ventas,
+comisión, IVA configurable y costo de mercado para cada alternativa, partiendo de efectivo o de la
+cartera actual.
 La [sensibilidad de asignaciones](docs/allocation_sensitivity.md) reestima los pesos con
 ventanas históricas de 60, 126 y 252 retornos para mostrar cuánto dependen de la muestra.
 Las pruebas fuera de muestra permiten comparar la covarianza muestral con una
@@ -103,8 +106,9 @@ pytest
 
 - Yahoo Finance no debe asumirse como fuente contractual para un servicio de inversión en producción.
 - Las monedas se declaran explícitamente; no hay detección automática de unidades.
-- Las simulaciones y pruebas de rebalanceo aceptan costos supuestos en puntos base; la
-  optimización principal y el PDF no descuentan tarifarios reales, impuestos, spreads ni liquidez.
+- Las simulaciones, pruebas de rebalanceo y estimación de implementación usan costos supuestos;
+  se muestran por separado y no se descuentan de las métricas optimizadas. No modelan impuestos,
+  profundidad ni una ejecución real.
 - La media histórica no es un pronóstico.
 - No existe gestión de clientes ni persistencia de información personal.
 - Antes de un uso comercial deben revisarse licenciamiento de datos, privacidad y cumplimiento aplicable.
@@ -116,6 +120,7 @@ app_inversiones.py   Interfaz Streamlit
 portfolio_core.py    Datos, métricas, optimización y riesgo
 price_upload.py       Importación estricta de precios ajustados CSV
 price_quality.py      Alertas heurísticas sobre precios originales
+implementation_costs.py Estimación explícita de compras, ventas y costos
 instruments.py       Catálogo y reglas de integración por tipo de instrumento
 fixed_income.py       Valuación y preparación de series de CETES
 backtesting.py         Evaluación hipotética con fecha de corte

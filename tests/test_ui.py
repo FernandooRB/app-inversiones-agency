@@ -28,6 +28,20 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     app.button[0].click().run()
     assert not app.exception
     assert not app.error
+    commission = next(
+        item for item in app.number_input if item.label == "Comisión sobre cada operación (%)"
+    )
+    commission.set_value(0.25).run()
+    app.button[0].click().run()
+    assert any("referencia del tarifario" in item.value for item in app.error)
+    cost_source = next(
+        item for item in app.text_input if item.label == "Referencia del tarifario"
+    )
+    cost_source.set_value("Tarifario ficticio de prueba").run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error
+    assert any("Tarifario ficticio de prueba" in item.value for item in app.caption)
     assert len(app.metric) == 4
     next(
         item for item in app.checkbox if item.label == "Calcular trayectorias hipotéticas"
