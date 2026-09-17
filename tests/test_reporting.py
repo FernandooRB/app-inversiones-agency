@@ -6,8 +6,9 @@ import pandas as pd
 from pypdf import PdfReader
 
 from benchmarking import analyze_benchmark
+from black_litterman import AbsoluteView, black_litterman_posterior
 from implementation_costs import ImplementationCostAssumptions, estimate_implementation_cost
-from portfolio_core import PortfolioMetrics, RiskMetrics
+from portfolio_core import PortfolioMetrics, RiskMetrics, optimize_portfolio
 from price_quality import PriceQualityIssue
 from reporting import (
     PortfolioAlternative,
@@ -137,6 +138,39 @@ def test_both_pdfs_include_reconciled_risk_attribution():
         assert "Contribuyentes" in text
         assert "efectivos" in text
         assert "contribución de Euler" in text
+
+
+def test_comparison_pdf_documents_black_litterman_assumptions():
+    covariance = pd.DataFrame(
+        [[0.04, 0.006], [0.006, 0.01]], index=["AAA", "BBB"], columns=["AAA", "BBB"]
+    )
+    result = black_litterman_posterior(
+        covariance, [0.6, 0.4], 0.05, risk_aversion=3.0, tau=0.08,
+        views=(AbsoluteView("AAA", 0.16, 0.70),),
+    )
+    black_litterman_metrics = optimize_portfolio(
+        result.posterior_returns, covariance, 0.05
+    )
+    historical_metrics = PortfolioMetrics(np.array([0.5, 0.5]), 0.09, 0.12, 0.33)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    report = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (
+            PortfolioAlternative("Máximo Sharpe", historical_metrics, risk),
+            PortfolioAlternative("Pesos iguales", historical_metrics, risk),
+            PortfolioAlternative("Black-Litterman", black_litterman_metrics, risk),
+        ),
+        100_000, base_currency="MXN", risk_free_rate=0.05,
+        observations=252, quotes={"AAA": "MXN", "BBB": "MXN"},
+        black_litterman=result, black_litterman_source="pesos de mercado declarados",
+    )
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+    assert "Escenario Black-Litterman" in text
+    assert "pesos de mercado declarados" in text
+    assert "Aversión al riesgo: 3.00" in text
+    assert "tau: 0.080" in text
+    assert "16.00%" in text
+    assert "70.0%" in text
 
 
 def test_both_pdfs_report_explicit_implementation_cost_assumptions():

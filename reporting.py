@@ -23,6 +23,7 @@ from reportlab.platypus import (
 )
 
 from benchmarking import BenchmarkAnalysis
+from black_litterman import BlackLittermanResult
 from implementation_costs import (
     ImplementationCostAssumptions,
     ImplementationCostEstimate,
@@ -146,6 +147,93 @@ def _risk_attribution_story(
             "la volatilidad individual ponderada con la volatilidad de la cartera; posiciones y "
             "contribuyentes efectivos son inversos de índices Herfindahl. Son diagnósticos "
             "históricos basados en la covarianza estimada.",
+            styles["Normal"],
+        ),
+    ]
+
+
+def _black_litterman_story(
+    result: BlackLittermanResult | None,
+    source: str | None,
+    styles,
+) -> list:
+    if result is None:
+        return []
+    if (
+        not source or len(source) > 120 or any(ord(char) < 32 for char in source)
+        or not np.isfinite([result.risk_aversion, result.tau]).all()
+        or not 0 < result.risk_aversion <= 100 or not 0 < result.tau <= 1
+        or result.detail.empty
+        or list(result.detail.columns) != [
+            "Activo", "Peso de equilibrio", "Retorno de equilibrio", "Opinión",
+            "Confianza", "Retorno posterior",
+        ]
+        or result.detail["Activo"].astype(str).str.strip().eq("").any()
+        or result.detail["Activo"].duplicated().any()
+        or not np.isfinite(result.detail[[
+            "Peso de equilibrio", "Retorno de equilibrio", "Retorno posterior",
+        ]].to_numpy(dtype=float)).all()
+        or not np.isclose(result.detail["Peso de equilibrio"].sum(), 1.0)
+        or not np.isfinite(result.detail["Opinión"].dropna()).all()
+        or not np.isfinite(result.detail["Confianza"].dropna()).all()
+        or not result.detail["Opinión"].dropna().between(-1, 5).all()
+        or not result.detail["Confianza"].dropna().between(0.01, 0.99).all()
+        or not result.prior_returns.index.equals(result.posterior_returns.index)
+        or tuple(result.prior_returns.index.astype(str))
+        != tuple(result.detail["Activo"].astype(str))
+        or not np.allclose(
+            result.prior_returns.to_numpy(), result.detail["Retorno de equilibrio"]
+        )
+        or not np.allclose(
+            result.posterior_returns.to_numpy(), result.detail["Retorno posterior"]
+        )
+    ):
+        raise ValueError("El escenario Black-Litterman contiene valores inválidos.")
+    rows = [[
+        "Activo", "Peso equilibrio", "Retorno equilibrio", "Opinión", "Confianza", "Posterior",
+    ]]
+    for row in result.detail.itertuples(index=False):
+        rows.append([
+            Paragraph(escape(str(row[0])), styles["Normal"]),
+            f"{row[1]:.2%}", f"{row[2]:.2%}",
+            "N/D" if pd.isna(row[3]) else f"{row[3]:.2%}",
+            "N/D" if pd.isna(row[4]) else f"{row[4]:.1%}",
+            f"{row[5]:.2%}",
+        ])
+    table = Table(
+        rows, colWidths=[36 * mm, 29 * mm, 34 * mm, 27 * mm, 27 * mm, 32 * mm],
+        repeatRows=1,
+    )
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEBF1")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    views_note = (
+        f"Se incorporaron {len(result.views)} opinión(es) absoluta(s)."
+        if result.views
+        else "No se declararon opiniones; el posterior coincide con el equilibrio implícito."
+    )
+    return [
+        Spacer(1, 3 * mm),
+        Paragraph("Escenario Black-Litterman", styles["Heading2"]),
+        Paragraph(
+            f"Pesos de referencia: {escape(source)}. Aversión al riesgo: "
+            f"{result.risk_aversion:.2f}; tau: {result.tau:.3f}. {views_note}",
+            styles["Normal"],
+        ),
+        Spacer(1, 1.5 * mm),
+        table,
+        Paragraph(
+            "Los retornos de equilibrio son tasa libre de riesgo más aversión por covarianza y "
+            "pesos de referencia. La confianza controla la incertidumbre de cada opinión. La "
+            "alternativa optimiza los retornos posteriores con la misma covarianza histórica "
+            "usada por las demás carteras. Los supuestos no son pronósticos verificados.",
             styles["Normal"],
         ),
     ]
@@ -486,10 +574,12 @@ def create_comparison_pdf_report(
     benchmark_analyses: tuple[BenchmarkAnalysis, ...] = (),
     benchmark_source: str | None = None,
     risk_attributions: tuple[RiskAttribution, ...] = (),
+    black_litterman: BlackLittermanResult | None = None,
+    black_litterman_source: str | None = None,
 ) -> bytes:
     """Compare historical portfolio alternatives on one sample and set of assumptions."""
-    if not 2 <= len(alternatives) <= 4 or len({item.name for item in alternatives}) != len(alternatives):
-        raise ValueError("Se requieren de dos a cuatro alternativas con nombres únicos.")
+    if not 2 <= len(alternatives) <= 5 or len({item.name for item in alternatives}) != len(alternatives):
+        raise ValueError("Se requieren de dos a cinco alternativas con nombres únicos.")
     if not tickers or observations < 1 or not np.isfinite(portfolio_value) or portfolio_value < 0:
         raise ValueError("Parámetros inválidos para el comparativo.")
     first_risk = alternatives[0].risk
@@ -500,6 +590,8 @@ def create_comparison_pdf_report(
         ):
             raise ValueError("Todas las alternativas deben usar el mismo horizonte y confianza.")
     alternative_names = {item.name for item in alternatives}
+    if (black_litterman is None) != ("Black-Litterman" not in alternative_names):
+        raise ValueError("El escenario Black-Litterman no coincide con las alternativas.")
     if any(item.alternative_name not in alternative_names for item in implementation_costs):
         raise ValueError("El costo de implementación no pertenece al comparativo.")
     if risk_attributions and {
@@ -555,7 +647,8 @@ def create_comparison_pdf_report(
         Paragraph("Resultados comparables", styles["Heading2"]),
         Paragraph(
             "Todas las alternativas usan los mismos activos, fechas, moneda y parámetros de riesgo. "
-            "Las medias son históricas anualizadas; no son rendimientos previstos.",
+            "Los retornos son medias históricas anualizadas, salvo Black-Litterman cuando aparece, "
+            "que usa el posterior de sus supuestos declarados. Ninguno es una promesa de rendimiento.",
             styles["Normal"],
         ),
         Spacer(1, 2 * mm),
@@ -564,9 +657,14 @@ def create_comparison_pdf_report(
     def comparison_row(label, getter, formatter):
         return [label] + [formatter(getter(item)) for item in alternatives]
 
-    rows = [["Métrica"] + [Paragraph(escape(item.name), styles["Normal"]) for item in alternatives]]
+    rows = [["Métrica"] + [
+        Paragraph(f'<font size="8">{escape(item.name)}</font>', styles["Normal"])
+        for item in alternatives
+    ]]
     rows += [
-        comparison_row("Media anualizada", lambda item: item.metrics.annual_return, lambda x: f"{x:.2%}"),
+        comparison_row(
+            "Retorno anualizado", lambda item: item.metrics.annual_return, lambda x: f"{x:.2%}"
+        ),
         comparison_row(
             "Volatilidad anualizada", lambda item: item.metrics.annual_volatility, lambda x: f"{x:.2%}"
         ),
@@ -601,7 +699,10 @@ def create_comparison_pdf_report(
         Spacer(1, 5 * mm),
         Paragraph("Asignación por instrumento", styles["Heading2"]),
     ])
-    allocation_rows = [["Activo"] + [Paragraph(escape(item.name), styles["Normal"]) for item in alternatives]]
+    allocation_rows = [["Activo"] + [
+        Paragraph(f'<font size="8">{escape(item.name)}</font>', styles["Normal"])
+        for item in alternatives
+    ]]
     for index, ticker in enumerate(tickers):
         label = f"{escape(ticker)} ({escape(quotes.get(ticker, base_currency))})"
         allocation_rows.append([Paragraph(label, styles["Normal"])] + [
@@ -623,6 +724,7 @@ def create_comparison_pdf_report(
         Spacer(1, 2 * mm),
     ])
     story.extend(_risk_attribution_story(risk_attributions, styles))
+    story.extend(_black_litterman_story(black_litterman, black_litterman_source, styles))
     story.extend(_benchmark_story(benchmark_analyses, benchmark_source, base_currency, styles))
     story.extend(_price_quality_story(price_quality_issues, styles, compact=True))
     story.extend(_implementation_cost_story(
@@ -636,13 +738,15 @@ def create_comparison_pdf_report(
             f"Fuente: {escape(data_source)}. "
             "Retornos diarios anualizados con 252 sesiones. Se optimizan pesos largos con el "
             "límite elegido. La cartera actual es una referencia ingresada y el riesgo histórico "
-            "supone rebalanceo diario.",
+            "supone rebalanceo diario. Black-Litterman, cuando aparece, sustituye la media histórica "
+            "por su retorno posterior y conserva la covarianza histórica.",
             styles["Normal"],
         ),
         Paragraph(
             "Las métricas anteriores no descuentan comisiones, diferenciales ni impuestos, y no "
-            "modelan liquidez. Los pesos usan la misma "
-            "muestra que los resultados: no es una prueba fuera de muestra ni una recomendación "
+            "modelan liquidez. Los pesos históricos usan la misma "
+            "muestra que los resultados; Black-Litterman añade supuestos declarados. No es una "
+            "prueba fuera de muestra ni una recomendación "
             "personalizada. La entrega a terceros requiere revisión legal.",
             styles["Normal"],
         ),

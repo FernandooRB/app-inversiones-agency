@@ -65,6 +65,22 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     assert not app.exception
     assert not app.error
     assert any("Alpha usa CAPM" in item.value for item in app.caption)
+    next(
+        item for item in app.checkbox if item.label == "Añadir alternativa Black-Litterman"
+    ).set_value(True).run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error
+    assert any("Equilibrio: referencia simple factible" in item.value for item in app.caption)
+    views = next(
+        item for item in app.text_area
+        if item.label == "Opiniones: activo, rendimiento anual %, confianza %"
+    )
+    views.set_value("AAPL,12,60\nMSFT,9,50").run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error
+    assert any("misma covarianza histórica" in item.value for item in app.caption)
     commission = next(
         item for item in app.number_input if item.label == "Comisión sobre cada operación (%)"
     )

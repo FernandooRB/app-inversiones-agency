@@ -14,6 +14,7 @@ from access import require_access
 from allocation_policy import parse_asset_classes, parse_class_limits, policy_table
 from backtesting import run_holdout_backtest
 from benchmarking import analyze_benchmark
+from black_litterman import black_litterman_posterior, parse_absolute_views
 from covariance_calibration import select_diagonal_shrinkage
 from currencies import convert_prices, currency_map, download_fx
 from fixed_income import merge_cetes_index, read_banxico_cetes_csv
@@ -220,6 +221,34 @@ with st.sidebar:
             "No se guarda en una base de datos."
         ),
     )
+    with st.expander("Escenario Black-Litterman"):
+        use_black_litterman = st.checkbox("Añadir alternativa Black-Litterman")
+        black_litterman_equilibrium_input = st.text_input(
+            "Pesos de equilibrio en % (opcional)",
+            help=(
+                "Un peso por activo en el mismo orden. Si se omite, se usa la cartera actual "
+                "cuando exista; en otro caso, la referencia simple factible."
+            ),
+        )
+        black_litterman_risk_aversion = st.number_input(
+            "Aversión al riesgo del equilibrio", min_value=0.1, max_value=100.0,
+            value=2.5, step=0.1,
+        )
+        black_litterman_tau = st.number_input(
+            "Tau (incertidumbre del equilibrio)", min_value=0.001, max_value=1.0,
+            value=0.05, step=0.01, format="%.3f",
+        )
+        black_litterman_views_input = st.text_area(
+            "Opiniones: activo, rendimiento anual %, confianza %",
+            help=(
+                "Una opinión absoluta por línea. Ejemplo: AAPL,12,60. "
+                "La confianza debe estar entre 1% y 99%."
+            ),
+        )
+        st.caption(
+            "Los pesos, parámetros y opiniones son supuestos declarados para investigación. "
+            "No se infieren del perfil del cliente ni constituyen pronósticos verificados."
+        )
     with st.expander("Supuestos de costo de implementación"):
         st.caption(
             "Escenario manual por compra o venta. Los valores iniciales son cero; usa el tarifario "
@@ -308,6 +337,11 @@ settings = (
     quote_input,
     base_currency,
     current_weights_input,
+    use_black_litterman,
+    black_litterman_equilibrium_input,
+    black_litterman_risk_aversion,
+    black_litterman_tau,
+    black_litterman_views_input,
     implementation_commission_percent,
     implementation_vat_percent,
     implementation_market_bps,
@@ -453,6 +487,45 @@ try:
                 "Cartera actual",
                 PortfolioMetrics(current_weights, current_return, current_volatility, current_sharpe),
                 calculate_risk_metrics(returns, current_weights, confidence, horizon),
+            ))
+        black_litterman_result = None
+        black_litterman_source = None
+        if use_black_litterman:
+            if black_litterman_equilibrium_input.strip():
+                equilibrium_weights = parse_current_weights(
+                    black_litterman_equilibrium_input, len(analysis_tickers)
+                )
+                black_litterman_source = "pesos de equilibrio ingresados por el usuario"
+            elif current_weights is not None:
+                equilibrium_weights = current_weights
+                black_litterman_source = "cartera actual ingresada"
+            else:
+                equilibrium_weights = equal_weights
+                black_litterman_source = "referencia simple factible"
+            black_litterman_result = black_litterman_posterior(
+                covariance,
+                equilibrium_weights,
+                risk_free_rate,
+                risk_aversion=black_litterman_risk_aversion,
+                tau=black_litterman_tau,
+                views=parse_absolute_views(
+                    black_litterman_views_input, analysis_tickers
+                ),
+            )
+            black_litterman_metrics = optimize_portfolio(
+                black_litterman_result.posterior_returns,
+                covariance,
+                risk_free_rate,
+                "max_sharpe",
+                max_weight,
+                allocation_groups,
+            )
+            alternatives.append(PortfolioAlternative(
+                "Black-Litterman",
+                black_litterman_metrics,
+                calculate_risk_metrics(
+                    returns, black_litterman_metrics.weights, confidence, horizon
+                ),
             ))
         risk_attributions = tuple(
             attribute_volatility(
@@ -810,6 +883,32 @@ try:
             "atribucion_riesgo.csv",
             "text/csv",
         )
+
+    if black_litterman_result is not None:
+        with st.expander("Supuestos y resultados Black-Litterman", expanded=True):
+            st.caption(
+                f"Equilibrio: {black_litterman_source} · Aversión al riesgo: "
+                f"{black_litterman_result.risk_aversion:.2f} · "
+                f"Tau: {black_litterman_result.tau:.3f}."
+            )
+            black_litterman_view = black_litterman_result.detail.copy()
+            black_litterman_view.insert(
+                2, "Peso Black-Litterman", black_litterman_metrics.weights
+            )
+            for column in (
+                "Peso de equilibrio", "Peso Black-Litterman", "Retorno de equilibrio",
+                "Opinión", "Confianza", "Retorno posterior",
+            ):
+                black_litterman_view[column] = black_litterman_view[column].map(
+                    lambda value: "N/D" if pd.isna(value) else f"{value:.2%}"
+                )
+            st.dataframe(black_litterman_view, hide_index=True, use_container_width=True)
+            st.caption(
+                "La alternativa maximiza Sharpe con los retornos posteriores y la misma "
+                "covarianza histórica de las demás carteras. Una confianza mayor acerca el "
+                "retorno posterior a la opinión declarada. Su retorno mostrado es una expectativa "
+                "del modelo, no una media histórica ni evidencia de que la opinión sea correcta."
+            )
 
     with st.expander("Costo estimado para implementar cada asignación"):
         starting_point = "cartera actual" if current_weights is not None else "efectivo"
@@ -1540,6 +1639,8 @@ try:
         benchmark_analyses=benchmark_analyses,
         benchmark_source=benchmark_source,
         risk_attributions=risk_attributions,
+        black_litterman=black_litterman_result,
+        black_litterman_source=black_litterman_source,
     )
     st.download_button(
         (

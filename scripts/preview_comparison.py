@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from benchmarking import analyze_benchmark
+from black_litterman import AbsoluteView, black_litterman_posterior
 from implementation_costs import ImplementationCostAssumptions, estimate_implementation_cost
 from portfolio_core import PortfolioMetrics, RiskMetrics
 from price_quality import PriceQualityIssue
@@ -58,6 +59,32 @@ def main() -> None:
         )
         for alternative in alternatives
     )
+    black_litterman = black_litterman_posterior(
+        covariance,
+        alternatives[-1].metrics.weights,
+        0.06,
+        risk_aversion=2.5,
+        tau=0.05,
+        views=(
+            AbsoluteView("ETF_SIC", 0.13, 0.60),
+            AbsoluteView("ACCION_MX", 0.10, 0.55),
+        ),
+    )
+    black_litterman_weights = np.array([0.30, 0.35, 0.25, 0.10])
+    black_litterman_return = float(black_litterman_weights @ black_litterman.posterior_returns)
+    black_litterman_volatility = float(np.sqrt(
+        black_litterman_weights @ covariance @ black_litterman_weights
+    ))
+    black_litterman_metrics = PortfolioMetrics(
+        weights=black_litterman_weights,
+        annual_return=black_litterman_return,
+        annual_volatility=black_litterman_volatility,
+        sharpe_ratio=(black_litterman_return - 0.06) / black_litterman_volatility,
+    )
+    alternatives = (*alternatives, PortfolioAlternative(
+        "Black-Litterman", black_litterman_metrics,
+        RiskMetrics(0.95, 5, 0.0, 0.031, 0.043),
+    ))
     result = simulate_portfolio_paths(
         fictional_returns, alternatives[0].metrics.weights,
         initial_value=1_000_000, months=36, paths=500,
@@ -86,7 +113,11 @@ def main() -> None:
     cost_assumptions = ImplementationCostAssumptions(
         commission_bps=25, market_cost_bps=8, vat_rate=0.16, minimum_commission=20,
     )
-    current_weights = alternatives[-1].metrics.weights
+    current_weights = next(
+        alternative.metrics.weights
+        for alternative in alternatives
+        if alternative.name == "Cartera actual"
+    )
     implementation_costs = tuple(
         estimate_implementation_cost(
             labels, alternative.metrics.weights, 1_000_000, cost_assumptions,
@@ -149,6 +180,8 @@ def main() -> None:
         benchmark_analyses=benchmark_analyses,
         benchmark_source="serie ficticia para revisión visual; no es un índice de mercado",
         risk_attributions=risk_attributions,
+        black_litterman=black_litterman,
+        black_litterman_source="cartera actual ficticia",
     ))
     print(output.resolve())
 
