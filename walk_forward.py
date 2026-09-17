@@ -7,7 +7,12 @@ import pandas as pd
 
 from backtesting import run_holdout_backtest
 from covariance_calibration import select_diagonal_shrinkage
-from portfolio_core import annualized_moments, optimize_portfolio
+from portfolio_core import (
+    AllocationGroup,
+    annualized_moments,
+    feasible_reference_weights,
+    optimize_portfolio,
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +36,7 @@ def run_walk_forward_backtest(
     current_weights: np.ndarray | None = None,
     trading_cost_bps: float = 0.0,
     covariance_shrinkage: float | str = 0.0,
+    allocation_groups: tuple[AllocationGroup, ...] = (),
 ) -> WalkForwardBacktest:
     """Re-estimate using prior observations only; trade before each review day's return.
 
@@ -48,6 +54,7 @@ def run_walk_forward_backtest(
         risk_free_rate=risk_free_rate, max_weight=max_weight,
         current_weights=current_weights, trading_cost_bps=trading_cost_bps,
         covariance_shrinkage=covariance_shrinkage,
+        allocation_groups=allocation_groups,
     )
     training_count = holdout.training_observations
     evaluation = returns.iloc[training_count:]
@@ -55,7 +62,8 @@ def run_walk_forward_backtest(
         holdout.allocations["Cartera actual"].to_numpy()
         if current_weights is not None else None
     )
-    names = ["Máximo Sharpe", "Mínima volatilidad", "Pesos iguales"]
+    reference_name = "Referencia simple factible" if allocation_groups else "Pesos iguales"
+    names = ["Máximo Sharpe", "Mínima volatilidad", reference_name]
     if baseline is not None:
         names.append("Cartera actual sin rebalanceo")
     holdings = {name: np.zeros(returns.shape[1]) for name in names}
@@ -80,12 +88,16 @@ def run_walk_forward_backtest(
             )
             targets = {
                 "Máximo Sharpe": optimize_portfolio(
-                    mean, covariance, risk_free_rate, "max_sharpe", max_weight
+                    mean, covariance, risk_free_rate, "max_sharpe", max_weight,
+                    allocation_groups,
                 ).weights,
                 "Mínima volatilidad": optimize_portfolio(
-                    mean, covariance, risk_free_rate, "min_volatility", max_weight
+                    mean, covariance, risk_free_rate, "min_volatility", max_weight,
+                    allocation_groups,
                 ).weights,
-                "Pesos iguales": np.full(returns.shape[1], 1 / returns.shape[1]),
+                reference_name: feasible_reference_weights(
+                    returns.shape[1], max_weight, allocation_groups
+                ),
             }
             if initial and baseline is not None:
                 targets["Cartera actual sin rebalanceo"] = baseline

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from portfolio_core import PortfolioError, annualized_moments, optimize_portfolio
+from portfolio_core import AllocationGroup, PortfolioError, annualized_moments, optimize_portfolio
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,7 @@ def analyze_allocation_sensitivity(
     risk_free_rate: float = 0.0,
     max_weight: float = 1.0,
     windows: tuple[int, ...] = (60, 126, 252),
+    allocation_groups: tuple[AllocationGroup, ...] = (),
 ) -> AllocationSensitivity:
     """Compare trailing estimates with the full sample at the same ending date.
 
@@ -51,10 +52,12 @@ def analyze_allocation_sensitivity(
         mean, covariance = annualized_moments(sample)
         estimates[name] = {
             "Máximo Sharpe": optimize_portfolio(
-                mean, covariance, risk_free_rate, "max_sharpe", max_weight
+                mean, covariance, risk_free_rate, "max_sharpe", max_weight,
+                allocation_groups,
             ).weights,
             "Mínima volatilidad": optimize_portfolio(
-                mean, covariance, risk_free_rate, "min_volatility", max_weight
+                mean, covariance, risk_free_rate, "min_volatility", max_weight,
+                allocation_groups,
             ).weights,
         }
 

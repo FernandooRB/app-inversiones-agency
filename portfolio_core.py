@@ -10,7 +10,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from scipy.optimize import minimize
+from scipy.optimize import linprog, minimize
 from scipy.stats import norm
 
 TRADING_DAYS = 252
@@ -46,6 +46,16 @@ class PriceDownload:
     requested_tickers: tuple[str, ...]
     valid_tickers: tuple[str, ...]
     rejected_tickers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AllocationGroup:
+    """Minimum and maximum total weight for a partition of the assets."""
+
+    name: str
+    asset_indices: tuple[int, ...]
+    minimum: float = 0.0
+    maximum: float = 1.0
 
 
 def normalize_tickers(raw_tickers: str | Iterable[str]) -> list[str]:
@@ -146,7 +156,7 @@ def annualized_moments(
     return mean_returns, covariance
 
 
-def validate_weights(weights, asset_count, max_weight=1.0):
+def validate_weights(weights, asset_count, max_weight=1.0, allocation_groups=()):
     weights = np.asarray(weights, dtype=float)
     if (
         weights.shape != (asset_count,)
@@ -156,6 +166,13 @@ def validate_weights(weights, asset_count, max_weight=1.0):
         or (weights > max_weight + 1e-7).any()
     ):
         raise PortfolioError("Pesos inválidos: deben ser finitos, no negativos y sumar 100%.")
+    groups = _validate_allocation_groups(asset_count, max_weight, allocation_groups)
+    for group in groups:
+        total = float(weights[list(group.asset_indices)].sum())
+        if total < group.minimum - 1e-7 or total > group.maximum + 1e-7:
+            raise PortfolioError(
+                f"La clase {group.name} queda fuera de su intervalo permitido."
+            )
     return weights
 
 
@@ -215,14 +232,99 @@ def _validate_weight_limit(asset_count: int, max_weight: float) -> None:
         )
 
 
-def optimize_portfolio(mean_returns, covariance, risk_free_rate, objective="max_sharpe", max_weight=1.0):
+def _validate_allocation_groups(asset_count, max_weight, allocation_groups=()):
+    """Validate a complete, non-overlapping partition and its feasibility."""
+    groups = tuple(allocation_groups or ())
+    if not groups:
+        return groups
+    _validate_weight_limit(asset_count, max_weight)
+    names, assigned = set(), []
+    for group in groups:
+        if not isinstance(group, AllocationGroup) or not group.name.strip():
+            raise PortfolioError("Cada restricción de clase requiere un nombre válido.")
+        if group.name in names:
+            raise PortfolioError(f"La clase {group.name} está repetida.")
+        names.add(group.name)
+        indices = tuple(group.asset_indices)
+        if not indices or len(set(indices)) != len(indices):
+            raise PortfolioError(f"La clase {group.name} requiere activos únicos.")
+        if any(not isinstance(index, int) or index < 0 or index >= asset_count for index in indices):
+            raise PortfolioError(f"La clase {group.name} contiene un activo inexistente.")
+        if (
+            not np.isfinite(group.minimum) or not np.isfinite(group.maximum)
+            or not 0 <= group.minimum <= group.maximum <= 1
+        ):
+            raise PortfolioError(
+                f"Los límites de {group.name} deben cumplir 0% ≤ mínimo ≤ máximo ≤ 100%."
+            )
+        if group.minimum > len(indices) * max_weight + 1e-10:
+            raise PortfolioError(
+                f"El mínimo de {group.name} no cabe con el límite máximo por activo."
+            )
+        assigned.extend(indices)
+    if sorted(assigned) != list(range(asset_count)):
+        raise PortfolioError("Cada activo debe pertenecer exactamente a una clase.")
+    effective_maximum = sum(
+        min(group.maximum, len(group.asset_indices) * max_weight) for group in groups
+    )
+    if sum(group.minimum for group in groups) > 1 + 1e-10 or effective_maximum < 1 - 1e-10:
+        raise PortfolioError("Los límites por clase no permiten una cartera que sume 100%.")
+    return groups
+
+
+def _group_constraints(allocation_groups):
+    constraints = [{"type": "eq", "fun": lambda weights: float(weights.sum() - 1)}]
+    for group in allocation_groups:
+        indices = np.asarray(group.asset_indices, dtype=int)
+        constraints.extend((
+            {
+                "type": "ineq",
+                "fun": lambda weights, indices=indices, minimum=group.minimum:
+                    float(weights[indices].sum() - minimum),
+            },
+            {
+                "type": "ineq",
+                "fun": lambda weights, indices=indices, maximum=group.maximum:
+                    float(maximum - weights[indices].sum()),
+            },
+        ))
+    return tuple(constraints)
+
+
+def feasible_reference_weights(asset_count, max_weight=1.0, allocation_groups=()):
+    """Return the feasible allocation closest to equal weights."""
+    _validate_weight_limit(asset_count, max_weight)
+    groups = _validate_allocation_groups(asset_count, max_weight, allocation_groups)
+    equal = np.full(asset_count, 1 / asset_count)
+    if not groups:
+        return equal
+    result = minimize(
+        lambda weights: float(np.square(weights - equal).sum()),
+        equal,
+        method="SLSQP",
+        bounds=tuple((0.0, max_weight) for _ in range(asset_count)),
+        constraints=_group_constraints(groups),
+        options={"maxiter": 1_000, "ftol": 1e-12},
+    )
+    if not result.success or not np.isfinite(result.x).all():
+        raise PortfolioError("No fue posible construir una referencia factible para la política.")
+    weights = np.clip(result.x, 0.0, max_weight)
+    weights /= weights.sum()
+    return validate_weights(weights, asset_count, max_weight, groups)
+
+
+def optimize_portfolio(
+    mean_returns, covariance, risk_free_rate, objective="max_sharpe", max_weight=1.0,
+    allocation_groups=(),
+):
     """Optimize a long-only portfolio with a concentration cap."""
     asset_count = len(mean_returns)
     validate_model(mean_returns, covariance, risk_free_rate)
     _validate_weight_limit(asset_count, max_weight)
-    initial = np.full(asset_count, 1 / asset_count)
+    groups = _validate_allocation_groups(asset_count, max_weight, allocation_groups)
+    initial = feasible_reference_weights(asset_count, max_weight, groups)
     bounds = tuple((0.0, max_weight) for _ in range(asset_count))
-    constraints = ({"type": "eq", "fun": lambda weights: float(weights.sum() - 1)},)
+    constraints = _group_constraints(groups)
     cov = covariance.to_numpy()
     means = mean_returns.to_numpy()
 
@@ -248,18 +350,23 @@ def optimize_portfolio(mean_returns, covariance, risk_free_rate, objective="max_
         raise PortfolioError(f"La optimización no convergió: {result.message}")
     weights = np.clip(result.x, 0.0, max_weight)
     weights = weights / weights.sum()
-    validate_weights(weights, asset_count, max_weight)
+    validate_weights(weights, asset_count, max_weight, groups)
     annual_return, annual_volatility, sharpe = portfolio_statistics(
         weights, mean_returns, covariance, risk_free_rate
     )
     return PortfolioMetrics(weights, annual_return, annual_volatility, sharpe)
 
 
-def efficient_frontier(mean_returns, covariance, max_weight=1.0, points=40):
+def efficient_frontier(
+    mean_returns, covariance, max_weight=1.0, points=40, allocation_groups=(),
+):
     """Compute minimum-variance portfolios across feasible target returns."""
     asset_count = len(mean_returns)
     _validate_weight_limit(asset_count, max_weight)
-    minimum = optimize_portfolio(mean_returns, covariance, 0.0, "min_volatility", max_weight)
+    groups = _validate_allocation_groups(asset_count, max_weight, allocation_groups)
+    minimum = optimize_portfolio(
+        mean_returns, covariance, 0.0, "min_volatility", max_weight, groups
+    )
     if (
         asset_count == 1
         or np.isclose(asset_count * max_weight, 1.0)
@@ -268,14 +375,24 @@ def efficient_frontier(mean_returns, covariance, max_weight=1.0, points=40):
         return pd.DataFrame([{"Retorno": minimum.annual_return, "Volatilidad": minimum.annual_volatility}])
     bounds = tuple((0.0, max_weight) for _ in range(asset_count))
     cov, means = covariance.to_numpy(), mean_returns.to_numpy()
-    # Determine the maximum feasible return under the concentration cap.
-    remaining, highest = 1.0, 0.0
-    for value in np.sort(means)[::-1]:
-        allocation = min(max_weight, remaining)
-        highest += allocation * value
-        remaining -= allocation
-        if remaining <= 1e-12:
-            break
+    # Determine the maximum feasible return under all concentration rules.
+    a_ub, b_ub = [], []
+    for group in groups:
+        row = np.zeros(asset_count)
+        row[list(group.asset_indices)] = 1
+        a_ub.extend((row, -row))
+        b_ub.extend((group.maximum, -group.minimum))
+    maximum_result = linprog(
+        -means,
+        A_ub=np.asarray(a_ub) if a_ub else None,
+        b_ub=np.asarray(b_ub) if b_ub else None,
+        A_eq=np.ones((1, asset_count)), b_eq=np.asarray([1.0]),
+        bounds=[(0.0, max_weight)] * asset_count,
+        method="highs",
+    )
+    if not maximum_result.success:
+        raise PortfolioError("No fue posible determinar el retorno factible máximo.")
+    highest = float(maximum_result.x @ means)
     if highest - minimum.annual_return <= 1e-8:
         return pd.DataFrame([{"Retorno": minimum.annual_return, "Volatilidad": minimum.annual_volatility}])
     targets = np.linspace(minimum.annual_return, highest, points)
@@ -284,6 +401,7 @@ def efficient_frontier(mean_returns, covariance, max_weight=1.0, points=40):
         constraints = (
             {"type": "eq", "fun": lambda weights: float(weights.sum() - 1)},
             {"type": "eq", "fun": lambda weights, target=target: float(weights @ means - target)},
+            *_group_constraints(groups)[1:],
         )
         result = minimize(
             lambda weights: float(weights @ cov @ weights),
@@ -301,18 +419,45 @@ def efficient_frontier(mean_returns, covariance, max_weight=1.0, points=40):
     return pd.DataFrame(rows)
 
 
-def random_portfolios(mean_returns, covariance, risk_free_rate, simulations=5_000, seed=42, max_weight=1.0):
+def random_portfolios(
+    mean_returns, covariance, risk_free_rate, simulations=5_000, seed=42,
+    max_weight=1.0, allocation_groups=(),
+):
     """Generate reproducible random allocations for visual context."""
     rng = np.random.default_rng(seed)
-    weights = rng.dirichlet(np.ones(len(mean_returns)), simulations)
-    _validate_weight_limit(len(mean_returns), max_weight)
-    # Contract each draw towards equal weight until it obeys the same cap as the frontier.
-    equal = 1 / len(mean_returns)
-    excess = weights.max(axis=1) - equal
-    scale = np.minimum(
-        1.0, np.divide(max_weight - equal, excess, out=np.ones_like(excess), where=excess > 1e-12)
-    )
-    weights = equal + scale[:, None] * (weights - equal)
+    asset_count = len(mean_returns)
+    _validate_weight_limit(asset_count, max_weight)
+    groups = _validate_allocation_groups(asset_count, max_weight, allocation_groups)
+    if not groups:
+        weights = rng.dirichlet(np.ones(asset_count), simulations)
+        equal = 1 / asset_count
+        excess = weights.max(axis=1) - equal
+        scale = np.minimum(
+            1.0, np.divide(max_weight - equal, excess, out=np.ones_like(excess), where=excess > 1e-12)
+        )
+        weights = equal + scale[:, None] * (weights - equal)
+    else:
+        weights = np.zeros((simulations, asset_count))
+        minimums = np.asarray([group.minimum for group in groups])
+        maximums = np.asarray([
+            min(group.maximum, len(group.asset_indices) * max_weight) for group in groups
+        ])
+        for row in weights:
+            remaining = 1.0
+            totals = np.zeros(len(groups))
+            for position in range(len(groups) - 1):
+                lower = max(minimums[position], remaining - maximums[position + 1:].sum())
+                upper = min(maximums[position], remaining - minimums[position + 1:].sum())
+                totals[position] = rng.uniform(lower, upper) if upper > lower else lower
+                remaining -= totals[position]
+            totals[-1] = remaining
+            for total, group in zip(totals, groups, strict=True):
+                indices = np.asarray(group.asset_indices)
+                draw = rng.dirichlet(np.ones(len(indices))) * total
+                equal = total / len(indices)
+                excess = draw.max() - equal
+                scale = min(1.0, (max_weight - equal) / excess) if excess > 1e-12 else 1.0
+                row[indices] = equal + scale * (draw - equal)
     means, cov = mean_returns.to_numpy(), covariance.to_numpy()
     returns = weights @ means
     volatilities = np.sqrt(np.einsum("ij,jk,ik->i", weights, cov, weights))

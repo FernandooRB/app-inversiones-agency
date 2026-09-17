@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from access import require_access
+from allocation_policy import parse_asset_classes, parse_class_limits, policy_table
 from backtesting import run_holdout_backtest
 from covariance_calibration import select_diagonal_shrinkage
 from currencies import convert_prices, currency_map, download_fx
@@ -30,6 +31,7 @@ from portfolio_core import (
     calculate_risk_metrics,
     download_adjusted_prices,
     efficient_frontier,
+    feasible_reference_weights,
     normalize_tickers,
     optimize_portfolio,
     parse_current_weights,
@@ -97,7 +99,11 @@ def render_covariance_comparison(sample, diagonal, calibrated=None):
         f"{label} · {name}": result.equity_curves[name]
         for label, result in variants.items() for name in scenarios
     }
-    curves["Pesos iguales"] = sample.equity_curves["Pesos iguales"]
+    reference_name = next(
+        name for name in ("Pesos iguales", "Referencia simple factible")
+        if name in sample.equity_curves
+    )
+    curves[reference_name] = sample.equity_curves[reference_name]
     st.line_chart(pd.DataFrame(curves), y_label="Capital relativo (1 = inicio)")
     st.caption(
         "Los estimadores usan idénticos retornos, fechas, restricciones y costos supuestos. "
@@ -155,6 +161,25 @@ with st.sidebar:
         "Supuesto manual: verifica la tasa para la moneda base y el periodo; no se consulta una fuente."
     )
     max_weight = st.slider("Peso máximo por activo", 10, 100, 60, 5) / 100
+    with st.expander("Política por clase de activo"):
+        use_class_policy = st.checkbox("Aplicar límites por clase")
+        asset_classes_input = st.text_input(
+            "Clases de los tickers, en el mismo orden",
+            "renta_variable, renta_variable, renta_variable, renta_variable",
+            help=(
+                "Una etiqueta por ticker. Usa minúsculas y guion bajo. Si cargas CETES, "
+                "la app añade deuda_gubernamental automáticamente."
+            ),
+        )
+        class_limits_input = st.text_area(
+            "Límites: clase, mínimo %, máximo %",
+            "renta_variable,0,100",
+            help="Incluye exactamente una línea por cada clase declarada.",
+        )
+        st.caption(
+            "Son restricciones de un escenario de investigación. No asignan por sí solas "
+            "un perfil de riesgo ni sustituyen la revisión humana."
+        )
     confidence = st.select_slider("Confianza de VaR", options=[0.90, 0.95, 0.975, 0.99], value=0.95)
     horizon = st.selectbox(
         "Horizonte de riesgo", [1, 5, 10, 21], index=0, format_func=lambda value: f"{value} día(s)"
@@ -246,6 +271,9 @@ settings = (
     end_date,
     risk_free_rate,
     max_weight,
+    use_class_policy,
+    asset_classes_input,
+    class_limits_input,
     confidence,
     horizon,
     portfolio_value,
@@ -328,6 +356,15 @@ try:
             prices = merge_cetes_index(prices, prepared_index)
         analysis_tickers = tuple(str(column) for column in prices.columns)
         analysis_quotes = quotes | ({cetes_name: "MXN"} if cetes_result is not None else {})
+        allocation_groups = ()
+        allocation_policy_table = None
+        if use_class_policy:
+            declared_classes = parse_asset_classes(asset_classes_input, len(tickers))
+            analysis_classes = declared_classes + (
+                ("deuda_gubernamental",) if cetes_result is not None else ()
+            )
+            allocation_groups = parse_class_limits(class_limits_input, analysis_classes)
+            allocation_policy_table = policy_table(allocation_groups)
         if price_contents:
             data_source = (
                 f"CSV aportado por el equipo; fuente declarada: {price_source}; "
@@ -344,12 +381,21 @@ try:
             )
         returns = calculate_returns(prices)
         mean_returns, covariance = annualized_moments(returns)
-        max_sharpe = optimize_portfolio(mean_returns, covariance, risk_free_rate, "max_sharpe", max_weight)
-        min_volatility = optimize_portfolio(
-            mean_returns, covariance, risk_free_rate, "min_volatility", max_weight
+        max_sharpe = optimize_portfolio(
+            mean_returns, covariance, risk_free_rate, "max_sharpe", max_weight,
+            allocation_groups,
         )
-        frontier = efficient_frontier(mean_returns, covariance, max_weight)
-        random_set = random_portfolios(mean_returns, covariance, risk_free_rate, max_weight=max_weight)
+        min_volatility = optimize_portfolio(
+            mean_returns, covariance, risk_free_rate, "min_volatility", max_weight,
+            allocation_groups,
+        )
+        frontier = efficient_frontier(
+            mean_returns, covariance, max_weight, allocation_groups=allocation_groups
+        )
+        random_set = random_portfolios(
+            mean_returns, covariance, risk_free_rate, max_weight=max_weight,
+            allocation_groups=allocation_groups,
+        )
         risk = calculate_risk_metrics(returns, max_sharpe.weights, confidence, horizon)
         alternatives = [
             PortfolioAlternative("Máximo Sharpe", max_sharpe, risk),
@@ -358,12 +404,14 @@ try:
                 calculate_risk_metrics(returns, min_volatility.weights, confidence, horizon),
             ),
         ]
-        equal_weights = np.full(len(analysis_tickers), 1 / len(analysis_tickers))
+        equal_weights = feasible_reference_weights(
+            len(analysis_tickers), max_weight, allocation_groups
+        )
         equal_return, equal_volatility, equal_sharpe = portfolio_statistics(
             equal_weights, mean_returns, covariance, risk_free_rate
         )
         alternatives.append(PortfolioAlternative(
-            "Pesos iguales",
+            "Referencia simple factible" if allocation_groups else "Pesos iguales",
             PortfolioMetrics(equal_weights, equal_return, equal_volatility, equal_sharpe),
             calculate_risk_metrics(returns, equal_weights, confidence, horizon),
         ))
@@ -415,6 +463,17 @@ try:
         f"Análisis realizado con {len(returns):,} observaciones, del "
         f"{prices.index.min().date()} al {prices.index.max().date()}. Moneda: {base_currency}."
     )
+    if allocation_policy_table is not None:
+        with st.expander("Política aplicada por clase de activo", expanded=True):
+            policy_view = allocation_policy_table.copy()
+            policy_view["Mínimo"] = policy_view["Mínimo"].map(lambda value: f"{value:.1%}")
+            policy_view["Máximo"] = policy_view["Máximo"].map(lambda value: f"{value:.1%}")
+            st.dataframe(policy_view, hide_index=True, use_container_width=True)
+            st.caption(
+                "La clasificación fue declarada por el usuario y no se verificó contra una "
+                "fuente externa. Máximo Sharpe, mínima volatilidad, frontera, nube y "
+                "validaciones usan estos mismos límites."
+            )
     if price_contents:
         st.info(
             f"Precios CSV aportados por el equipo · Fuente declarada: {price_source} · "
@@ -629,7 +688,8 @@ try:
         )
         if st.checkbox("Comparar ventanas de estimación"):
             sensitivity = analyze_allocation_sensitivity(
-                returns, risk_free_rate=risk_free_rate, max_weight=max_weight
+                returns, risk_free_rate=risk_free_rate, max_weight=max_weight,
+                allocation_groups=allocation_groups,
             )
             overview = sensitivity.summary.reset_index().copy()
             overview["Mayor peso"] = overview["Mayor peso"].map(
@@ -905,6 +965,7 @@ try:
                         current_weights if current_weights_input.strip() else None
                     ),
                     trading_cost_bps=entry_cost_bps,
+                    allocation_groups=allocation_groups,
                 )
                 st.write(
                     f"**Estimación:** {backtest.training_start.date()} a "
@@ -935,6 +996,7 @@ try:
                         ),
                         trading_cost_bps=entry_cost_bps,
                         covariance_shrinkage=0.5,
+                        allocation_groups=allocation_groups,
                     )
                     variants = {
                             "Muestral": backtest.allocations,
@@ -953,6 +1015,7 @@ try:
                                 ),
                                 trading_cost_bps=entry_cost_bps,
                                 covariance_shrinkage="cv",
+                                allocation_groups=allocation_groups,
                             )
                             calibration = select_diagonal_shrinkage(
                                 returns.iloc[:backtest.training_observations]
@@ -998,8 +1061,8 @@ try:
     with st.expander("Sensibilidad a cuatro fechas de corte"):
         st.caption(
             "Compara cortes iniciales fijos de 50%, 60%, 70% y 80%. Cada cartera se estima "
-            "antes de su evaluación y se mantiene después. La diferencia frente a pesos "
-            "iguales se calcula sólo dentro del mismo periodo."
+            "antes de su evaluación y se mantiene después. La diferencia frente a la referencia "
+            "simple se calcula sólo dentro del mismo periodo."
         )
         if st.checkbox("Evaluar cuatro cortes predefinidos"):
             if len(returns) < 120:
@@ -1032,19 +1095,24 @@ try:
                         ),
                         trading_cost_bps=multi_cost,
                         covariance_shrinkage=method,
+                        allocation_groups=allocation_groups,
+                    )
+                    reference_difference = (
+                        "Diferencia total neta vs referencia simple"
+                        if allocation_groups else "Diferencia total neta vs pesos iguales"
                     )
                     overview = multi.summary.reset_index()[[
                         "Corte inicial", "Escenario", "Estimación hasta",
                         "Retornos de estimación", "Evaluación desde", "Evaluación hasta",
                         "Retornos de evaluación", "Contracción de covarianza",
                         "Retorno total neto", "Retorno anualizado neto",
-                        "Diferencia total neta vs pesos iguales",
+                        reference_difference,
                         "Volatilidad anualizada", "Sharpe realizado", "Máxima caída",
                         "Rotación inicial", "Costo inicial sobre capital",
                     ]].copy()
                     for column in (
                         "Contracción de covarianza", "Retorno total neto",
-                        "Retorno anualizado neto", "Diferencia total neta vs pesos iguales",
+                        "Retorno anualizado neto", reference_difference,
                         "Volatilidad anualizada", "Máxima caída", "Rotación inicial",
                         "Costo inicial sobre capital",
                     ):
@@ -1080,8 +1148,8 @@ try:
     with st.expander("Validación con revisiones sucesivas"):
         st.caption(
             "La primera parte estima los pesos iniciales. Después, cada revisión de 3, 6 o 12 "
-            "meses utiliza sólo retornos observados hasta la sesión anterior. Pesos iguales "
-            "se rebalancea en las mismas fechas; la cartera actual opcional se mantiene."
+            "meses utiliza sólo retornos observados hasta la sesión anterior. La referencia "
+            "simple se rebalancea en las mismas fechas; la cartera actual opcional se mantiene."
         )
         if st.checkbox("Evaluar revisiones sucesivas"):
             if removed:
@@ -1106,6 +1174,7 @@ try:
                         current_weights if current_weights_input.strip() else None
                     ),
                     trading_cost_bps=cost_bps,
+                    allocation_groups=allocation_groups,
                 )
                 st.write(
                     f"**Estimación inicial hasta:** {walk.training_end.date()}. "
@@ -1134,6 +1203,7 @@ try:
                         ),
                         trading_cost_bps=cost_bps,
                         covariance_shrinkage=0.5,
+                        allocation_groups=allocation_groups,
                     )
                     calibrated_walk = None
                     if st.checkbox("Añadir intensidad calibrada (revisiones)"):
@@ -1149,6 +1219,7 @@ try:
                                 ),
                                 trading_cost_bps=cost_bps,
                                 covariance_shrinkage="cv",
+                                allocation_groups=allocation_groups,
                             )
                             st.download_button(
                                 "Descargar revisiones con intensidad calibrada CSV",
@@ -1199,6 +1270,7 @@ try:
         implementation_cost_assumptions=implementation_assumptions,
         implementation_cost_source=implementation_source,
         implementation_cost_source_date=implementation_source_date,
+        allocation_policy=allocation_policy_table,
     )
     st.download_button(
         "Descargar reporte metodológico PDF", pdf, f"reporte_portafolio_{date.today()}.pdf", "application/pdf"
@@ -1221,6 +1293,7 @@ try:
         implementation_cost_source_date=implementation_source_date,
         simulation=simulation_report,
         stress=stress_report,
+        allocation_policy=allocation_policy_table,
     )
     st.download_button(
         (

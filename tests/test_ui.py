@@ -28,6 +28,22 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     app.button[0].click().run()
     assert not app.exception
     assert not app.error
+    policy_toggle = next(
+        item for item in app.checkbox if item.label == "Aplicar límites por clase"
+    )
+    policy_toggle.set_value(True).run()
+    classes = next(
+        item for item in app.text_input if item.label == "Clases de los tickers, en el mismo orden"
+    )
+    classes.set_value("crecimiento,crecimiento,defensivo,defensivo").run()
+    limits = next(
+        item for item in app.text_area if item.label == "Límites: clase, mínimo %, máximo %"
+    )
+    limits.set_value("crecimiento,20,40\ndefensivo,60,80").run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error
+    assert any("clasificación fue declarada" in item.value for item in app.caption)
     commission = next(
         item for item in app.number_input if item.label == "Comisión sobre cada operación (%)"
     )

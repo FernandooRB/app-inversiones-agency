@@ -21,6 +21,9 @@ y costos supuestos.
 El [estimador de costo de implementación](docs/implementation_costs.md) separa compras y ventas,
 comisión, IVA configurable y costo de mercado para cada alternativa, partiendo de efectivo o de la
 cartera actual.
+La [política por clase de activo](docs/allocation_policy.md) aplica mínimos y máximos declarados a
+Markowitz, la frontera, la nube de carteras y las validaciones históricas; si pesos iguales no es
+factible, utiliza la referencia permitida más cercana.
 La [sensibilidad de asignaciones](docs/allocation_sensitivity.md) reestima los pesos con
 ventanas históricas de 60, 126 y 252 retornos para mostrar cuánto dependen de la muestra.
 Las pruebas fuera de muestra permiten comparar la covarianza muestral con una
@@ -100,7 +103,7 @@ pytest
 
 - VaR histórico multidiario capitaliza retornos de una cartera rebalanceada diariamente;
   las ventanas se solapan. El VaR normal sigue siendo una aproximación aditiva con retornos independientes.
-- La nube aleatoria respeta el límite por activo mediante contracción hacia pesos iguales;
+- La nube aleatoria respeta el límite por activo y, cuando existen, los intervalos por clase;
   no es una muestra uniforme ni una simulación de precios futuros.
 - Las pruebas automatizadas no son una auditoría de seguridad ni validación para operar con clientes.
 
@@ -121,6 +124,7 @@ portfolio_core.py    Datos, métricas, optimización y riesgo
 price_upload.py       Importación estricta de precios ajustados CSV
 price_quality.py      Alertas heurísticas sobre precios originales
 implementation_costs.py Estimación explícita de compras, ventas y costos
+allocation_policy.py  Lectura y presentación de límites por clase declarada
 instruments.py       Catálogo y reglas de integración por tipo de instrumento
 fixed_income.py       Valuación y preparación de series de CETES
 backtesting.py         Evaluación hipotética con fecha de corte
@@ -134,7 +138,8 @@ tests/               Pruebas unitarias
 ## Próximas fases
 
 - Validar estimadores de covarianza en más regímenes y universos; Black-Litterman.
-- Perfiles IR1–IR5 y restricciones por clase de activo.
+- Diseñar perfiles IR1–IR5 sólo después de definir su metodología y encuadre; el motor de
+  restricciones por clase ya está disponible para escenarios internos declarados.
 - Cobertura cambiaria y validación de metadatos de instrumentos.
 - Costos, impuestos y rebalanceo.
 - Expediente de cliente y audit trail.
