@@ -10,7 +10,7 @@ un retorno total comparable.
 | --- | --- |
 | `DIRECTO_ACTUAL` | El motor puede descargar una serie ajustada en la misma moneda declarada. |
 | `DIRECTO_CON_PROXY` | El motor usa la serie del mercado de origen y la convierte a la moneda base. |
-| `PREPARACION_ARCHIVO` | El usuario aporta precio y plazo; la app prepara y valida el índice antes del análisis. |
+| `PREPARACION_ARCHIVO` | El usuario aporta los insumos de valoración requeridos por el instrumento; la app prepara y valida el índice antes del análisis. |
 | `REQUIERE_ADAPTADOR` | Falta valoración específica, flujos, NAV o una fuente oficial integrada. |
 | `REFERENCIA_NO_INVERTIBLE` | La serie sirve para conversión o contraste, no como posición. |
 
@@ -18,10 +18,12 @@ Para un valor del SIC, la serie extranjera convertida a MXN aproxima su exposici
 reproduce la cotización local, el spread, la profundidad, la ejecución ni los costos del intermediario.
 La BMV describe al SIC como la plataforma para acciones y ETF extranjeros y señala que opera en pesos.
 
-Los CETES se modelarán como instrumentos a descuento con valor nominal, plazo y precio. Las series de
+Los CETES se modelan como instrumentos a descuento con valor nominal, plazo y precio. Las series de
 tasas no se transformarán directamente en retornos diarios. El adaptador deberá seleccionar una serie de
 precios de Banxico y documentar cómo mantiene o rola vencimientos comparables. Los Bonos M requieren
-emisión, cupón semestral, vencimiento y tratamiento de precio limpio, interés devengado y flujos.
+emisión, cupón semestral, vencimiento y tratamiento de precio limpio, interés devengado y flujos. El
+[adaptador de Bonos M](bonos_m_adapter.md) ya prepara una emisión desde un CSV; aún requiere contraste
+externo de sus precios, devengado y calendario antes de un uso comercial.
 
 ## Reglas operativas
 

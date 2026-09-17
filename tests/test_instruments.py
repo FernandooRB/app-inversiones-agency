@@ -17,6 +17,9 @@ def test_analysis_inputs_excludes_debt_cash_and_reference_rates():
     inputs = analysis_inputs(load_catalog())
     assert set(inputs["analysis_symbol"]) == {"AMXB.MX", "AAPL", "SPY"}
     assert not inputs["analysis_symbol"].str.startswith("BANXICO").any()
+    bond = load_catalog().loc[lambda table: table["instrument_id"].eq("MX_BONOS_M")].iloc[0]
+    assert bond["integration_status"] == "PREPARACION_ARCHIVO"
+    assert bond["analysis_method"] == "user_clean_accrued_coupon"
 
 
 def test_sic_rows_are_explicit_foreign_market_proxies():

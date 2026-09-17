@@ -277,3 +277,55 @@ def test_uploaded_prices_run_without_yahoo_price_download(monkeypatch):
     assert not app.exception
     assert not app.error
     assert any("Precios CSV aportados" in item.value for item in app.info)
+
+
+def test_bond_issue_csv_is_integrated_with_auditable_total_return(monkeypatch):
+    import access
+
+    monkeypatch.setattr(access, "require_access", lambda: None)
+    dates = pd.date_range("2024-01-02", periods=140, freq="B")
+    rng = np.random.default_rng(77)
+    stock_values = 100 * np.cumprod(1 + rng.normal(0.0005, 0.008, (140, 2)), axis=0)
+    price_table = pd.DataFrame(stock_values, columns=["AAPL", "MSFT"])
+    price_table.insert(0, "Fecha", dates.strftime("%Y-%m-%d"))
+    bond_table = pd.DataFrame({
+        "Fecha": dates.strftime("%Y-%m-%d"),
+        "Emision": "M 310529",
+        "Vencimiento": "2031-05-29",
+        "PrecioLimpio": np.linspace(98.0, 99.0, len(dates)),
+        "InteresDevengado": np.linspace(0.1, 2.9, len(dates)),
+        "Cupon": 0.0,
+    })
+    bond_table.loc[70, ["PrecioLimpio", "InteresDevengado", "Cupon"]] = [96.0, 0.1, 3.0]
+    uploads = {
+        "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
+            price_table.to_csv(index=False).encode("utf-8-sig")
+        ),
+        "Serie de Bono M por emisión (opcional)": BytesIO(
+            bond_table.to_csv(index=False).encode("utf-8-sig")
+        ),
+    }
+    monkeypatch.setattr(st, "file_uploader", lambda label, **_kwargs: uploads.get(label))
+    monkeypatch.setattr(
+        core.yf, "download",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Yahoo no debe consultarse")),
+    )
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
+    ).run()
+    next(item for item in app.text_input if item.label == "Tickers").set_value("AAPL, MSFT")
+    next(
+        item for item in app.text_input
+        if item.label == "Monedas de cotización, en el mismo orden"
+    ).set_value("MXN, MXN")
+    next(
+        item for item in app.selectbox if item.label == "Moneda base del análisis"
+    ).set_value("MXN")
+    next(
+        item for item in app.text_input if item.label == "Fuente declarada de precios CSV"
+    ).set_value("Archivo interno de prueba")
+    app.run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error, [item.value for item in app.error]
+    assert any("M 310529" in item.value for item in app.info)
