@@ -133,10 +133,10 @@ def _risk_attribution_story(
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
         ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
-    return [
+    return [KeepTogether([
         Spacer(1, 3 * mm),
         Paragraph("Atribución de riesgo", styles["Heading2"]),
         table,
@@ -149,7 +149,7 @@ def _risk_attribution_story(
             "históricos basados en la covarianza estimada.",
             styles["Normal"],
         ),
-    ]
+    ])]
 
 
 def _black_litterman_story(
@@ -211,8 +211,8 @@ def _black_litterman_story(
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
         ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
     views_note = (
         f"Se incorporaron {len(result.views)} opinión(es) absoluta(s)."
@@ -685,8 +685,8 @@ def create_comparison_pdf_report(
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
         ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
     story.extend([
         main_table,
@@ -696,7 +696,7 @@ def create_comparison_pdf_report(
             f"para {first_risk.horizon_days} sesión(es). No son pérdidas máximas posibles.",
             styles["Normal"],
         ),
-        Spacer(1, 5 * mm),
+        Spacer(1, 2 * mm),
         Paragraph("Asignación por instrumento", styles["Heading2"]),
     ])
     allocation_rows = [["Activo"] + [
@@ -716,8 +716,8 @@ def create_comparison_pdf_report(
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
         ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
     ]))
     story.extend([
         allocation_table,
@@ -881,8 +881,8 @@ def create_comparison_pdf_report(
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
             ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
         ]))
         story.extend([
             PageBreak(),
@@ -929,8 +929,8 @@ def create_comparison_pdf_report(
                     ("ROWBACKGROUNDS", (0, 1), (-1, -1),
                      [colors.white, colors.HexColor("#F4F7FA")]),
                     ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
-                    ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
                 ]))
             story.extend([
                 Spacer(1, 3 * mm),

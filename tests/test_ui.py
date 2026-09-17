@@ -383,3 +383,61 @@ def test_liquidity_rate_csv_is_integrated_without_future_rate_use(monkeypatch):
     assert not app.exception
     assert not app.error, [item.value for item in app.error]
     assert any("Cuenta remunerada de prueba" in item.value for item in app.info)
+
+
+def test_exact_fund_series_csv_is_integrated_with_distributions(monkeypatch):
+    import access
+
+    monkeypatch.setattr(access, "require_access", lambda: None)
+    dates = pd.date_range("2024-01-02", periods=140, freq="B")
+    rng = np.random.default_rng(101)
+    stock_values = 100 * np.cumprod(1 + rng.normal(0.0004, 0.008, (140, 2)), axis=0)
+    price_table = pd.DataFrame(stock_values, columns=["AAPL", "MSFT"])
+    price_table.insert(0, "Fecha", dates.strftime("%Y-%m-%d"))
+    fund_values = np.linspace(10.0, 10.8, len(dates))
+    distributions = np.zeros(len(dates))
+    distributions[70] = 0.2
+    fund_values[70:] -= 0.2
+    fund_table = pd.DataFrame({
+        "Fecha": dates.strftime("%Y-%m-%d"),
+        "Fondo": "Fondo de prueba",
+        "Serie": "A1",
+        "Moneda": "MXN",
+        "ValorAccion": fund_values,
+        "Distribucion": distributions,
+    })
+    uploads = {
+        "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
+            price_table.to_csv(index=False).encode("utf-8-sig")
+        ),
+        "Serie de fondo de inversión MXN (opcional)": BytesIO(
+            fund_table.to_csv(index=False).encode("utf-8-sig")
+        ),
+    }
+    monkeypatch.setattr(st, "file_uploader", lambda label, **_kwargs: uploads.get(label))
+    monkeypatch.setattr(
+        core.yf, "download",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Yahoo no debe consultarse")),
+    )
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
+    ).run()
+    next(item for item in app.text_input if item.label == "Tickers").set_value("AAPL, MSFT")
+    next(
+        item for item in app.text_input
+        if item.label == "Monedas de cotización, en el mismo orden"
+    ).set_value("MXN, MXN")
+    next(
+        item for item in app.selectbox if item.label == "Moneda base del análisis"
+    ).set_value("MXN")
+    next(
+        item for item in app.text_input if item.label == "Fuente declarada de precios CSV"
+    ).set_value("Archivo interno de prueba")
+    next(
+        item for item in app.text_input if item.label == "Fuente declarada del valor del fondo"
+    ).set_value("Estado de cuenta de prueba")
+    app.run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error, [item.value for item in app.error]
+    assert any("Fondo de prueba" in item.value and "A1" in item.value for item in app.info)
