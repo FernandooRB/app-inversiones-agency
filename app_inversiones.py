@@ -17,7 +17,12 @@ from benchmarking import analyze_benchmark
 from black_litterman import black_litterman_posterior, parse_absolute_views
 from covariance_calibration import select_diagonal_shrinkage
 from currencies import convert_prices, currency_map, download_fx
-from fixed_income import merge_cetes_index, read_banxico_cetes_csv
+from fixed_income import (
+    merge_bond_index,
+    merge_cetes_index,
+    read_banxico_cetes_csv,
+    read_bond_total_return_csv,
+)
 from fx_comparison import render_comparison
 from implementation_costs import (
     ImplementationCostAssumptions,
@@ -141,7 +146,8 @@ with st.expander("Catálogo piloto de instrumentos México y SIC"):
         "Compatibles hoy con el motor histórico: " + examples + ". "
         "En SIC se usa una aproximación con la serie del mercado de origen convertida a MXN; "
         "no representa el precio local ejecutable. CETES puede añadirse mediante un CSV validado; "
-        "bonos, efectivo y fondos permanecen fuera hasta integrar su valoración específica."
+        "Bonos M puede añadirse por emisión mediante precio limpio, devengado y cupones; "
+        "efectivo y fondos permanecen fuera hasta integrar su valoración específica."
     )
     st.download_button(
         "Descargar catálogo y notas CSV",
@@ -193,8 +199,8 @@ with st.sidebar:
             "Clases de los tickers, en el mismo orden",
             "renta_variable, renta_variable, renta_variable, renta_variable",
             help=(
-                "Una etiqueta por ticker. Usa minúsculas y guion bajo. Si cargas CETES, "
-                "la app añade deuda_gubernamental automáticamente."
+                "Una etiqueta por ticker. Usa minúsculas y guion bajo. Si cargas CETES o un "
+                "Bono M, la app añade deuda_gubernamental automáticamente."
             ),
         )
         class_limits_input = st.text_area(
@@ -216,7 +222,8 @@ with st.sidebar:
     current_weights_input = st.text_input(
         "Cartera actual, pesos en % (opcional)",
         help=(
-            "Un porcentaje por activo, en el mismo orden; si cargas CETES, su peso va al final. "
+            "Un porcentaje por activo, en el mismo orden; CETES y Bono M van al final, "
+            "en ese orden, cuando se cargan. "
             "Deben sumar 100. "
             "No se guarda en una base de datos."
         ),
@@ -313,12 +320,36 @@ with st.sidebar:
         "plantilla_cetes.csv",
         "text/csv",
     )
+    bond_upload = st.file_uploader(
+        "Serie de Bono M por emisión (opcional)",
+        type=["csv"],
+        help=(
+            "Una sola emisión con Fecha, Emision, Vencimiento, PrecioLimpio, "
+            "InteresDevengado y Cupon por 100 de nominal. Máximo 5 MB; sólo MXN."
+        ),
+    )
+    bond_name_input = st.text_input(
+        "Nombre de la serie Bono M", "BONOM", help="Etiqueta para tablas y reportes."
+    )
+    st.download_button(
+        "Descargar plantilla Bono M CSV",
+        (
+            b"Fecha,Emision,Vencimiento,PrecioLimpio,InteresDevengado,Cupon\n"
+            b"2026-01-02,M 310529,2031-05-29,98.0000,2.8000,0\n"
+            b"2026-01-05,M 310529,2031-05-29,98.0500,2.8500,0\n"
+            b"2026-01-06,M 310529,2031-05-29,98.1000,2.9000,0\n"
+        ),
+        "plantilla_bono_m.csv",
+        "text/csv",
+    )
     analyze = st.button("Analizar portafolio", type="primary", use_container_width=True)
 
 price_contents = price_upload.getvalue() if price_upload is not None else b""
 price_fingerprint = sha256(price_contents).hexdigest() if price_contents else None
 cetes_contents = cetes_upload.getvalue() if cetes_upload is not None else b""
 cetes_fingerprint = sha256(cetes_contents).hexdigest() if cetes_contents else None
+bond_contents = bond_upload.getvalue() if bond_upload is not None else b""
+bond_fingerprint = sha256(bond_contents).hexdigest() if bond_contents else None
 settings = (
     tickers_input,
     start_date,
@@ -352,6 +383,8 @@ settings = (
     price_source_input,
     cetes_fingerprint,
     cetes_name_input,
+    bond_fingerprint,
+    bond_name_input,
 )
 if analyze:
     st.session_state["analysis_settings"] = settings
@@ -372,12 +405,13 @@ if st.session_state.get("analysis_settings") != settings:
 try:
     tickers = tuple(normalize_tickers(tickers_input))
     quotes = currency_map(tickers, quote_input)
-    asset_count = len(tickers) + bool(cetes_contents)
+    asset_count = len(tickers) + bool(cetes_contents) + bool(bond_contents)
     if asset_count * max_weight < 1:
         raise PortfolioError(
             f"Con {asset_count} activos, el peso máximo debe ser al menos {1 / asset_count:.1%}."
         )
     cetes_result = None
+    bond_result = None
     with st.spinner("Preparando y validando datos..."):
         if price_contents:
             price_source = price_source_input.strip()
@@ -416,15 +450,30 @@ try:
                 pd.Timestamp(start_date):pd.Timestamp(end_date)
             ]
             prices = merge_cetes_index(prices, prepared_index)
+        if bond_contents:
+            if base_currency != "MXN":
+                raise PortfolioError("La serie del Bono M sólo puede añadirse con moneda base MXN.")
+            bond_name = normalize_tickers([bond_name_input])[0]
+            if bond_name in prices.columns:
+                raise PortfolioError("El nombre de la serie Bono M coincide con otro activo.")
+            bond_result = read_bond_total_return_csv(bond_contents, name=bond_name)
+            prepared_bond_index = bond_result.index.loc[
+                pd.Timestamp(start_date):pd.Timestamp(end_date)
+            ]
+            prices = merge_bond_index(prices, prepared_bond_index)
         analysis_tickers = tuple(str(column) for column in prices.columns)
-        analysis_quotes = quotes | ({cetes_name: "MXN"} if cetes_result is not None else {})
+        analysis_quotes = (
+            quotes
+            | ({cetes_name: "MXN"} if cetes_result is not None else {})
+            | ({bond_name: "MXN"} if bond_result is not None else {})
+        )
         allocation_groups = ()
         allocation_policy_table = None
         if use_class_policy:
             declared_classes = parse_asset_classes(asset_classes_input, len(tickers))
-            analysis_classes = declared_classes + (
-                ("deuda_gubernamental",) if cetes_result is not None else ()
-            )
+            analysis_classes = declared_classes + ("deuda_gubernamental",) * sum((
+                cetes_result is not None, bond_result is not None,
+            ))
             allocation_groups = parse_class_limits(class_limits_input, analysis_classes)
             allocation_policy_table = policy_table(allocation_groups)
         if price_contents:
@@ -440,6 +489,13 @@ try:
             data_source += (
                 f"; {cetes_name}: CSV aportado por el usuario y preparado desde precio/plazo, "
                 f"SHA-256 {cetes_fingerprint[:12]}"
+            )
+        if bond_result is not None:
+            data_source += (
+                f"; {bond_name}: CSV aportado por el usuario, emisión "
+                f"{bond_result.issue_id}, vencimiento {bond_result.maturity_date.date()}, "
+                "retorno total desde precio limpio, interés devengado y cupones, "
+                f"SHA-256 {bond_fingerprint[:12]}"
             )
         returns = calculate_returns(prices)
         mean_returns, covariance = annualized_moments(returns)
@@ -663,6 +719,13 @@ try:
             f"{len(relevant_maturities)} vencimiento(s) reconocido(s). Revisa las fechas antes de "
             "usar los resultados."
         )
+    if bond_result is not None:
+        coupon_count = int((bond_result.coupons > 0).sum())
+        st.info(
+            f"Serie {bond_name} integrada para la emisión {bond_result.issue_id}, con vencimiento "
+            f"{bond_result.maturity_date.date()} y {coupon_count} cupón(es) reconocido(s) en el "
+            "archivo. Verifica emisión, precios, devengado y flujos con la fuente."
+        )
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Media histórica anualizada", percent(max_sharpe.annual_return))
@@ -799,6 +862,20 @@ try:
                 "Índice CETES preparado CSV",
                 cetes_result.index.rename("Indice retorno total").to_csv().encode("utf-8"),
                 "cetes_indice_preparado.csv",
+                "text/csv",
+            )
+        if bond_result is not None:
+            bond_audit = pd.concat([
+                bond_result.clean_prices,
+                bond_result.accrued_interest,
+                bond_result.dirty_prices,
+                bond_result.coupons,
+                bond_result.index.rename("Índice retorno total"),
+            ], axis=1)
+            st.download_button(
+                "Descargar auditoría Bono M CSV",
+                bond_audit.to_csv().encode("utf-8-sig"),
+                "bono_m_indice_preparado.csv",
                 "text/csv",
             )
 
@@ -1209,9 +1286,11 @@ try:
                     )
                     shocks_array = parse_asset_shocks(raw_shocks, len(analysis_tickers))
                 else:
-                    stress_classes = parse_asset_classes(asset_classes_input, len(tickers)) + (
-                        ("deuda_gubernamental",) if cetes_result is not None else ()
-                    )
+                    stress_classes = parse_asset_classes(
+                        asset_classes_input, len(tickers)
+                    ) + ("deuda_gubernamental",) * sum((
+                        cetes_result is not None, bond_result is not None,
+                    ))
                     unique_classes = sorted(set(stress_classes))
                     raw_class_shocks = st.text_area(
                         "Cambios por clase: clase, shock %",

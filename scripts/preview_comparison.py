@@ -23,12 +23,12 @@ from stress import deterministic_shock, historical_worst_windows
 
 
 def main() -> None:
-    labels = ("CETES28", "ETF_SIC", "ACCION_MX", "EFECTIVO")
+    labels = ("CETES28", "BONOM", "ETF_SIC", "ACCION_MX", "EFECTIVO")
     cases = (
-        ("Máximo Sharpe", [0.20, 0.45, 0.30, 0.05], 0.125, 0.138, 0.47, 0.039, 0.052),
-        ("Mínima volatilidad", [0.50, 0.20, 0.10, 0.20], 0.083, 0.066, 0.34, 0.017, 0.024),
-        ("Pesos iguales", [0.25, 0.25, 0.25, 0.25], 0.101, 0.105, 0.39, 0.029, 0.040),
-        ("Cartera actual", [0.30, 0.30, 0.35, 0.05], 0.108, 0.119, 0.41, 0.034, 0.046),
+        ("Máximo Sharpe", [0.15, 0.15, 0.40, 0.25, 0.05], 0.125, 0.138, 0.47, 0.039, 0.052),
+        ("Mínima volatilidad", [0.35, 0.25, 0.15, 0.10, 0.15], 0.083, 0.066, 0.34, 0.017, 0.024),
+        ("Pesos iguales", [0.20, 0.20, 0.20, 0.20, 0.20], 0.101, 0.105, 0.39, 0.029, 0.040),
+        ("Cartera actual", [0.25, 0.15, 0.25, 0.30, 0.05], 0.108, 0.119, 0.41, 0.034, 0.046),
     )
     alternatives = tuple(
         PortfolioAlternative(
@@ -40,8 +40,10 @@ def main() -> None:
     )
     rng = np.random.default_rng(21)
     fictional_returns = pd.DataFrame(
-        rng.normal([0.0002, 0.0005, 0.0006, 0.0001], [0.001, 0.009, 0.012, 0.0005],
-                   size=(600, 4)),
+        rng.normal(
+            [0.0002, 0.00025, 0.0005, 0.0006, 0.0001],
+            [0.001, 0.004, 0.009, 0.012, 0.0005], size=(600, 5),
+        ),
         index=pd.date_range("2023-08-01", periods=600, freq="B"),
         columns=labels,
     )
@@ -70,7 +72,7 @@ def main() -> None:
             AbsoluteView("ACCION_MX", 0.10, 0.55),
         ),
     )
-    black_litterman_weights = np.array([0.30, 0.35, 0.25, 0.10])
+    black_litterman_weights = np.array([0.25, 0.20, 0.30, 0.15, 0.10])
     black_litterman_return = float(black_litterman_weights @ black_litterman.posterior_returns)
     black_litterman_volatility = float(np.sqrt(
         black_litterman_weights @ covariance @ black_litterman_weights
@@ -98,9 +100,9 @@ def main() -> None:
         history.insert(0, "Escenario", alternative.name)
         historical_parts.append(history)
     stress_history = pd.concat(historical_parts, ignore_index=True)
-    shocks = pd.Series([-0.03, -0.22, -0.22, 0.0], index=labels, name="Shock")
+    shocks = pd.Series([-0.03, -0.08, -0.22, -0.22, 0.0], index=labels, name="Shock")
     class_shocks = pd.Series({
-        "deuda_gubernamental": -0.03,
+        "deuda_gubernamental": -0.06,
         "renta_variable": -0.22,
         "efectivo": 0.0,
     }, name="Shock por clase")
@@ -128,8 +130,8 @@ def main() -> None:
     allocation_policy = pd.DataFrame({
         "Clase": ["deuda_gubernamental", "renta_variable", "efectivo"],
         "Mínimo": [0.20, 0.30, 0.05],
-        "Máximo": [0.50, 0.75, 0.20],
-        "Activos": [1, 2, 1],
+        "Máximo": [0.60, 0.75, 0.20],
+        "Activos": [2, 2, 1],
     })
     benchmark_returns = (
         fictional_returns["ETF_SIC"] * 0.65
@@ -156,7 +158,10 @@ def main() -> None:
         labels, date(2021, 1, 4), date(2025, 12, 31), alternatives, 1_000_000,
         base_currency="MXN", risk_free_rate=0.06, observations=1_200,
         quotes=dict.fromkeys(labels, "MXN"),
-        data_source="datos ficticios para revisión visual; no son cotizaciones de mercado",
+        data_source=(
+            "datos ficticios para revisión visual; BONOM representa una emisión preparada desde "
+            "precio limpio, interés devengado y cupones; no son cotizaciones de mercado"
+        ),
         price_quality_issues=(
             PriceQualityIssue("ETF_SIC", "Salto de precio", "2024-06-10", "2024-06-11", "+35.40%"),
             PriceQualityIssue(
