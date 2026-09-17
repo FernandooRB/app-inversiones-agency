@@ -20,6 +20,8 @@ desde el valor de la acción y sus distribuciones por acción.
 La [importación manual de precios ajustados](docs/price_upload.md) acepta un CSV
 aportado por el equipo y documenta su fuente y huella, sin verificar por sí sola
 ajustes corporativos, moneda ni derechos de uso.
+La [conciliación de cartera actual](docs/current_holdings_import.md) transforma una valuación anónima
+en MXN a pesos ordenados, capital y un archivo de auditoría, sin persistir el CSV.
 La [revisión heurística de precios](docs/price_quality.md) identifica saltos de al menos
 30 % y tramos sin variación en las series originales; deja alertas en la app, un CSV
 descargable y ambos PDF para que el equipo compruebe la fuente.
@@ -137,6 +139,7 @@ pytest
 app_inversiones.py   Interfaz Streamlit
 portfolio_core.py    Datos, métricas, optimización y riesgo
 price_upload.py       Importación estricta de precios ajustados CSV
+holdings.py           Conciliación estricta de la cartera actual valuada en MXN
 price_quality.py      Alertas heurísticas sobre precios originales
 implementation_costs.py Estimación explícita de compras, ventas y costos
 allocation_policy.py  Lectura y presentación de límites por clase declarada
@@ -163,7 +166,7 @@ tests/               Pruebas unitarias
 - Diseñar perfiles IR1–IR5 sólo después de definir su metodología y encuadre; el motor de
   restricciones por clase ya está disponible para escenarios internos declarados.
 - Cobertura cambiaria y validación de metadatos de instrumentos.
-- Costos, impuestos y rebalanceo.
+- Validar tarifarios reales, impuestos por régimen e instrumento y supuestos de ejecución.
 - Expediente de cliente y audit trail.
 
 ## Licencia

@@ -279,6 +279,91 @@ def test_uploaded_prices_run_without_yahoo_price_download(monkeypatch):
     assert any("Precios CSV aportados" in item.value for item in app.info)
 
 
+def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client_data(monkeypatch):
+    import access
+
+    monkeypatch.setattr(access, "require_access", lambda: None)
+    rng = np.random.default_rng(271)
+    dates = pd.date_range("2024-01-02", periods=140, freq="B")
+    values = 100 * np.cumprod(1 + rng.normal(0.0005, 0.009, (140, 2)), axis=0)
+    prices = pd.DataFrame(values, columns=["AAPL", "MSFT"])
+    prices.insert(0, "Fecha", dates.strftime("%Y-%m-%d"))
+    cutoff = date.today().isoformat()
+    holdings = pd.DataFrame({
+        "FechaCorte": [cutoff, cutoff],
+        "Instrumento": ["MSFT", "AAPL"],
+        "ValorMXN": [30_000, 70_000],
+    })
+    uploads = {
+        "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
+            prices.to_csv(index=False).encode("utf-8-sig")
+        ),
+        "Cartera actual valuada en MXN CSV (opcional)": BytesIO(
+            holdings.to_csv(index=False).encode("utf-8-sig")
+        ),
+    }
+    monkeypatch.setattr(st, "file_uploader", lambda label, **_kwargs: uploads.get(label))
+    monkeypatch.setattr(
+        core.yf, "download",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Yahoo no debe consultarse")),
+    )
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
+    ).run()
+    next(item for item in app.text_input if item.label == "Tickers").set_value("AAPL, MSFT")
+    next(
+        item for item in app.text_input
+        if item.label == "Monedas de cotización, en el mismo orden"
+    ).set_value("MXN, MXN")
+    next(
+        item for item in app.selectbox if item.label == "Moneda base del análisis"
+    ).set_value("MXN")
+    next(
+        item for item in app.text_input if item.label == "Fuente declarada de precios CSV"
+    ).set_value("Archivo de precios de prueba")
+    next(
+        item for item in app.text_input if item.label == "Fuente declarada de la cartera actual"
+    ).set_value("Estado de cuenta ficticio")
+    app.run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error, [item.value for item in app.error]
+    assert any(
+        cutoff in item.value and "100,000.00 MXN" in item.value
+        and "Estado de cuenta ficticio" in item.value
+        for item in app.info
+    )
+    assert any(
+        frame.value.astype(str).eq("Cartera actual").any().any()
+        for frame in app.dataframe
+    )
+
+
+def test_current_holdings_csv_cannot_be_combined_with_manual_weights(monkeypatch):
+    import access
+
+    monkeypatch.setattr(access, "require_access", lambda: None)
+    holdings = BytesIO(
+        (
+            "FechaCorte,Instrumento,ValorMXN\n"
+            f"{date.today().isoformat()},AAPL,100000\n"
+        ).encode("utf-8-sig")
+    )
+    monkeypatch.setattr(
+        st, "file_uploader",
+        lambda label, **_kwargs: holdings if label.startswith("Cartera actual valuada") else None,
+    )
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
+    ).run()
+    next(item for item in app.text_input if item.label.startswith("Cartera actual, pesos")).set_value(
+        "25,25,25,25"
+    ).run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert any("sólo una entrada" in item.value for item in app.error)
+
+
 def test_bond_issue_csv_is_integrated_with_auditable_total_return(monkeypatch):
     import access
 
