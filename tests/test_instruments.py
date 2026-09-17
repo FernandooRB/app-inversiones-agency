@@ -20,6 +20,11 @@ def test_analysis_inputs_excludes_debt_cash_and_reference_rates():
     bond = load_catalog().loc[lambda table: table["instrument_id"].eq("MX_BONOS_M")].iloc[0]
     assert bond["integration_status"] == "PREPARACION_ARCHIVO"
     assert bond["analysis_method"] == "user_clean_accrued_coupon"
+    liquidity = load_catalog().loc[
+        lambda table: table["instrument_id"].eq("MX_CASH")
+    ].iloc[0]
+    assert liquidity["integration_status"] == "PREPARACION_ARCHIVO"
+    assert liquidity["analysis_method"] == "user_annual_rate_accrual"
 
 
 def test_sic_rows_are_explicit_foreign_market_proxies():

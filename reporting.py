@@ -744,7 +744,7 @@ def create_comparison_pdf_report(
         ),
         Paragraph(
             "Las métricas anteriores no descuentan comisiones, diferenciales ni impuestos, y no "
-            "modelan liquidez. Los pesos históricos usan la misma "
+            "modelan liquidez de mercado. Los pesos históricos usan la misma "
             "muestra que los resultados; Black-Litterman añade supuestos declarados. No es una "
             "prueba fuera de muestra ni una recomendación "
             "personalizada. La entrega a terceros requiere revisión legal.",
@@ -949,7 +949,8 @@ def create_comparison_pdf_report(
             Spacer(1, 2 * mm),
             Paragraph(
                 "Una pérdida histórica no es la máxima posible. El resultado depende del periodo, "
-                "los instrumentos y el rebalanceo; no incorpora liquidez, suspensiones ni incumplimientos.",
+                "los instrumentos y el rebalanceo; no incorpora liquidez de mercado, suspensiones "
+                "ni incumplimientos.",
                 styles["Normal"],
             ),
         ])

@@ -23,7 +23,7 @@ from stress import deterministic_shock, historical_worst_windows
 
 
 def main() -> None:
-    labels = ("CETES28", "BONOM", "ETF_SIC", "ACCION_MX", "EFECTIVO")
+    labels = ("CETES28", "BONOM", "ETF_SIC", "ACCION_MX", "LIQUIDEZ")
     cases = (
         ("Máximo Sharpe", [0.15, 0.15, 0.40, 0.25, 0.05], 0.125, 0.138, 0.47, 0.039, 0.052),
         ("Mínima volatilidad", [0.35, 0.25, 0.15, 0.10, 0.15], 0.083, 0.066, 0.34, 0.017, 0.024),
@@ -160,7 +160,8 @@ def main() -> None:
         quotes=dict.fromkeys(labels, "MXN"),
         data_source=(
             "datos ficticios para revisión visual; BONOM representa una emisión preparada desde "
-            "precio limpio, interés devengado y cupones; no son cotizaciones de mercado"
+            "precio limpio, interés devengado y cupones, y LIQUIDEZ una tasa histórica declarada; "
+            "no son cotizaciones de mercado"
         ),
         price_quality_issues=(
             PriceQualityIssue("ETF_SIC", "Salto de precio", "2024-06-10", "2024-06-11", "+35.40%"),

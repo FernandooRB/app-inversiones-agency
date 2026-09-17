@@ -29,6 +29,7 @@ from implementation_costs import (
     estimate_implementation_cost,
 )
 from instruments import analysis_inputs, display_catalog, load_catalog
+from liquidity import merge_liquidity_index, read_liquidity_rate_csv
 from multi_cut import run_multi_cut_backtest
 from portfolio_core import (
     PortfolioError,
@@ -147,7 +148,8 @@ with st.expander("Catálogo piloto de instrumentos México y SIC"):
         "En SIC se usa una aproximación con la serie del mercado de origen convertida a MXN; "
         "no representa el precio local ejecutable. CETES puede añadirse mediante un CSV validado; "
         "Bonos M puede añadirse por emisión mediante precio limpio, devengado y cupones; "
-        "efectivo y fondos permanecen fuera hasta integrar su valoración específica."
+        "un vehículo de liquidez puede añadirse con tasas y convención declaradas. Los fondos "
+        "permanecen fuera hasta integrar su valoración específica."
     )
     st.download_button(
         "Descargar catálogo y notas CSV",
@@ -199,8 +201,8 @@ with st.sidebar:
             "Clases de los tickers, en el mismo orden",
             "renta_variable, renta_variable, renta_variable, renta_variable",
             help=(
-                "Una etiqueta por ticker. Usa minúsculas y guion bajo. Si cargas CETES o un "
-                "Bono M, la app añade deuda_gubernamental automáticamente."
+                "Una etiqueta por ticker. Usa minúsculas y guion bajo. La app añade "
+                "deuda_gubernamental para CETES y Bono M, y efectivo para liquidez."
             ),
         )
         class_limits_input = st.text_area(
@@ -222,7 +224,7 @@ with st.sidebar:
     current_weights_input = st.text_input(
         "Cartera actual, pesos en % (opcional)",
         help=(
-            "Un porcentaje por activo, en el mismo orden; CETES y Bono M van al final, "
+            "Un porcentaje por activo, en el mismo orden; CETES, Bono M y liquidez van al final, "
             "en ese orden, cuando se cargan. "
             "Deben sumar 100. "
             "No se guarda en una base de datos."
@@ -342,6 +344,32 @@ with st.sidebar:
         "plantilla_bono_m.csv",
         "text/csv",
     )
+    liquidity_upload = st.file_uploader(
+        "Tasas de vehículo de liquidez MXN (opcional)",
+        type=["csv"],
+        help=(
+            "Un solo vehículo con Fecha, Vehiculo, TasaAnualPct, Convencion y Tratamiento. "
+            "Convenciones: nominal_360 o efectiva_365; tratamiento: BRUTA o NETA. Máximo 5 MB."
+        ),
+    )
+    liquidity_name_input = st.text_input(
+        "Nombre de la serie de liquidez", "LIQUIDEZ", help="Etiqueta para tablas y reportes."
+    )
+    liquidity_source_input = st.text_input(
+        "Fuente declarada de la tasa de liquidez",
+        help="Contrato, estado de cuenta o proveedor; aparecerá en el PDF.",
+    )
+    st.download_button(
+        "Descargar plantilla de liquidez CSV",
+        (
+            b"Fecha,Vehiculo,TasaAnualPct,Convencion,Tratamiento\n"
+            b"2026-01-02,Cuenta remunerada de ejemplo,8.50,nominal_360,NETA\n"
+            b"2026-01-05,Cuenta remunerada de ejemplo,8.50,nominal_360,NETA\n"
+            b"2026-01-06,Cuenta remunerada de ejemplo,8.45,nominal_360,NETA\n"
+        ),
+        "plantilla_liquidez_mxn.csv",
+        "text/csv",
+    )
     analyze = st.button("Analizar portafolio", type="primary", use_container_width=True)
 
 price_contents = price_upload.getvalue() if price_upload is not None else b""
@@ -350,6 +378,8 @@ cetes_contents = cetes_upload.getvalue() if cetes_upload is not None else b""
 cetes_fingerprint = sha256(cetes_contents).hexdigest() if cetes_contents else None
 bond_contents = bond_upload.getvalue() if bond_upload is not None else b""
 bond_fingerprint = sha256(bond_contents).hexdigest() if bond_contents else None
+liquidity_contents = liquidity_upload.getvalue() if liquidity_upload is not None else b""
+liquidity_fingerprint = sha256(liquidity_contents).hexdigest() if liquidity_contents else None
 settings = (
     tickers_input,
     start_date,
@@ -385,6 +415,9 @@ settings = (
     cetes_name_input,
     bond_fingerprint,
     bond_name_input,
+    liquidity_fingerprint,
+    liquidity_name_input,
+    liquidity_source_input,
 )
 if analyze:
     st.session_state["analysis_settings"] = settings
@@ -405,13 +438,16 @@ if st.session_state.get("analysis_settings") != settings:
 try:
     tickers = tuple(normalize_tickers(tickers_input))
     quotes = currency_map(tickers, quote_input)
-    asset_count = len(tickers) + bool(cetes_contents) + bool(bond_contents)
+    asset_count = (
+        len(tickers) + bool(cetes_contents) + bool(bond_contents) + bool(liquidity_contents)
+    )
     if asset_count * max_weight < 1:
         raise PortfolioError(
             f"Con {asset_count} activos, el peso máximo debe ser al menos {1 / asset_count:.1%}."
         )
     cetes_result = None
     bond_result = None
+    liquidity_result = None
     with st.spinner("Preparando y validando datos..."):
         if price_contents:
             price_source = price_source_input.strip()
@@ -461,11 +497,32 @@ try:
                 pd.Timestamp(start_date):pd.Timestamp(end_date)
             ]
             prices = merge_bond_index(prices, prepared_bond_index)
+        if liquidity_contents:
+            if base_currency != "MXN":
+                raise PortfolioError("La serie de liquidez sólo puede añadirse con moneda base MXN.")
+            liquidity_name = normalize_tickers([liquidity_name_input])[0]
+            if liquidity_name in prices.columns:
+                raise PortfolioError("El nombre de la serie de liquidez coincide con otro activo.")
+            liquidity_source = liquidity_source_input.strip()
+            if (
+                not liquidity_source
+                or len(liquidity_source) > 120
+                or any(ord(char) < 32 for char in liquidity_source)
+            ):
+                raise PortfolioError("Declara una fuente de tasa de liquidez de 1 a 120 caracteres.")
+            liquidity_result = read_liquidity_rate_csv(
+                liquidity_contents, name=liquidity_name
+            )
+            prepared_liquidity_index = liquidity_result.index.loc[
+                pd.Timestamp(start_date):pd.Timestamp(end_date)
+            ]
+            prices = merge_liquidity_index(prices, prepared_liquidity_index)
         analysis_tickers = tuple(str(column) for column in prices.columns)
         analysis_quotes = (
             quotes
             | ({cetes_name: "MXN"} if cetes_result is not None else {})
             | ({bond_name: "MXN"} if bond_result is not None else {})
+            | ({liquidity_name: "MXN"} if liquidity_result is not None else {})
         )
         allocation_groups = ()
         allocation_policy_table = None
@@ -473,7 +530,7 @@ try:
             declared_classes = parse_asset_classes(asset_classes_input, len(tickers))
             analysis_classes = declared_classes + ("deuda_gubernamental",) * sum((
                 cetes_result is not None, bond_result is not None,
-            ))
+            )) + (("efectivo",) if liquidity_result is not None else ())
             allocation_groups = parse_class_limits(class_limits_input, analysis_classes)
             allocation_policy_table = policy_table(allocation_groups)
         if price_contents:
@@ -496,6 +553,13 @@ try:
                 f"{bond_result.issue_id}, vencimiento {bond_result.maturity_date.date()}, "
                 "retorno total desde precio limpio, interés devengado y cupones, "
                 f"SHA-256 {bond_fingerprint[:12]}"
+            )
+        if liquidity_result is not None:
+            data_source += (
+                f"; {liquidity_name}: CSV aportado por el usuario para "
+                f"{liquidity_result.vehicle}; fuente declarada: {liquidity_source}; "
+                f"tasa {liquidity_result.treatment.lower()} con convención "
+                f"{liquidity_result.convention}; SHA-256 {liquidity_fingerprint[:12]}"
             )
         returns = calculate_returns(prices)
         mean_returns, covariance = annualized_moments(returns)
@@ -726,6 +790,13 @@ try:
             f"{bond_result.maturity_date.date()} y {coupon_count} cupón(es) reconocido(s) en el "
             "archivo. Verifica emisión, precios, devengado y flujos con la fuente."
         )
+    if liquidity_result is not None:
+        st.info(
+            f"Serie {liquidity_name} integrada para {liquidity_result.vehicle}: tasa "
+            f"{liquidity_result.treatment.lower()}, convención {liquidity_result.convention}. "
+            "La tasa de cada fecha se aplica al intervalo siguiente. Verifica fuente, liquidez, "
+            "comisiones, impuestos y protección aplicable al vehículo."
+        )
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Media histórica anualizada", percent(max_sharpe.annual_return))
@@ -876,6 +947,18 @@ try:
                 "Descargar auditoría Bono M CSV",
                 bond_audit.to_csv().encode("utf-8-sig"),
                 "bono_m_indice_preparado.csv",
+                "text/csv",
+            )
+        if liquidity_result is not None:
+            liquidity_audit = pd.concat([
+                liquidity_result.annual_rates.mul(100).rename("Tasa anual %"),
+                liquidity_result.calendar_days,
+                liquidity_result.index.rename("Índice de acumulación"),
+            ], axis=1)
+            st.download_button(
+                "Descargar auditoría de liquidez CSV",
+                liquidity_audit.to_csv().encode("utf-8-sig"),
+                "liquidez_indice_preparado.csv",
                 "text/csv",
             )
 
@@ -1290,7 +1373,7 @@ try:
                         asset_classes_input, len(tickers)
                     ) + ("deuda_gubernamental",) * sum((
                         cetes_result is not None, bond_result is not None,
-                    ))
+                    )) + (("efectivo",) if liquidity_result is not None else ())
                     unique_classes = sorted(set(stress_classes))
                     raw_class_shocks = st.text_area(
                         "Cambios por clase: clase, shock %",
