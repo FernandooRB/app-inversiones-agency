@@ -104,6 +104,16 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     shocks.set_value("-20,-10,-5,0").run()
     assert not app.exception
     assert not app.error
+    asset_shock = next(
+        item for item in app.checkbox if item.label == "Añadir shock hipotético por activo"
+    )
+    asset_shock.set_value(False).run()
+    next(
+        item for item in app.checkbox if item.label == "Añadir shock hipotético por clase"
+    ).set_value(True).run()
+    assert not app.exception
+    assert not app.error
+    assert any("Shocks definidos por clase" in item.value for item in app.markdown)
     app.run()
     assert not app.exception
     assert len(app.metric) == 8

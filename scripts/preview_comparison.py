@@ -56,7 +56,12 @@ def main() -> None:
         history.insert(0, "Escenario", alternative.name)
         historical_parts.append(history)
     stress_history = pd.concat(historical_parts, ignore_index=True)
-    shocks = pd.Series([-0.02, -0.25, -0.18, 0.0], index=labels, name="Shock")
+    shocks = pd.Series([-0.03, -0.22, -0.22, 0.0], index=labels, name="Shock")
+    class_shocks = pd.Series({
+        "deuda_gubernamental": -0.03,
+        "renta_variable": -0.22,
+        "efectivo": 0.0,
+    }, name="Shock por clase")
     shock_results = {
         alternative.name: deterministic_shock(
             alternative.metrics.weights, shocks, 1_000_000, labels=labels
@@ -114,7 +119,11 @@ def main() -> None:
         simulation=SimulationReport(
             "Máximo Sharpe", result, 0, 40_000, 0.01, 10, 0.04, 6, 21,
         ),
-        stress=StressReport(stress_history, shocks, shock_results),
+        stress=StressReport(
+            stress_history, shocks, shock_results, class_shocks,
+            "Venta global y búsqueda de liquidez",
+            "Caída simultánea de activos de riesgo y presión moderada en deuda.",
+        ),
         allocation_policy=allocation_policy,
         benchmark_analyses=benchmark_analyses,
         benchmark_source="serie ficticia para revisión visual; no es un índice de mercado",

@@ -283,3 +283,36 @@ def test_comparison_pdf_reports_historical_and_hypothetical_stress():
     assert "Peores ventanas históricas" in text
     assert "Shock hipotético simultáneo" in text
     assert "-14.00%" in text
+
+
+def test_comparison_pdf_documents_named_class_stress():
+    metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 5, 0.02, 0.025, 0.035)
+    index = pd.date_range("2023-01-02", periods=80, freq="B")
+    returns = pd.DataFrame({
+        "AAA": np.linspace(-0.02, 0.02, 80),
+        "BBB": np.linspace(0.01, -0.01, 80),
+    }, index=index)
+    history = historical_worst_windows(returns, metrics.weights)
+    history.insert(0, "Escenario", "Máximo Sharpe")
+    shocks = pd.Series([-0.25, -0.03], index=["AAA", "BBB"], name="Shock")
+    class_shocks = pd.Series(
+        {"renta_variable": -0.25, "deuda": -0.03}, name="Shock por clase"
+    )
+    result = deterministic_shock(metrics.weights, shocks, 1000, labels=shocks.index)
+    report = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (PortfolioAlternative("Máximo Sharpe", metrics, risk),
+         PortfolioAlternative("Pesos iguales", metrics, risk)),
+        1000, base_currency="MXN", risk_free_rate=0.05, observations=80,
+        quotes={"AAA": "MXN", "BBB": "MXN"},
+        stress=StressReport(
+            history, shocks, {"Máximo Sharpe": result}, class_shocks,
+            "Venta global", "Aversión al riesgo y ampliación de diferenciales",
+        ),
+    )
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+    assert "Clase declarada" in text
+    assert "Venta global" in text
+    assert "Aversión al riesgo" in text
+    assert "renta_variable" in text

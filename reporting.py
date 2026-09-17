@@ -58,6 +58,9 @@ class StressReport:
     historical: pd.DataFrame
     shocks: pd.Series | None = None
     shock_results: dict[str, ShockResult] | None = None
+    class_shocks: pd.Series | None = None
+    shock_name: str | None = None
+    shock_rationale: str | None = None
 
 
 def _allocation_policy_story(policy: pd.DataFrame | None, styles) -> list:
@@ -681,8 +684,17 @@ def create_comparison_pdf_report(
             stress_table,
         ])
         if stress.shocks is not None and stress.shock_results:
-            shock_rows = [["Activo", "Cambio hipotético"]] + [
-                [escape(str(label)), f"{value:.2%}"] for label, value in stress.shocks.items()
+            displayed_shocks = (
+                stress.class_shocks if stress.class_shocks is not None else stress.shocks
+            )
+            if (
+                displayed_shocks.empty or displayed_shocks.index.has_duplicates
+                or not np.isfinite(displayed_shocks.to_numpy(dtype=float)).all()
+            ):
+                raise ValueError("Los shocks del reporte contienen valores inválidos.")
+            basis = "Clase declarada" if stress.class_shocks is not None else "Activo"
+            shock_rows = [[basis, "Cambio hipotético"]] + [
+                [escape(str(label)), f"{value:.2%}"] for label, value in displayed_shocks.items()
             ]
             outcome_rows = [["Escenario", "Cambio", f"Valor ({base_currency})", "Pérdida"]] + [
                 [
@@ -711,7 +723,10 @@ def create_comparison_pdf_report(
                 Spacer(1, 3 * mm),
                 Paragraph("Shock hipotético simultáneo", styles["Heading2"]),
                 Paragraph(
-                    "Cambios definidos por activo sobre posiciones valuadas en la moneda base. "
+                    f"Escenario: {escape(stress.shock_name or 'Escenario manual')}<br/>"
+                    f"Fundamento: {escape(stress.shock_rationale or 'No documentado')}<br/>"
+                    f"Cambios definidos por {'clase' if stress.class_shocks is not None else 'activo'} "
+                    "sobre posiciones valuadas en la moneda base. "
                     "Es un cálculo estático de un paso; no asigna probabilidad ni modela recuperación.",
                     styles["Normal"],
                 ),

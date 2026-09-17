@@ -18,8 +18,11 @@ puede ser peor o presentar relaciones distintas entre activos.
 
 ## Shock hipotético simultáneo
 
-El usuario ingresa un cambio porcentual de precio por activo, en el mismo orden
-de los tickers. El cambio de la cartera es la suma de `peso × shock`; el valor
+El usuario puede ingresar un cambio porcentual por activo, en el mismo orden de los
+tickers, o una regla por cada clase declarada. En el segundo caso, el motor exige
+exactamente una regla para cada clase y expande el mismo cambio a sus instrumentos.
+El escenario requiere nombre y fundamento; ambos quedan en el PDF. El cambio de la
+cartera es la suma de `peso × shock`; el valor
 estresado es `capital × (1 + cambio de cartera)`. También se muestra la
 contribución de cada activo al cambio total. Cada shock debe ser al menos -100 %.
 
@@ -39,7 +42,6 @@ explica que resultados hipotéticos y retrospectivos no equivalen a desempeño r
 
 ## Controles siguientes
 
-Crear escenarios nombrados para México y SIC después de contar con un catálogo
-de instrumentos que identifique clase de activo, moneda, duración, liquidez y
-mercado. Validar por separado shocks de tasas para CETES y bonos mediante un
+Ampliar los escenarios para incorporar moneda, duración, liquidez y mercado.
+Validar por separado shocks de tasas para CETES y bonos mediante un
 modelo de flujos y duración; no tratarlos como simples cambios de precio arbitrarios.

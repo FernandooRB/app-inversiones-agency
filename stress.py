@@ -62,6 +62,66 @@ def parse_asset_shocks(raw: str, asset_count: int) -> np.ndarray:
     return shocks
 
 
+def parse_class_shocks(
+    raw: str, asset_classes: tuple[str, ...]
+) -> tuple[pd.Series, np.ndarray]:
+    """Parse one percentage shock per declared class and expand it to the assets."""
+    if not asset_classes or any(not str(value).strip() for value in asset_classes):
+        raise PortfolioError("Cada activo requiere una clase para aplicar shocks por clase.")
+    normalized = tuple(str(value).strip().lower() for value in asset_classes)
+    expected = set(normalized)
+    parsed: dict[str, float] = {}
+    for line_number, line in enumerate(raw.splitlines(), start=1):
+        if not line.strip():
+            continue
+        parts = [part.strip().lower() for part in line.split(",")]
+        if len(parts) != 2:
+            raise PortfolioError(
+                f"La línea {line_number} debe tener clase y shock porcentual."
+            )
+        name = parts[0]
+        if name in parsed:
+            raise PortfolioError(f"La clase {name} aparece más de una vez en los shocks.")
+        try:
+            value = float(parts[1]) / 100
+        except ValueError as exc:
+            raise PortfolioError(
+                f"El shock de la línea {line_number} debe ser numérico."
+            ) from exc
+        if not np.isfinite(value) or value < -1 or value > 10:
+            raise PortfolioError(
+                "Cada shock de clase debe ser finito, al menos -100% y no mayor a 1,000%."
+            )
+        parsed[name] = value
+    missing, extra = expected - parsed.keys(), parsed.keys() - expected
+    if missing:
+        raise PortfolioError("Faltan shocks para las clases: " + ", ".join(sorted(missing)))
+    if extra:
+        raise PortfolioError(
+            "Hay shocks para clases no utilizadas: " + ", ".join(sorted(extra))
+        )
+    class_shocks = pd.Series(
+        {name: parsed[name] for name in sorted(expected)}, name="Shock por clase", dtype=float
+    )
+    return class_shocks, np.asarray([parsed[name] for name in normalized], dtype=float)
+
+
+def validate_scenario_metadata(name: str, rationale: str) -> tuple[str, str]:
+    """Validate report-safe labels for a hypothetical stress scenario."""
+    cleaned_name, cleaned_rationale = name.strip(), rationale.strip()
+    if (
+        not cleaned_name or len(cleaned_name) > 80
+        or any(ord(char) < 32 for char in cleaned_name)
+    ):
+        raise PortfolioError("El escenario requiere un nombre de 1 a 80 caracteres.")
+    if (
+        not cleaned_rationale or len(cleaned_rationale) > 240
+        or any(ord(char) < 32 for char in cleaned_rationale)
+    ):
+        raise PortfolioError("El fundamento del escenario debe tener de 1 a 240 caracteres.")
+    return cleaned_name, cleaned_rationale
+
+
 def deterministic_shock(weights, shocks, portfolio_value: float, labels=None) -> ShockResult:
     """Apply simultaneous one-step relative price changes to current weights."""
     shocks = np.asarray(shocks, dtype=float)

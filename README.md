@@ -4,7 +4,8 @@ Aplicación educativa de uso interno en Streamlit para analizar asignaciones de 
 portafolios de máximo Sharpe y mínima volatilidad, una frontera eficiente, VaR, CVaR y un reporte PDF.
 Incluye [escenarios Monte Carlo](docs/monte_carlo.md) para investigación interna,
 con métodos histórico por bloques y lognormal correlacionado, y
-[pruebas de estrés](docs/stress_testing.md) históricas e hipotéticas. El
+[pruebas de estrés](docs/stress_testing.md) históricas e hipotéticas con shocks documentados
+por activo o por clase declarada y contribuciones por instrumento. El
 [catálogo piloto México/SIC](docs/instrument_catalog.md) distingue el instrumento negociable de
 la serie utilizada por el motor y bloquea bonos, efectivo y fondos hasta contar con su valoración.
 El [preparador de CETES](docs/cetes_adapter.md) convierte archivos de precio y plazo en un índice
