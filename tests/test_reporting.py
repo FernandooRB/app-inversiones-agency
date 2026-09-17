@@ -27,6 +27,33 @@ def test_pdf_report_is_created():
     assert len(report) > 1_000
 
 
+def test_both_pdfs_include_declared_asset_class_policy():
+    metrics = PortfolioMetrics(np.array([0.4, 0.6]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    policy = pd.DataFrame({
+        "Clase": ["crecimiento", "defensivo"],
+        "Mínimo": [0.20, 0.60], "Máximo": [0.40, 0.80], "Activos": [1, 1],
+    })
+    basic = create_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        metrics, risk, 100_000, allocation_policy=policy,
+    )
+    comparison = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (PortfolioAlternative("Máximo Sharpe", metrics, risk),
+         PortfolioAlternative("Referencia simple factible", metrics, risk)),
+        100_000, base_currency="MXN", risk_free_rate=0.05,
+        observations=252, quotes={"AAA": "MXN", "BBB": "MXN"},
+        allocation_policy=policy,
+    )
+    for report in (basic, comparison):
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+        assert "Política por clase de activo" in text
+        assert "crecimiento" in text
+        assert "20.0%" in text
+        assert "clasificación fue declarada" in text
+
+
 def test_both_pdfs_report_explicit_implementation_cost_assumptions():
     metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
     risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)

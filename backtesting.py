@@ -7,8 +7,10 @@ import pandas as pd
 
 from covariance_calibration import select_diagonal_shrinkage
 from portfolio_core import (
+    AllocationGroup,
     PortfolioError,
     annualized_moments,
+    feasible_reference_weights,
     optimize_portfolio,
     validate_weights,
 )
@@ -72,6 +74,7 @@ def run_holdout_backtest(
     current_weights: np.ndarray | None = None,
     trading_cost_bps: float = 0.0,
     covariance_shrinkage: float | str = 0.0,
+    allocation_groups: tuple[AllocationGroup, ...] = (),
 ) -> HoldoutBacktest:
     """Estimate allocations once, then evaluate the untouched later sample."""
     if not isinstance(returns.index, pd.DatetimeIndex) or (
@@ -111,14 +114,17 @@ def run_holdout_backtest(
     mean, covariance = annualized_moments(
         training, covariance_shrinkage=selected_shrinkage
     )
+    reference_name = "Referencia simple factible" if allocation_groups else "Pesos iguales"
     allocations = {
         "Máximo Sharpe": optimize_portfolio(
-            mean, covariance, risk_free_rate, "max_sharpe", max_weight
+            mean, covariance, risk_free_rate, "max_sharpe", max_weight, allocation_groups
         ).weights,
         "Mínima volatilidad": optimize_portfolio(
-            mean, covariance, risk_free_rate, "min_volatility", max_weight
+            mean, covariance, risk_free_rate, "min_volatility", max_weight, allocation_groups
         ).weights,
-        "Pesos iguales": np.full(returns.shape[1], 1 / returns.shape[1]),
+        reference_name: feasible_reference_weights(
+            returns.shape[1], max_weight, allocation_groups
+        ),
     }
     if baseline is not None:
         allocations["Cartera actual"] = baseline

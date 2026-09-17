@@ -59,6 +59,53 @@ class StressReport:
     shock_results: dict[str, ShockResult] | None = None
 
 
+def _allocation_policy_story(policy: pd.DataFrame | None, styles) -> list:
+    if policy is None:
+        return []
+    required = ["Clase", "Mínimo", "Máximo", "Activos"]
+    if list(policy.columns) != required or policy.empty:
+        raise ValueError("La política por clase no tiene el formato esperado.")
+    numeric = policy[["Mínimo", "Máximo", "Activos"]].to_numpy(dtype=float)
+    if (
+        not np.isfinite(numeric).all()
+        or (policy["Mínimo"] < 0).any()
+        or (policy["Máximo"] > 1).any()
+        or (policy["Mínimo"] > policy["Máximo"]).any()
+        or (policy["Activos"] < 1).any()
+        or policy["Clase"].astype(str).str.strip().eq("").any()
+        or policy["Clase"].duplicated().any()
+    ):
+        raise ValueError("La política por clase contiene valores inválidos.")
+    rows = [["Clase declarada", "Mínimo", "Máximo", "Activos"]] + [
+        [
+            Paragraph(escape(str(row.Clase)), styles["Normal"]),
+            f"{row.Mínimo:.1%}", f"{row.Máximo:.1%}", str(int(row.Activos)),
+        ]
+        for row in policy.itertuples(index=False)
+    ]
+    table = Table(rows, colWidths=[70 * mm, 30 * mm, 30 * mm, 25 * mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEBF1")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    return [
+        Spacer(1, 3 * mm),
+        KeepTogether([
+            Paragraph("Política por clase de activo", styles["Heading2"]),
+            table,
+            Paragraph(
+                "La clasificación fue declarada por el usuario y no fue verificada contra una "
+                "fuente externa. Las carteras optimizadas respetan estos intervalos.",
+                styles["Normal"],
+            ),
+        ]),
+    ]
+
+
 def _implementation_cost_story(
     estimates: tuple[ImplementationCostEstimate, ...],
     assumptions: ImplementationCostAssumptions | None,
@@ -263,6 +310,7 @@ def create_comparison_pdf_report(
     implementation_cost_assumptions: ImplementationCostAssumptions | None = None,
     implementation_cost_source: str | None = None,
     implementation_cost_source_date: date | None = None,
+    allocation_policy: pd.DataFrame | None = None,
 ) -> bytes:
     """Compare historical portfolio alternatives on one sample and set of assumptions."""
     if not 2 <= len(alternatives) <= 4 or len({item.name for item in alternatives}) != len(alternatives):
@@ -307,6 +355,9 @@ def create_comparison_pdf_report(
             styles["Normal"],
         ),
         Spacer(1, 5 * mm),
+    ]
+    story.extend(_allocation_policy_story(allocation_policy, styles))
+    story.extend([
         Paragraph("Resultados comparables", styles["Heading2"]),
         Paragraph(
             "Todas las alternativas usan los mismos activos, fechas, moneda y parámetros de riesgo. "
@@ -314,7 +365,7 @@ def create_comparison_pdf_report(
             styles["Normal"],
         ),
         Spacer(1, 2 * mm),
-    ]
+    ])
 
     def comparison_row(label, getter, formatter):
         return [label] + [formatter(getter(item)) for item in alternatives]
@@ -623,6 +674,7 @@ def create_pdf_report(
     implementation_cost_assumptions: ImplementationCostAssumptions | None = None,
     implementation_cost_source: str | None = None,
     implementation_cost_source_date: date | None = None,
+    allocation_policy: pd.DataFrame | None = None,
 ) -> bytes:
     """Create a compact, methodology-first report."""
     validate_weights(metrics.weights, len(tickers), max_weight)
@@ -659,6 +711,7 @@ def create_pdf_report(
         ),
         Spacer(1, 3 * mm),
     ]
+    story.extend(_allocation_policy_story(allocation_policy, styles))
     rows = [
         ["Métrica", "Estimación", "Importe"],
         ["Media histórica anualizada", f"{metrics.annual_return:.2%}", "—"],

@@ -2,7 +2,8 @@
 
 La aplicación separa los retornos cronológicamente en dos ventanas sin superposición. La primera
 estima medias, covarianza y pesos de máximo Sharpe y mínima volatilidad. La segunda evalúa esos pesos
-sin reoptimizar, junto con pesos iguales y la cartera actual opcional. Exige al menos 60 retornos para
+sin reoptimizar, junto con pesos iguales —o la referencia simple factible cuando existe una
+política por clase— y la cartera actual opcional. Exige al menos 60 retornos para
 estimación y 20 para evaluación. El usuario elige entre 50 % y 90 % de la muestra para estimar.
 
 La evaluación supone comprar al inicio y mantener los activos sin rebalanceo. El capital de cada activo
@@ -44,7 +45,7 @@ conviene fijar corte, frecuencia, universo y costo antes de inspeccionar las cur
 Cada estrategia invierte en los pesos calculados antes del retorno de la sesión. Entre revisiones,
 las posiciones se mantienen y sus pesos cambian con el mercado. La rotación es la mitad de la suma
 de cambios absolutos desde esos pesos efectivos; se descuenta del capital en puntos base al inicio
-y en cada revisión. Pesos iguales se rebalancea en las mismas fechas. Si se proporciona la cartera
+y en cada revisión. La referencia simple se rebalancea en las mismas fechas. Si se proporciona la cartera
 actual, ésta se compara como referencia sin rebalanceo; si no, se supone que la posición inicial ya
 está asignada y su costo inicial es cero. El costo pagado acumulado se expresa como fracción del
 capital inicial, no como suma de tasas ni como estimación de una tarifa real de la casa de bolsa.

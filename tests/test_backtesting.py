@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from backtesting import run_holdout_backtest
-from portfolio_core import PortfolioError
+from portfolio_core import AllocationGroup, PortfolioError
 
 
 def regime_returns() -> pd.DataFrame:
@@ -63,3 +63,16 @@ def test_entry_cost_uses_current_portfolio_turnover_and_no_rebalancing():
 def test_holdout_rejects_too_little_evaluation_data():
     with pytest.raises(PortfolioError, match="20 para evaluación"):
         run_holdout_backtest(regime_returns().iloc[:70], training_fraction=0.90)
+
+
+def test_holdout_applies_policy_to_every_constructed_reference():
+    groups = (
+        AllocationGroup("a", (0,), 0.30, 0.40),
+        AllocationGroup("b", (1,), 0.60, 0.70),
+    )
+    result = run_holdout_backtest(
+        regime_returns(), training_fraction=0.70, allocation_groups=groups
+    )
+    assert "Referencia simple factible" in result.allocations
+    for scenario in ("Máximo Sharpe", "Mínima volatilidad", "Referencia simple factible"):
+        assert 0.30 - 1e-7 <= result.allocations.loc["A", scenario] <= 0.40 + 1e-7

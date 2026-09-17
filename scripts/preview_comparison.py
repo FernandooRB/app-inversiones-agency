@@ -73,6 +73,12 @@ def main() -> None:
         )
         for alternative in alternatives
     )
+    allocation_policy = pd.DataFrame({
+        "Clase": ["deuda_gubernamental", "renta_variable", "efectivo"],
+        "Mínimo": [0.20, 0.30, 0.05],
+        "Máximo": [0.50, 0.75, 0.20],
+        "Activos": [1, 2, 1],
+    })
     output = Path("output/pdf/comparativo_ficticio_costos_mxn.pdf")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(create_comparison_pdf_report(
@@ -95,6 +101,7 @@ def main() -> None:
             "Máximo Sharpe", result, 0, 40_000, 0.01, 10, 0.04, 6, 21,
         ),
         stress=StressReport(stress_history, shocks, shock_results),
+        allocation_policy=allocation_policy,
     ))
     print(output.resolve())
 

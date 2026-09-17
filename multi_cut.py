@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from backtesting import HoldoutBacktest, run_holdout_backtest
-from portfolio_core import PortfolioError
+from portfolio_core import AllocationGroup, PortfolioError
 
 TRAINING_FRACTIONS = (0.50, 0.60, 0.70, 0.80)
 
@@ -26,6 +26,7 @@ def run_multi_cut_backtest(
     current_weights: np.ndarray | None = None,
     trading_cost_bps: float = 0.0,
     covariance_shrinkage: float | str = 0.0,
+    allocation_groups: tuple[AllocationGroup, ...] = (),
 ) -> MultiCutBacktest:
     """Run four fixed cuts, reporting each overlapping evaluation separately."""
     if len(returns) < 120:
@@ -45,10 +46,17 @@ def run_multi_cut_backtest(
             risk_free_rate=risk_free_rate, max_weight=max_weight,
             current_weights=current_weights, trading_cost_bps=trading_cost_bps,
             covariance_shrinkage=covariance_shrinkage,
+            allocation_groups=allocation_groups,
         )
         results[label] = result
-        equal_total = result.summary.loc["Pesos iguales", "Retorno total neto"]
-        equal_annual = result.summary.loc["Pesos iguales", "Retorno anualizado neto"]
+        reference_name = (
+            "Referencia simple factible" if allocation_groups else "Pesos iguales"
+        )
+        reference_suffix = (
+            "referencia simple" if allocation_groups else "pesos iguales"
+        )
+        equal_total = result.summary.loc[reference_name, "Retorno total neto"]
+        equal_annual = result.summary.loc[reference_name, "Retorno anualizado neto"]
         for scenario, metrics in result.summary.iterrows():
             rows.append({
                 "Corte inicial": label, "Escenario": scenario,
@@ -60,9 +68,9 @@ def run_multi_cut_backtest(
                 "Retornos de evaluación": result.evaluation_observations,
                 "Contracción de covarianza": result.covariance_shrinkage,
                 **metrics.to_dict(),
-                "Diferencia total neta vs pesos iguales":
+                f"Diferencia total neta vs {reference_suffix}":
                     metrics["Retorno total neto"] - equal_total,
-                "Diferencia anualizada neta vs pesos iguales":
+                f"Diferencia anualizada neta vs {reference_suffix}":
                     metrics["Retorno anualizado neto"] - equal_annual,
             })
 

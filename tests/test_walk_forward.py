@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from portfolio_core import PortfolioError
+from portfolio_core import AllocationGroup, PortfolioError
 from walk_forward import run_walk_forward_backtest
 
 
@@ -62,3 +62,16 @@ def test_cadence_and_return_validations():
         run_walk_forward_backtest(returns, cadence_months=1)
     with pytest.raises(PortfolioError, match="fechas únicas y ordenadas"):
         run_walk_forward_backtest(returns.iloc[::-1])
+
+
+def test_every_walk_forward_review_obeys_policy():
+    groups = (
+        AllocationGroup("a", (0,), 0.20, 0.35),
+        AllocationGroup("b", (1,), 0.65, 0.80),
+    )
+    result = run_walk_forward_backtest(
+        sample_returns(), training_fraction=0.60, cadence_months=3,
+        allocation_groups=groups,
+    )
+    assert "Referencia simple factible" in result.summary.index
+    assert result.allocation_history["A"].between(0.20 - 1e-7, 0.35 + 1e-7).all()
