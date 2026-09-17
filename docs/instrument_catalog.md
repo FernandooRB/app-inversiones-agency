@@ -29,6 +29,10 @@ El [adaptador de liquidez MXN](liquidity_adapter.md) prepara un vehículo identi
 anual histórica y una convención explícita. La etiqueta `NETA` es una declaración de la fuente; la app
 no calcula impuestos ni verifica disponibilidad, comisiones, protección de depósitos o riesgo de crédito.
 
+El [adaptador de fondos MXN](fund_adapter.md) exige un fondo y una serie constantes, y combina el valor
+de la acción con distribuciones en efectivo. No confirma que el valor aportado sea ejecutable, que incluya
+todos los costos ni que la serie esté disponible para un cliente determinado.
+
 ## Reglas operativas
 
 1. Confirmar símbolo, serie, ISIN, mercado y moneda con una fuente autorizada antes de analizar.

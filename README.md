@@ -7,14 +7,16 @@ con métodos histórico por bloques y lognormal correlacionado, y
 [pruebas de estrés](docs/stress_testing.md) históricas e hipotéticas con shocks documentados
 por activo o por clase declarada y contribuciones por instrumento. El
 [catálogo piloto México/SIC](docs/instrument_catalog.md) distingue el instrumento negociable de
-la serie utilizada por el motor y bloquea fondos hasta contar con su valoración; los Bonos M y los
-vehículos de liquidez MXN se incorporan únicamente mediante archivos auditables e identificados.
+la serie utilizada por el motor. Bonos M, vehículos de liquidez MXN y fondos mexicanos se incorporan
+únicamente mediante archivos auditables que identifican la emisión, el vehículo o la serie exacta.
 El [preparador de CETES](docs/cetes_adapter.md) convierte archivos de precio y plazo en un índice
 revisable que puede añadirse al optimizador mixto en MXN.
 El [preparador de Bonos M](docs/bonos_m_adapter.md) construye retorno total para una emisión única
 desde precio limpio, interés devengado y cupones, con un CSV de auditoría.
 El [preparador de liquidez MXN](docs/liquidity_adapter.md) acumula una tasa anual histórica declarada
 con convención explícita y sin usar tasas futuras para intervalos anteriores.
+El [preparador de fondos MXN](docs/fund_adapter.md) calcula retorno total para un fondo y serie exactos
+desde el valor de la acción y sus distribuciones por acción.
 La [importación manual de precios ajustados](docs/price_upload.md) acepta un CSV
 aportado por el equipo y documenta su fuente y huella, sin verificar por sí sola
 ajustes corporativos, moneda ni derechos de uso.
@@ -157,6 +159,7 @@ tests/               Pruebas unitarias
   universos.
 - Validar series de Bonos M por emisión y sus convenciones contra una fuente contractual.
 - Validar tasas de vehículos de liquidez contra contratos y estados de cuenta reales.
+- Validar valores de acción, distribuciones y costos de fondos contra fuentes contractuales.
 - Diseñar perfiles IR1–IR5 sólo después de definir su metodología y encuadre; el motor de
   restricciones por clase ya está disponible para escenarios internos declarados.
 - Cobertura cambiaria y validación de metadatos de instrumentos.

@@ -23,6 +23,7 @@ from fixed_income import (
     read_banxico_cetes_csv,
     read_bond_total_return_csv,
 )
+from funds import merge_fund_index, read_fund_total_return_csv
 from fx_comparison import render_comparison
 from implementation_costs import (
     ImplementationCostAssumptions,
@@ -148,8 +149,8 @@ with st.expander("Catálogo piloto de instrumentos México y SIC"):
         "En SIC se usa una aproximación con la serie del mercado de origen convertida a MXN; "
         "no representa el precio local ejecutable. CETES puede añadirse mediante un CSV validado; "
         "Bonos M puede añadirse por emisión mediante precio limpio, devengado y cupones; "
-        "un vehículo de liquidez puede añadirse con tasas y convención declaradas. Los fondos "
-        "permanecen fuera hasta integrar su valoración específica."
+        "un vehículo de liquidez puede añadirse con tasas y convención declaradas; los fondos "
+        "mexicanos requieren una serie exacta con valor de acción y distribuciones."
     )
     st.download_button(
         "Descargar catálogo y notas CSV",
@@ -202,7 +203,8 @@ with st.sidebar:
             "renta_variable, renta_variable, renta_variable, renta_variable",
             help=(
                 "Una etiqueta por ticker. Usa minúsculas y guion bajo. La app añade "
-                "deuda_gubernamental para CETES y Bono M, y efectivo para liquidez."
+                "deuda_gubernamental para CETES y Bono M, efectivo para liquidez y fondo para "
+                "una serie de fondo cargada."
             ),
         )
         class_limits_input = st.text_area(
@@ -224,7 +226,7 @@ with st.sidebar:
     current_weights_input = st.text_input(
         "Cartera actual, pesos en % (opcional)",
         help=(
-            "Un porcentaje por activo, en el mismo orden; CETES, Bono M y liquidez van al final, "
+            "Un porcentaje por activo, en el mismo orden; CETES, Bono M, liquidez y fondo van al final, "
             "en ese orden, cuando se cargan. "
             "Deben sumar 100. "
             "No se guarda en una base de datos."
@@ -370,6 +372,32 @@ with st.sidebar:
         "plantilla_liquidez_mxn.csv",
         "text/csv",
     )
+    fund_upload = st.file_uploader(
+        "Serie de fondo de inversión MXN (opcional)",
+        type=["csv"],
+        help=(
+            "Un solo fondo y serie con Fecha, Fondo, Serie, Moneda, ValorAccion y Distribucion "
+            "por acción. Máximo 5 MB; sólo MXN."
+        ),
+    )
+    fund_name_input = st.text_input(
+        "Nombre de la serie del fondo", "FONDOMXN", help="Etiqueta para tablas y reportes."
+    )
+    fund_source_input = st.text_input(
+        "Fuente declarada del valor del fondo",
+        help="Operadora, distribuidora o estado de cuenta; aparecerá en el PDF.",
+    )
+    st.download_button(
+        "Descargar plantilla de fondo CSV",
+        (
+            b"Fecha,Fondo,Serie,Moneda,ValorAccion,Distribucion\n"
+            b"2026-01-02,Fondo de ejemplo,A1,MXN,10.0000,0\n"
+            b"2026-01-05,Fondo de ejemplo,A1,MXN,10.0100,0\n"
+            b"2026-01-06,Fondo de ejemplo,A1,MXN,10.0150,0\n"
+        ),
+        "plantilla_fondo_mxn.csv",
+        "text/csv",
+    )
     analyze = st.button("Analizar portafolio", type="primary", use_container_width=True)
 
 price_contents = price_upload.getvalue() if price_upload is not None else b""
@@ -380,6 +408,8 @@ bond_contents = bond_upload.getvalue() if bond_upload is not None else b""
 bond_fingerprint = sha256(bond_contents).hexdigest() if bond_contents else None
 liquidity_contents = liquidity_upload.getvalue() if liquidity_upload is not None else b""
 liquidity_fingerprint = sha256(liquidity_contents).hexdigest() if liquidity_contents else None
+fund_contents = fund_upload.getvalue() if fund_upload is not None else b""
+fund_fingerprint = sha256(fund_contents).hexdigest() if fund_contents else None
 settings = (
     tickers_input,
     start_date,
@@ -418,6 +448,9 @@ settings = (
     liquidity_fingerprint,
     liquidity_name_input,
     liquidity_source_input,
+    fund_fingerprint,
+    fund_name_input,
+    fund_source_input,
 )
 if analyze:
     st.session_state["analysis_settings"] = settings
@@ -440,6 +473,7 @@ try:
     quotes = currency_map(tickers, quote_input)
     asset_count = (
         len(tickers) + bool(cetes_contents) + bool(bond_contents) + bool(liquidity_contents)
+        + bool(fund_contents)
     )
     if asset_count * max_weight < 1:
         raise PortfolioError(
@@ -448,6 +482,7 @@ try:
     cetes_result = None
     bond_result = None
     liquidity_result = None
+    fund_result = None
     with st.spinner("Preparando y validando datos..."):
         if price_contents:
             price_source = price_source_input.strip()
@@ -517,12 +552,31 @@ try:
                 pd.Timestamp(start_date):pd.Timestamp(end_date)
             ]
             prices = merge_liquidity_index(prices, prepared_liquidity_index)
+        if fund_contents:
+            if base_currency != "MXN":
+                raise PortfolioError("La serie del fondo sólo puede añadirse con moneda base MXN.")
+            fund_name = normalize_tickers([fund_name_input])[0]
+            if fund_name in prices.columns:
+                raise PortfolioError("El nombre de la serie del fondo coincide con otro activo.")
+            fund_source = fund_source_input.strip()
+            if (
+                not fund_source
+                or len(fund_source) > 120
+                or any(ord(char) < 32 for char in fund_source)
+            ):
+                raise PortfolioError("Declara una fuente del fondo de 1 a 120 caracteres.")
+            fund_result = read_fund_total_return_csv(fund_contents, name=fund_name)
+            prepared_fund_index = fund_result.index.loc[
+                pd.Timestamp(start_date):pd.Timestamp(end_date)
+            ]
+            prices = merge_fund_index(prices, prepared_fund_index)
         analysis_tickers = tuple(str(column) for column in prices.columns)
         analysis_quotes = (
             quotes
             | ({cetes_name: "MXN"} if cetes_result is not None else {})
             | ({bond_name: "MXN"} if bond_result is not None else {})
             | ({liquidity_name: "MXN"} if liquidity_result is not None else {})
+            | ({fund_name: "MXN"} if fund_result is not None else {})
         )
         allocation_groups = ()
         allocation_policy_table = None
@@ -531,6 +585,7 @@ try:
             analysis_classes = declared_classes + ("deuda_gubernamental",) * sum((
                 cetes_result is not None, bond_result is not None,
             )) + (("efectivo",) if liquidity_result is not None else ())
+            analysis_classes += (("fondo",) if fund_result is not None else ())
             allocation_groups = parse_class_limits(class_limits_input, analysis_classes)
             allocation_policy_table = policy_table(allocation_groups)
         if price_contents:
@@ -560,6 +615,12 @@ try:
                 f"{liquidity_result.vehicle}; fuente declarada: {liquidity_source}; "
                 f"tasa {liquidity_result.treatment.lower()} con convención "
                 f"{liquidity_result.convention}; SHA-256 {liquidity_fingerprint[:12]}"
+            )
+        if fund_result is not None:
+            data_source += (
+                f"; {fund_name}: CSV aportado por el usuario para {fund_result.fund_id}, "
+                f"serie {fund_result.series_id}; fuente declarada: {fund_source}; retorno total "
+                f"desde valor de acción y distribuciones; SHA-256 {fund_fingerprint[:12]}"
             )
         returns = calculate_returns(prices)
         mean_returns, covariance = annualized_moments(returns)
@@ -797,6 +858,13 @@ try:
             "La tasa de cada fecha se aplica al intervalo siguiente. Verifica fuente, liquidez, "
             "comisiones, impuestos y protección aplicable al vehículo."
         )
+    if fund_result is not None:
+        distribution_count = int((fund_result.distributions > 0).sum())
+        st.info(
+            f"Serie {fund_name} integrada para {fund_result.fund_id}, serie "
+            f"{fund_result.series_id}, con {distribution_count} distribución(es) reconocida(s). "
+            "Verifica valores, distribuciones, comisiones, liquidez y derechos de la serie."
+        )
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Media histórica anualizada", percent(max_sharpe.annual_return))
@@ -959,6 +1027,18 @@ try:
                 "Descargar auditoría de liquidez CSV",
                 liquidity_audit.to_csv().encode("utf-8-sig"),
                 "liquidez_indice_preparado.csv",
+                "text/csv",
+            )
+        if fund_result is not None:
+            fund_audit = pd.concat([
+                fund_result.share_values,
+                fund_result.distributions,
+                fund_result.index.rename("Índice retorno total"),
+            ], axis=1)
+            st.download_button(
+                "Descargar auditoría del fondo CSV",
+                fund_audit.to_csv().encode("utf-8-sig"),
+                "fondo_indice_preparado.csv",
                 "text/csv",
             )
 
@@ -1374,6 +1454,7 @@ try:
                     ) + ("deuda_gubernamental",) * sum((
                         cetes_result is not None, bond_result is not None,
                     )) + (("efectivo",) if liquidity_result is not None else ())
+                    stress_classes += (("fondo",) if fund_result is not None else ())
                     unique_classes = sorted(set(stress_classes))
                     raw_class_shocks = st.text_area(
                         "Cambios por clase: clase, shock %",
