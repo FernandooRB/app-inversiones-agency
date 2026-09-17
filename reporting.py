@@ -29,6 +29,7 @@ from implementation_costs import (
 )
 from portfolio_core import PortfolioMetrics, RiskMetrics, validate_weights
 from price_quality import PriceQualityIssue
+from risk_attribution import RiskAttribution
 from simulation import SimulationResult
 from stress import ShockResult
 
@@ -61,6 +62,93 @@ class StressReport:
     class_shocks: pd.Series | None = None
     shock_name: str | None = None
     shock_rationale: str | None = None
+
+
+def _risk_attribution_story(
+    attributions: tuple[RiskAttribution, ...],
+    styles,
+) -> list:
+    if not attributions:
+        return []
+    if len({item.alternative_name for item in attributions}) != len(attributions):
+        raise ValueError("Las atribuciones de riesgo deben tener nombres únicos.")
+    required = {
+        "Activo", "Peso", "Volatilidad individual", "Contribución marginal",
+        "Contribución a volatilidad", "% contribución a volatilidad",
+        "% absoluto del riesgo",
+    }
+    rows = [[
+        Paragraph("<b>Alternativa</b>", styles["Normal"]),
+        Paragraph("<b>Volatilidad</b>", styles["Normal"]),
+        Paragraph("<b>Razón de<br/>diversificación</b>", styles["Normal"]),
+        Paragraph("<b>Posiciones<br/>efectivas</b>", styles["Normal"]),
+        Paragraph("<b>Contribuyentes<br/>efectivos</b>", styles["Normal"]),
+        Paragraph("<b>Mayor<br/>contribuyente</b>", styles["Normal"]),
+    ]]
+    for item in attributions:
+        values = np.array([
+            item.portfolio_volatility, item.weighted_standalone_volatility,
+            item.diversification_ratio, item.weight_hhi, item.effective_positions,
+            item.absolute_risk_hhi, item.effective_risk_contributors,
+        ])
+        if (
+            not np.isfinite(values).all() or (values <= 0).any()
+            or set(item.detail.columns) != required or item.detail.empty
+            or item.detail["Activo"].astype(str).str.strip().eq("").any()
+            or item.detail["Activo"].duplicated().any()
+            or not np.isfinite(
+                item.detail.drop(columns="Activo").to_numpy(dtype=float)
+            ).all()
+            or not np.isclose(
+                item.detail["Contribución a volatilidad"].sum(),
+                item.portfolio_volatility,
+                atol=1e-8,
+                rtol=1e-6,
+            )
+            or not np.isclose(item.detail["% absoluto del riesgo"].sum(), 1.0)
+        ):
+            raise ValueError("La atribución de riesgo contiene valores inválidos.")
+        largest = item.detail.loc[item.detail["% absoluto del riesgo"].idxmax()]
+        rows.append([
+            Paragraph(escape(item.alternative_name), styles["Normal"]),
+            f"{item.portfolio_volatility:.2%}",
+            f"{item.diversification_ratio:.2f}",
+            f"{item.effective_positions:.2f}",
+            f"{item.effective_risk_contributors:.2f}",
+            Paragraph(
+                f"{escape(str(largest['Activo']))} ({largest['% absoluto del riesgo']:.1%})",
+                styles["Normal"],
+            ),
+        ])
+    table = Table(
+        rows,
+        colWidths=[38 * mm, 25 * mm, 31 * mm, 27 * mm, 31 * mm, 33 * mm],
+        repeatRows=1,
+    )
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEBF1")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    return [
+        Spacer(1, 3 * mm),
+        Paragraph("Atribución de riesgo", styles["Heading2"]),
+        table,
+        Paragraph(
+            "La contribución de Euler descompone la volatilidad anualizada y puede ser negativa "
+            "cuando un activo reduce el riesgo conjunto. La concentración usa participaciones "
+            "absolutas para que las coberturas no se cancelen. La razón de diversificación compara "
+            "la volatilidad individual ponderada con la volatilidad de la cartera; posiciones y "
+            "contribuyentes efectivos son inversos de índices Herfindahl. Son diagnósticos "
+            "históricos basados en la covarianza estimada.",
+            styles["Normal"],
+        ),
+    ]
 
 
 def _allocation_policy_story(policy: pd.DataFrame | None, styles) -> list:
@@ -397,6 +485,7 @@ def create_comparison_pdf_report(
     allocation_policy: pd.DataFrame | None = None,
     benchmark_analyses: tuple[BenchmarkAnalysis, ...] = (),
     benchmark_source: str | None = None,
+    risk_attributions: tuple[RiskAttribution, ...] = (),
 ) -> bytes:
     """Compare historical portfolio alternatives on one sample and set of assumptions."""
     if not 2 <= len(alternatives) <= 4 or len({item.name for item in alternatives}) != len(alternatives):
@@ -413,6 +502,25 @@ def create_comparison_pdf_report(
     alternative_names = {item.name for item in alternatives}
     if any(item.alternative_name not in alternative_names for item in implementation_costs):
         raise ValueError("El costo de implementación no pertenece al comparativo.")
+    if risk_attributions and {
+        item.alternative_name for item in risk_attributions
+    } != alternative_names:
+        raise ValueError("La atribución de riesgo debe cubrir todas las alternativas.")
+    if risk_attributions:
+        attribution_by_name = {
+            item.alternative_name: item for item in risk_attributions
+        }
+        if any(
+            set(attribution_by_name[item.name].detail["Activo"]) != set(tickers)
+            or not np.isclose(
+                attribution_by_name[item.name].portfolio_volatility,
+                item.metrics.annual_volatility,
+                atol=1e-8,
+                rtol=1e-6,
+            )
+            for item in alternatives
+        ):
+            raise ValueError("La atribución de riesgo no reconcilia con el comparativo.")
 
     buffer = io.BytesIO()
     document = SimpleDocTemplate(
@@ -514,6 +622,7 @@ def create_comparison_pdf_report(
         allocation_table,
         Spacer(1, 2 * mm),
     ])
+    story.extend(_risk_attribution_story(risk_attributions, styles))
     story.extend(_benchmark_story(benchmark_analyses, benchmark_source, base_currency, styles))
     story.extend(_price_quality_story(price_quality_issues, styles, compact=True))
     story.extend(_implementation_cost_story(
@@ -776,9 +885,22 @@ def create_pdf_report(
     allocation_policy: pd.DataFrame | None = None,
     benchmark_analyses: tuple[BenchmarkAnalysis, ...] = (),
     benchmark_source: str | None = None,
+    risk_attributions: tuple[RiskAttribution, ...] = (),
 ) -> bytes:
     """Create a compact, methodology-first report."""
     validate_weights(metrics.weights, len(tickers), max_weight)
+    if risk_attributions and (
+        len(risk_attributions) != 1
+        or risk_attributions[0].alternative_name != "Máximo Sharpe"
+        or set(risk_attributions[0].detail["Activo"]) != set(tickers)
+        or not np.isclose(
+            risk_attributions[0].portfolio_volatility,
+            metrics.annual_volatility,
+            atol=1e-8,
+            rtol=1e-6,
+        )
+    ):
+        raise ValueError("La atribución de Máximo Sharpe no reconcilia con el reporte.")
     buffer = io.BytesIO()
     document = SimpleDocTemplate(
         buffer,
@@ -891,6 +1013,7 @@ def create_pdf_report(
     )
 
     story.extend(_price_quality_story(price_quality_issues, styles))
+    story.extend(_risk_attribution_story(risk_attributions, styles))
     story.extend(_benchmark_story(benchmark_analyses, benchmark_source, base_currency, styles))
     story.extend(_implementation_cost_story(
         implementation_costs, implementation_cost_assumptions,

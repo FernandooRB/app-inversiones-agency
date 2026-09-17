@@ -28,6 +28,8 @@ factible, utiliza la referencia permitida más cercana.
 La [comparación contra benchmark](docs/benchmarking.md) alinea una referencia independiente en la
 misma moneda base y reporta retorno activo, tracking error, razón de información, beta, alpha CAPM,
 correlación y drawdowns para cada alternativa.
+La [atribución de riesgo](docs/risk_attribution.md) descompone la volatilidad por instrumento y
+compara concentración de pesos, concentración del riesgo y beneficio histórico de diversificación.
 La [sensibilidad de asignaciones](docs/allocation_sensitivity.md) reestima los pesos con
 ventanas históricas de 60, 126 y 252 retornos para mostrar cuánto dependen de la muestra.
 Las pruebas fuera de muestra permiten comparar la covarianza muestral con una
@@ -130,6 +132,7 @@ price_quality.py      Alertas heurísticas sobre precios originales
 implementation_costs.py Estimación explícita de compras, ventas y costos
 allocation_policy.py  Lectura y presentación de límites por clase declarada
 benchmarking.py       Comparación histórica contra una referencia independiente
+risk_attribution.py   Contribuciones de Euler y diagnósticos de diversificación
 instruments.py       Catálogo y reglas de integración por tipo de instrumento
 fixed_income.py       Valuación y preparación de series de CETES
 backtesting.py         Evaluación hipotética con fecha de corte
@@ -142,7 +145,8 @@ tests/               Pruebas unitarias
 
 ## Próximas fases
 
-- Validar estimadores de covarianza en más regímenes y universos; Black-Litterman.
+- Validar estimadores de covarianza y atribución de riesgo en más regímenes y universos;
+  Black-Litterman.
 - Diseñar perfiles IR1–IR5 sólo después de definir su metodología y encuadre; el motor de
   restricciones por clase ya está disponible para escenarios internos declarados.
 - Cobertura cambiaria y validación de metadatos de instrumentos.

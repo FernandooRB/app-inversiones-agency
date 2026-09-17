@@ -48,6 +48,7 @@ from reporting import (
     create_comparison_pdf_report,
     create_pdf_report,
 )
+from risk_attribution import attribute_volatility
 from sensitivity import analyze_allocation_sensitivity
 from simulation import simulate_portfolio_paths
 from stress import (
@@ -453,6 +454,14 @@ try:
                 PortfolioMetrics(current_weights, current_return, current_volatility, current_sharpe),
                 calculate_risk_metrics(returns, current_weights, confidence, horizon),
             ))
+        risk_attributions = tuple(
+            attribute_volatility(
+                covariance,
+                alternative.metrics.weights,
+                alternative_name=alternative.name,
+            )
+            for alternative in alternatives
+        )
         implementation_assumptions = ImplementationCostAssumptions(
             commission_bps=implementation_commission_percent * 100,
             market_cost_bps=implementation_market_bps,
@@ -740,6 +749,67 @@ try:
         use_container_width=True,
         hide_index=True,
     )
+
+    with st.expander("Atribución de riesgo y diversificación", expanded=True):
+        risk_summary = pd.DataFrame([
+            {
+                "Alternativa": item.alternative_name,
+                "Volatilidad": item.portfolio_volatility,
+                "Razón de diversificación": item.diversification_ratio,
+                "Posiciones efectivas": item.effective_positions,
+                "Contribuyentes efectivos": item.effective_risk_contributors,
+                "Mayor contribuyente": item.detail.loc[
+                    item.detail["% absoluto del riesgo"].idxmax(), "Activo"
+                ],
+                "% absoluto mayor": item.detail["% absoluto del riesgo"].max(),
+            }
+            for item in risk_attributions
+        ])
+        formatted_risk = risk_summary.copy()
+        formatted_risk["Volatilidad"] = formatted_risk["Volatilidad"].map(percent)
+        formatted_risk["% absoluto mayor"] = formatted_risk["% absoluto mayor"].map(percent)
+        for column in (
+            "Razón de diversificación", "Posiciones efectivas", "Contribuyentes efectivos",
+        ):
+            formatted_risk[column] = formatted_risk[column].map(lambda value: f"{value:.2f}")
+        st.dataframe(formatted_risk, hide_index=True, use_container_width=True)
+        selected_risk_name = st.selectbox(
+            "Alternativa para ver contribuciones de riesgo",
+            [item.alternative_name for item in risk_attributions],
+        )
+        selected_risk = next(
+            item for item in risk_attributions if item.alternative_name == selected_risk_name
+        )
+        detail_view = selected_risk.detail.copy()
+        percentage_columns = [
+            "Peso", "Volatilidad individual", "Contribución marginal",
+            "Contribución a volatilidad", "% contribución a volatilidad",
+            "% absoluto del riesgo",
+        ]
+        st.dataframe(
+            detail_view.style.format({column: "{:.2%}" for column in percentage_columns}),
+            hide_index=True,
+            use_container_width=True,
+        )
+        st.caption(
+            "Las contribuciones con signo suman la volatilidad de la cartera; una contribución "
+            "negativa indica cobertura dentro del modelo. El porcentaje absoluto se usa sólo "
+            "para medir concentración y suma 100 %."
+        )
+        risk_download = pd.concat(
+            [
+                item.detail.assign(Alternativa=item.alternative_name)
+                for item in risk_attributions
+            ],
+            ignore_index=True,
+        )
+        risk_download = risk_download[["Alternativa", *selected_risk.detail.columns]]
+        st.download_button(
+            "Descargar atribución de riesgo CSV",
+            risk_download.to_csv(index=False).encode("utf-8-sig"),
+            "atribucion_riesgo.csv",
+            "text/csv",
+        )
 
     with st.expander("Costo estimado para implementar cada asignación"):
         starting_point = "cartera actual" if current_weights is not None else "efectivo"
@@ -1443,6 +1513,7 @@ try:
         allocation_policy=allocation_policy_table,
         benchmark_analyses=benchmark_analyses[:1],
         benchmark_source=benchmark_source,
+        risk_attributions=risk_attributions[:1],
     )
     st.download_button(
         "Descargar reporte metodológico PDF", pdf, f"reporte_portafolio_{date.today()}.pdf", "application/pdf"
@@ -1468,6 +1539,7 @@ try:
         allocation_policy=allocation_policy_table,
         benchmark_analyses=benchmark_analyses,
         benchmark_source=benchmark_source,
+        risk_attributions=risk_attributions,
     )
     st.download_button(
         (

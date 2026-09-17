@@ -16,6 +16,7 @@ from reporting import (
     StressReport,
     create_comparison_pdf_report,
 )
+from risk_attribution import attribute_volatility
 from simulation import simulate_portfolio_paths
 from stress import deterministic_shock, historical_worst_windows
 
@@ -42,6 +43,20 @@ def main() -> None:
                    size=(600, 4)),
         index=pd.date_range("2023-08-01", periods=600, freq="B"),
         columns=labels,
+    )
+    covariance = fictional_returns.cov() * 252
+    alternatives = tuple(
+        PortfolioAlternative(
+            alternative.name,
+            PortfolioMetrics(
+                alternative.metrics.weights,
+                alternative.metrics.annual_return,
+                float(np.sqrt(alternative.metrics.weights @ covariance @ alternative.metrics.weights)),
+                alternative.metrics.sharpe_ratio,
+            ),
+            alternative.risk,
+        )
+        for alternative in alternatives
     )
     result = simulate_portfolio_paths(
         fictional_returns, alternatives[0].metrics.weights,
@@ -98,6 +113,12 @@ def main() -> None:
         )
         for alternative in alternatives
     )
+    risk_attributions = tuple(
+        attribute_volatility(
+            covariance, alternative.metrics.weights, alternative_name=alternative.name
+        )
+        for alternative in alternatives
+    )
     output = Path("output/pdf/comparativo_ficticio_costos_mxn.pdf")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(create_comparison_pdf_report(
@@ -127,6 +148,7 @@ def main() -> None:
         allocation_policy=allocation_policy,
         benchmark_analyses=benchmark_analyses,
         benchmark_source="serie ficticia para revisión visual; no es un índice de mercado",
+        risk_attributions=risk_attributions,
     ))
     print(output.resolve())
 
