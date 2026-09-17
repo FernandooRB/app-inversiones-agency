@@ -50,7 +50,13 @@ from reporting import (
 )
 from sensitivity import analyze_allocation_sensitivity
 from simulation import simulate_portfolio_paths
-from stress import deterministic_shock, historical_worst_windows, parse_asset_shocks
+from stress import (
+    deterministic_shock,
+    historical_worst_windows,
+    parse_asset_shocks,
+    parse_class_shocks,
+    validate_scenario_metadata,
+)
 from walk_forward import run_walk_forward_backtest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -1006,14 +1012,46 @@ try:
             st.dataframe(display_history, hide_index=True, use_container_width=True)
 
             shocks = None
+            class_shocks = None
             shock_results = None
-            if st.checkbox("Añadir shock hipotético por activo"):
-                raw_shocks = st.text_input(
-                    "Cambios por activo en %, en el mismo orden",
-                    value=", ".join("-10" for _ in analysis_tickers),
-                    help="Ejemplo para dos activos: -20, -5. El mínimo por activo es -100%.",
+            shock_name = None
+            shock_rationale = None
+            asset_shock_enabled = st.checkbox("Añadir shock hipotético por activo")
+            class_shock_enabled = st.checkbox("Añadir shock hipotético por clase")
+            if asset_shock_enabled and class_shock_enabled:
+                raise PortfolioError("Selecciona shocks por activo o por clase, no ambos.")
+            if asset_shock_enabled or class_shock_enabled:
+                shock_name_input = st.text_input(
+                    "Nombre del escenario hipotético", "Escenario adverso manual"
                 )
-                shocks_array = parse_asset_shocks(raw_shocks, len(analysis_tickers))
+                shock_rationale_input = st.text_area(
+                    "Fundamento del escenario",
+                    "Supuesto definido por el equipo para análisis de sensibilidad.",
+                    help="Describe brevemente la narrativa económica; máximo 240 caracteres.",
+                )
+                shock_name, shock_rationale = validate_scenario_metadata(
+                    shock_name_input, shock_rationale_input
+                )
+                if asset_shock_enabled:
+                    raw_shocks = st.text_input(
+                        "Cambios por activo en %, en el mismo orden",
+                        value=", ".join("-10" for _ in analysis_tickers),
+                        help="Ejemplo para dos activos: -20, -5. El mínimo por activo es -100%.",
+                    )
+                    shocks_array = parse_asset_shocks(raw_shocks, len(analysis_tickers))
+                else:
+                    stress_classes = parse_asset_classes(asset_classes_input, len(tickers)) + (
+                        ("deuda_gubernamental",) if cetes_result is not None else ()
+                    )
+                    unique_classes = sorted(set(stress_classes))
+                    raw_class_shocks = st.text_area(
+                        "Cambios por clase: clase, shock %",
+                        "\n".join(f"{name},-10" for name in unique_classes),
+                        help="Incluye exactamente una línea por cada clase declarada.",
+                    )
+                    class_shocks, shocks_array = parse_class_shocks(
+                        raw_class_shocks, stress_classes
+                    )
                 shocks = pd.Series(shocks_array, index=analysis_tickers, name="Shock")
                 shock_results = {
                     alternative.name: deterministic_shock(
@@ -1034,14 +1072,38 @@ try:
                         f"{item.loss_amount:,.0f}" for item in shock_results.values()
                     ],
                 })
-                st.write("Resultado del shock simultáneo:")
+                st.write(f"Resultado de **{shock_name}**:")
+                st.caption(f"Fundamento: {shock_rationale}")
+                if class_shocks is not None:
+                    class_view = class_shocks.rename("Cambio hipotético").to_frame()
+                    st.write("Shocks definidos por clase:")
+                    st.dataframe(
+                        class_view.style.format("{:.2%}"), use_container_width=True
+                    )
                 st.dataframe(shock_table, hide_index=True, use_container_width=True)
                 contributions = pd.DataFrame({
                     name: result.contributions for name, result in shock_results.items()
                 })
                 st.write("Contribución de cada activo al cambio total:")
                 st.dataframe(contributions.style.format("{:.2%}"), use_container_width=True)
-            stress_report = StressReport(stress_history, shocks, shock_results)
+                shock_export = pd.DataFrame({
+                    "Activo": analysis_tickers,
+                    "Clase": (
+                        stress_classes if class_shocks is not None
+                        else tuple("definido_por_activo" for _ in analysis_tickers)
+                    ),
+                    "Shock": shocks_array,
+                })
+                st.download_button(
+                    "Descargar escenario hipotético CSV",
+                    shock_export.to_csv(index=False).encode("utf-8-sig"),
+                    "escenario_estres_hipotetico.csv", "text/csv",
+                )
+            stress_report = StressReport(
+                stress_history, shocks, shock_results,
+                class_shocks=class_shocks, shock_name=shock_name,
+                shock_rationale=shock_rationale,
+            )
             st.caption(
                 "El estrés histórico usa pesos constantes al cierre de cada sesión. El shock "
                 "hipotético es estático, no tiene probabilidad asignada y no modela recuperación, "

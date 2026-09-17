@@ -3,7 +3,13 @@ import pandas as pd
 import pytest
 
 from portfolio_core import PortfolioError
-from stress import deterministic_shock, historical_worst_windows, parse_asset_shocks
+from stress import (
+    deterministic_shock,
+    historical_worst_windows,
+    parse_asset_shocks,
+    parse_class_shocks,
+    validate_scenario_metadata,
+)
 
 
 def test_historical_worst_windows_compound_and_report_dates():
@@ -42,6 +48,43 @@ def test_total_loss_shock_is_supported():
     result = deterministic_shock([1], parse_asset_shocks("-100", 1), 1000)
     assert result.stressed_value == 0
     assert result.loss_amount == 1000
+
+
+def test_class_shocks_expand_to_each_asset_and_preserve_class_table():
+    classes = ("renta_variable", "deuda", "renta_variable", "efectivo")
+    class_shocks, asset_shocks = parse_class_shocks(
+        "renta_variable,-25\ndeuda,-3\nefectivo,0", classes
+    )
+    assert class_shocks.to_dict() == pytest.approx({
+        "deuda": -0.03, "efectivo": 0.0, "renta_variable": -0.25,
+    })
+    np.testing.assert_allclose(asset_shocks, [-0.25, -0.03, -0.25, 0.0])
+    result = deterministic_shock([0.4, 0.3, 0.2, 0.1], asset_shocks, 1000)
+    assert result.portfolio_return == pytest.approx(-0.159)
+
+
+@pytest.mark.parametrize(
+    "raw,match",
+    [
+        ("renta_variable,-20", "Faltan shocks"),
+        ("renta_variable,-20\ndeuda,-5\notra,0", "no utilizadas"),
+        ("renta_variable,-20\nrenta_variable,-10\ndeuda,-5", "más de una vez"),
+        ("renta_variable,-101\ndeuda,-5", "-100%"),
+    ],
+)
+def test_class_shocks_reject_incomplete_duplicate_or_unknown_rules(raw, match):
+    with pytest.raises(PortfolioError, match=match):
+        parse_class_shocks(raw, ("renta_variable", "deuda"))
+
+
+def test_scenario_metadata_is_required_and_trimmed():
+    assert validate_scenario_metadata("  Venta global  ", "  Aversión al riesgo  ") == (
+        "Venta global", "Aversión al riesgo"
+    )
+    with pytest.raises(PortfolioError, match="nombre"):
+        validate_scenario_metadata("", "Fundamento")
+    with pytest.raises(PortfolioError, match="fundamento"):
+        validate_scenario_metadata("Escenario", "")
 
 
 def test_historical_stress_rejects_nonfinite_returns():
