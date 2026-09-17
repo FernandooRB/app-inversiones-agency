@@ -333,19 +333,20 @@ def read_bond_total_return_csv(
 
 def merge_cetes_index(market_prices: pd.DataFrame, cetes_index: pd.Series) -> pd.DataFrame:
     """Align a prepared CETES index without hiding internal observation gaps."""
-    return _merge_fixed_income_index(market_prices, cetes_index, "CETES")
+    return merge_prepared_index(market_prices, cetes_index, "CETES")
 
 
 def merge_bond_index(market_prices: pd.DataFrame, bond_index: pd.Series) -> pd.DataFrame:
     """Align a prepared bond index without hiding internal observation gaps."""
-    return _merge_fixed_income_index(market_prices, bond_index, "bono")
+    return merge_prepared_index(market_prices, bond_index, "bono")
 
 
-def _merge_fixed_income_index(
+def merge_prepared_index(
     market_prices: pd.DataFrame,
     fixed_income_index: pd.Series,
     series_kind: str,
 ) -> pd.DataFrame:
+    """Align a prepared positive-value index to market dates without filling gaps."""
     if market_prices.empty or fixed_income_index.empty:
         raise PortfolioError(f"Las series de mercado y {series_kind} no pueden estar vacías.")
     if not isinstance(market_prices.index, pd.DatetimeIndex) or not isinstance(

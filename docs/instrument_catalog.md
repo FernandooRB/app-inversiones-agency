@@ -25,6 +25,10 @@ emisión, cupón semestral, vencimiento y tratamiento de precio limpio, interés
 [adaptador de Bonos M](bonos_m_adapter.md) ya prepara una emisión desde un CSV; aún requiere contraste
 externo de sus precios, devengado y calendario antes de un uso comercial.
 
+El [adaptador de liquidez MXN](liquidity_adapter.md) prepara un vehículo identificado desde su tasa
+anual histórica y una convención explícita. La etiqueta `NETA` es una declaración de la fuente; la app
+no calcula impuestos ni verifica disponibilidad, comisiones, protección de depósitos o riesgo de crédito.
+
 ## Reglas operativas
 
 1. Confirmar símbolo, serie, ISIN, mercado y moneda con una fuente autorizada antes de analizar.

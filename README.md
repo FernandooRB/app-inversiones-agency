@@ -7,12 +7,14 @@ con métodos histórico por bloques y lognormal correlacionado, y
 [pruebas de estrés](docs/stress_testing.md) históricas e hipotéticas con shocks documentados
 por activo o por clase declarada y contribuciones por instrumento. El
 [catálogo piloto México/SIC](docs/instrument_catalog.md) distingue el instrumento negociable de
-la serie utilizada por el motor y bloquea efectivo y fondos hasta contar con su valoración; los Bonos M
-se incorporan únicamente mediante el archivo auditable de una emisión identificada.
+la serie utilizada por el motor y bloquea fondos hasta contar con su valoración; los Bonos M y los
+vehículos de liquidez MXN se incorporan únicamente mediante archivos auditables e identificados.
 El [preparador de CETES](docs/cetes_adapter.md) convierte archivos de precio y plazo en un índice
 revisable que puede añadirse al optimizador mixto en MXN.
 El [preparador de Bonos M](docs/bonos_m_adapter.md) construye retorno total para una emisión única
 desde precio limpio, interés devengado y cupones, con un CSV de auditoría.
+El [preparador de liquidez MXN](docs/liquidity_adapter.md) acumula una tasa anual histórica declarada
+con convención explícita y sin usar tasas futuras para intervalos anteriores.
 La [importación manual de precios ajustados](docs/price_upload.md) acepta un CSV
 aportado por el equipo y documenta su fuente y huella, sin verificar por sí sola
 ajustes corporativos, moneda ni derechos de uso.
@@ -154,6 +156,7 @@ tests/               Pruebas unitarias
 - Validar estimadores de covarianza, atribución de riesgo y Black-Litterman en más regímenes y
   universos.
 - Validar series de Bonos M por emisión y sus convenciones contra una fuente contractual.
+- Validar tasas de vehículos de liquidez contra contratos y estados de cuenta reales.
 - Diseñar perfiles IR1–IR5 sólo después de definir su metodología y encuadre; el motor de
   restricciones por clase ya está disponible para escenarios internos declarados.
 - Cobertura cambiaria y validación de metadatos de instrumentos.
