@@ -13,6 +13,7 @@ import streamlit as st
 from access import require_access
 from allocation_policy import parse_asset_classes, parse_class_limits, policy_table
 from backtesting import run_holdout_backtest
+from benchmarking import analyze_benchmark
 from covariance_calibration import select_diagonal_shrinkage
 from currencies import convert_prices, currency_map, download_fx
 from fixed_income import merge_cetes_index, read_banxico_cetes_csv
@@ -161,6 +162,23 @@ with st.sidebar:
         "Supuesto manual: verifica la tasa para la moneda base y el periodo; no se consulta una fuente."
     )
     max_weight = st.slider("Peso máximo por activo", 10, 100, 60, 5) / 100
+    with st.expander("Benchmark histórico"):
+        benchmark_ticker_input = st.text_input(
+            "Ticker del benchmark (opcional)",
+            help=(
+                "Índice o vehículo de referencia ajeno a la cartera. Verifica que represente "
+                "el mercado relevante y que sus datos puedan usarse para el propósito previsto."
+            ),
+        )
+        benchmark_name_input = st.text_input("Nombre del benchmark", "Referencia de mercado")
+        benchmark_quote = st.selectbox(
+            "Moneda de cotización del benchmark",
+            ["MXN", "USD", "EUR", "GBP", "CAD", "JPY", "CHF"],
+        )
+        st.caption(
+            "Se descarga como serie separada, se convierte a la moneda base y se compara "
+            "únicamente en fechas comunes. No se incorpora como activo invertible."
+        )
     with st.expander("Política por clase de activo"):
         use_class_policy = st.checkbox("Aplicar límites por clase")
         asset_classes_input = st.text_input(
@@ -271,6 +289,9 @@ settings = (
     end_date,
     risk_free_rate,
     max_weight,
+    benchmark_ticker_input,
+    benchmark_name_input,
+    benchmark_quote,
     use_class_policy,
     asset_classes_input,
     class_limits_input,
@@ -456,6 +477,40 @@ try:
             )
             for alternative in alternatives
         )
+        benchmark_analyses = ()
+        benchmark_source = None
+        benchmark_quality_issues = ()
+        if benchmark_ticker_input.strip():
+            benchmark_tickers = tuple(normalize_tickers(benchmark_ticker_input))
+            if len(benchmark_tickers) != 1:
+                raise PortfolioError("Ingresa un solo ticker como benchmark.")
+            benchmark_ticker = benchmark_tickers[0]
+            benchmark_download = cached_prices((benchmark_ticker,), start_date, end_date)
+            if benchmark_download.rejected_tickers:
+                raise PortfolioError("El benchmark no produjo una serie de precios válida.")
+            benchmark_quality_issues = assess_price_quality(benchmark_download.prices)
+            benchmark_fx = cached_fx(
+                {benchmark_ticker: benchmark_quote}, base_currency, start_date, end_date
+            )
+            benchmark_prices = convert_prices(
+                benchmark_download.prices,
+                {benchmark_ticker: benchmark_quote},
+                base_currency,
+                benchmark_fx,
+            )[benchmark_ticker]
+            benchmark_analyses = tuple(
+                analyze_benchmark(
+                    returns, alternative.metrics.weights, benchmark_prices,
+                    benchmark_name=benchmark_name_input,
+                    portfolio_name=alternative.name,
+                    risk_free_rate=risk_free_rate,
+                )
+                for alternative in alternatives
+            )
+            benchmark_source = (
+                f"Yahoo Finance mediante yfinance; {benchmark_ticker}; precios ajustados; "
+                f"cotización declarada {benchmark_quote}; convertido a {base_currency}"
+            )
 
     if download.rejected_tickers:
         st.warning("Tickers excluidos por falta de datos: " + ", ".join(download.rejected_tickers))
@@ -526,6 +581,59 @@ try:
     col2.metric("Volatilidad anualizada", percent(max_sharpe.annual_volatility))
     col3.metric("Sharpe histórico", f"{max_sharpe.sharpe_ratio:.2f}")
     col4.metric(f"VaR histórico ({confidence:.1%})", percent(risk.historical_var))
+
+    if benchmark_analyses:
+        with st.expander("Comparación contra benchmark", expanded=True):
+            benchmark_rows = pd.DataFrame([
+                {
+                    "Alternativa": item.portfolio_name,
+                    "Retorno anualizado": item.portfolio_annualized_return,
+                    "Benchmark anualizado": item.benchmark_annualized_return,
+                    "Retorno activo anualizado": item.annualized_active_return,
+                    "Tracking error": item.tracking_error,
+                    "Razón de información": item.information_ratio,
+                    "Beta": item.beta,
+                    "Alpha anualizada": item.annualized_alpha,
+                    "Correlación": item.correlation,
+                    "Máxima caída": item.portfolio_max_drawdown,
+                    "Máxima caída benchmark": item.benchmark_max_drawdown,
+                }
+                for item in benchmark_analyses
+            ])
+            formatted_benchmark = benchmark_rows.copy()
+            for column in (
+                "Retorno anualizado", "Benchmark anualizado", "Retorno activo anualizado",
+                "Tracking error", "Alpha anualizada", "Máxima caída",
+                "Máxima caída benchmark",
+            ):
+                formatted_benchmark[column] = formatted_benchmark[column].map(
+                    lambda value: f"{value:.2%}"
+                )
+            for column in ("Razón de información", "Beta", "Correlación"):
+                formatted_benchmark[column] = formatted_benchmark[column].map(
+                    lambda value: "N/D" if not np.isfinite(value) else f"{value:.2f}"
+                )
+            st.dataframe(formatted_benchmark, hide_index=True, use_container_width=True)
+            selected_benchmark = st.selectbox(
+                "Alternativa para la trayectoria relativa",
+                [item.portfolio_name for item in benchmark_analyses],
+            )
+            selected_analysis = next(
+                item for item in benchmark_analyses
+                if item.portfolio_name == selected_benchmark
+            )
+            st.line_chart(selected_analysis.curves, y_label="Capital relativo (1 = inicio)")
+            st.caption(
+                f"{selected_analysis.name} · {selected_analysis.observations} retornos comunes · "
+                f"{selected_analysis.start.date()} a {selected_analysis.end.date()}. "
+                "La cartera supone rebalanceo diario para atribución histórica. Alpha usa CAPM "
+                "con la tasa libre de riesgo indicada; no prueba habilidad ni causalidad."
+            )
+            if benchmark_quality_issues:
+                st.warning(
+                    f"El benchmark tiene {len(benchmark_quality_issues)} alerta(s) heurística(s) "
+                    "de precio; revisa la fuente antes de interpretar la comparación."
+                )
 
     figure = px.scatter(
         random_set,
@@ -1271,6 +1379,8 @@ try:
         implementation_cost_source=implementation_source,
         implementation_cost_source_date=implementation_source_date,
         allocation_policy=allocation_policy_table,
+        benchmark_analyses=benchmark_analyses[:1],
+        benchmark_source=benchmark_source,
     )
     st.download_button(
         "Descargar reporte metodológico PDF", pdf, f"reporte_portafolio_{date.today()}.pdf", "application/pdf"
@@ -1294,6 +1404,8 @@ try:
         simulation=simulation_report,
         stress=stress_report,
         allocation_policy=allocation_policy_table,
+        benchmark_analyses=benchmark_analyses,
+        benchmark_source=benchmark_source,
     )
     st.download_button(
         (

@@ -22,6 +22,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from benchmarking import BenchmarkAnalysis
 from implementation_costs import (
     ImplementationCostAssumptions,
     ImplementationCostEstimate,
@@ -103,6 +104,86 @@ def _allocation_policy_story(policy: pd.DataFrame | None, styles) -> list:
                 styles["Normal"],
             ),
         ]),
+    ]
+
+
+def _benchmark_story(
+    analyses: tuple[BenchmarkAnalysis, ...],
+    source: str | None,
+    currency: str,
+    styles,
+) -> list:
+    if not analyses:
+        return []
+    if (
+        not source or len(source) > 240 or any(ord(char) < 32 for char in source)
+        or len({item.portfolio_name for item in analyses}) != len(analyses)
+    ):
+        raise ValueError("La comparación con benchmark requiere alternativas y fuente válidas.")
+    first = analyses[0]
+    common = (first.name, first.observations, first.start, first.end)
+    if any(
+        (item.name, item.observations, item.start, item.end) != common
+        for item in analyses
+    ):
+        raise ValueError("Las alternativas deben usar la misma muestra del benchmark.")
+
+    def number(value):
+        return "N/D" if not np.isfinite(value) else f"{value:.2f}"
+
+    performance_rows = [[
+        "Alternativa", "Cartera anual", "Benchmark anual", "Activo anual", "Tracking error", "RI",
+    ]] + [
+        [
+            Paragraph(escape(item.portfolio_name), styles["Normal"]),
+            f"{item.portfolio_annualized_return:.2%}",
+            f"{item.benchmark_annualized_return:.2%}",
+            f"{item.annualized_active_return:.2%}",
+            f"{item.tracking_error:.2%}", number(item.information_ratio),
+        ]
+        for item in analyses
+    ]
+    relationship_rows = [[
+        "Alternativa", "Beta", "Alpha anual", "Correlación", "Caída cartera", "Caída benchmark",
+    ]] + [
+        [
+            Paragraph(escape(item.portfolio_name), styles["Normal"]),
+            number(item.beta), f"{item.annualized_alpha:.2%}", number(item.correlation),
+            f"{item.portfolio_max_drawdown:.2%}", f"{item.benchmark_max_drawdown:.2%}",
+        ]
+        for item in analyses
+    ]
+    tables = []
+    for rows in (performance_rows, relationship_rows):
+        table = Table(rows, colWidths=[46 * mm] + [27.5 * mm] * 5, repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEBF1")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        tables.extend([table, Spacer(1, 1.5 * mm)])
+    return [
+        Spacer(1, 3 * mm),
+        Paragraph("Comparación contra benchmark", styles["Heading2"]),
+        Paragraph(
+            f"Referencia: {escape(first.name)} | Moneda base: {escape(currency)} | "
+            f"Muestra común: {first.start.date()} a {first.end.date()} "
+            f"({first.observations:,} retornos).<br/>Fuente: {escape(source)}.",
+            styles["Normal"],
+        ),
+        Spacer(1, 1.5 * mm),
+        *tables,
+        Paragraph(
+            "Retorno activo e information ratio usan diferencias diarias; tracking error es su "
+            "volatilidad anualizada. Alpha usa CAPM con la tasa libre de riesgo del análisis. "
+            "La cartera supone rebalanceo diario para esta atribución histórica. La comparación "
+            "no prueba habilidad, causalidad ni rendimiento futuro.",
+            styles["Normal"],
+        ),
     ]
 
 
@@ -311,6 +392,8 @@ def create_comparison_pdf_report(
     implementation_cost_source: str | None = None,
     implementation_cost_source_date: date | None = None,
     allocation_policy: pd.DataFrame | None = None,
+    benchmark_analyses: tuple[BenchmarkAnalysis, ...] = (),
+    benchmark_source: str | None = None,
 ) -> bytes:
     """Compare historical portfolio alternatives on one sample and set of assumptions."""
     if not 2 <= len(alternatives) <= 4 or len({item.name for item in alternatives}) != len(alternatives):
@@ -428,6 +511,7 @@ def create_comparison_pdf_report(
         allocation_table,
         Spacer(1, 2 * mm),
     ])
+    story.extend(_benchmark_story(benchmark_analyses, benchmark_source, base_currency, styles))
     story.extend(_price_quality_story(price_quality_issues, styles, compact=True))
     story.extend(_implementation_cost_story(
         implementation_costs, implementation_cost_assumptions,
@@ -675,6 +759,8 @@ def create_pdf_report(
     implementation_cost_source: str | None = None,
     implementation_cost_source_date: date | None = None,
     allocation_policy: pd.DataFrame | None = None,
+    benchmark_analyses: tuple[BenchmarkAnalysis, ...] = (),
+    benchmark_source: str | None = None,
 ) -> bytes:
     """Create a compact, methodology-first report."""
     validate_weights(metrics.weights, len(tickers), max_weight)
@@ -790,6 +876,7 @@ def create_pdf_report(
     )
 
     story.extend(_price_quality_story(price_quality_issues, styles))
+    story.extend(_benchmark_story(benchmark_analyses, benchmark_source, base_currency, styles))
     story.extend(_implementation_cost_story(
         implementation_costs, implementation_cost_assumptions,
         portfolio_value, base_currency,

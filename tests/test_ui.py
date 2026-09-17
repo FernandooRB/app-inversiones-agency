@@ -21,7 +21,16 @@ def test_complete_analysis_survives_rerun(monkeypatch):
         index=pd.date_range("2024-01-01", periods=150, freq="B"),
         columns=pd.MultiIndex.from_product([["Close"], ["AAPL", "MSFT", "GOOG", "TSLA"]]),
     )
-    monkeypatch.setattr(core.yf, "download", lambda *args, **kwargs: data)
+    benchmark_data = pd.DataFrame(
+        100 * np.cumprod(1 + rng.normal(0.0005, 0.008, (150, 1)), axis=0),
+        index=data.index,
+        columns=pd.MultiIndex.from_product([["Close"], ["SPY"]]),
+    )
+
+    def fake_download(symbols, **_kwargs):
+        return benchmark_data if symbols == ["SPY"] else data
+
+    monkeypatch.setattr(core.yf, "download", fake_download)
     app = AppTest.from_file(
         Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
     ).run()
@@ -44,6 +53,18 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     assert not app.exception
     assert not app.error
     assert any("clasificación fue declarada" in item.value for item in app.caption)
+    benchmark = next(
+        item for item in app.text_input if item.label == "Ticker del benchmark (opcional)"
+    )
+    benchmark.set_value("SPY").run()
+    benchmark_currency = next(
+        item for item in app.selectbox if item.label == "Moneda de cotización del benchmark"
+    )
+    benchmark_currency.set_value("USD").run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error
+    assert any("Alpha usa CAPM" in item.value for item in app.caption)
     commission = next(
         item for item in app.number_input if item.label == "Comisión sobre cada operación (%)"
     )

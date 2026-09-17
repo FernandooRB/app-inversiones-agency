@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from benchmarking import analyze_benchmark
 from implementation_costs import ImplementationCostAssumptions, estimate_implementation_cost
 from portfolio_core import PortfolioMetrics, RiskMetrics
 from price_quality import PriceQualityIssue
@@ -79,6 +80,19 @@ def main() -> None:
         "Máximo": [0.50, 0.75, 0.20],
         "Activos": [1, 2, 1],
     })
+    benchmark_returns = (
+        fictional_returns["ETF_SIC"] * 0.65
+        + fictional_returns["ACCION_MX"] * 0.35
+    )
+    benchmark_prices = 100 * (1 + benchmark_returns).cumprod()
+    benchmark_analyses = tuple(
+        analyze_benchmark(
+            fictional_returns, alternative.metrics.weights, benchmark_prices,
+            benchmark_name="Índice compuesto ficticio",
+            portfolio_name=alternative.name, risk_free_rate=0.06,
+        )
+        for alternative in alternatives
+    )
     output = Path("output/pdf/comparativo_ficticio_costos_mxn.pdf")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(create_comparison_pdf_report(
@@ -102,6 +116,8 @@ def main() -> None:
         ),
         stress=StressReport(stress_history, shocks, shock_results),
         allocation_policy=allocation_policy,
+        benchmark_analyses=benchmark_analyses,
+        benchmark_source="serie ficticia para revisión visual; no es un índice de mercado",
     ))
     print(output.resolve())
 
