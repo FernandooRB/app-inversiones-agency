@@ -16,6 +16,7 @@ from reporting import (
     create_comparison_pdf_report,
     create_pdf_report,
 )
+from risk_attribution import attribute_volatility
 from simulation import simulate_portfolio_paths
 from stress import deterministic_shock, historical_worst_windows
 
@@ -89,6 +90,53 @@ def test_both_pdfs_include_benchmark_metrics_and_source():
         assert "Tracking error" in text
         assert "Alpha anual" in text
         assert "Fuente ficticia de prueba" in text
+
+
+def test_both_pdfs_include_reconciled_risk_attribution():
+    metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    covariance = pd.DataFrame(
+        [[0.04, 0.006], [0.006, 0.01]], index=["AAA", "BBB"], columns=["AAA", "BBB"]
+    )
+    attribution = attribute_volatility(
+        covariance, metrics.weights, alternative_name="Máximo Sharpe"
+    )
+    metrics = PortfolioMetrics(
+        metrics.weights, metrics.annual_return, attribution.portfolio_volatility,
+        metrics.sharpe_ratio,
+    )
+    basic = create_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1), metrics, risk,
+        100_000, risk_attributions=(attribution,),
+    )
+    second_attribution = attribute_volatility(
+        covariance, [0.5, 0.5], alternative_name="Pesos iguales"
+    )
+    comparison = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (
+            PortfolioAlternative("Máximo Sharpe", metrics, risk),
+            PortfolioAlternative(
+                "Pesos iguales",
+                PortfolioMetrics(
+                    np.array([0.5, 0.5]), 0.09,
+                    second_attribution.portfolio_volatility, 0.33,
+                ),
+                risk,
+            ),
+        ),
+        100_000, base_currency="MXN", risk_free_rate=0.05,
+        observations=252, quotes={"AAA": "MXN", "BBB": "MXN"},
+        risk_attributions=(attribution, second_attribution),
+    )
+    for report in (basic, comparison):
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+        assert "Atribución de riesgo" in text
+        assert "Razón de" in text
+        assert "diversificación" in text
+        assert "Contribuyentes" in text
+        assert "efectivos" in text
+        assert "contribución de Euler" in text
 
 
 def test_both_pdfs_report_explicit_implementation_cost_assumptions():
