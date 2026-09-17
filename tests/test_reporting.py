@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from pypdf import PdfReader
 
+from benchmarking import analyze_benchmark
 from implementation_costs import ImplementationCostAssumptions, estimate_implementation_cost
 from portfolio_core import PortfolioMetrics, RiskMetrics
 from price_quality import PriceQualityIssue
@@ -52,6 +53,42 @@ def test_both_pdfs_include_declared_asset_class_policy():
         assert "crecimiento" in text
         assert "20.0%" in text
         assert "clasificación fue declarada" in text
+
+
+def test_both_pdfs_include_benchmark_metrics_and_source():
+    index = pd.date_range("2023-01-02", periods=100, freq="B")
+    benchmark_returns = np.linspace(-0.01, 0.012, len(index))
+    returns = pd.DataFrame({
+        "AAA": benchmark_returns,
+        "BBB": benchmark_returns * 0.4 + 0.0003,
+    }, index=index)
+    prices = pd.Series(100 * np.cumprod(1 + benchmark_returns), index=index)
+    metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    analysis = analyze_benchmark(
+        returns, metrics.weights, prices, benchmark_name="IPC ficticio",
+        portfolio_name="Máximo Sharpe", risk_free_rate=0.05,
+    )
+    basic = create_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        metrics, risk, 100_000, benchmark_analyses=(analysis,),
+        benchmark_source="Fuente ficticia de prueba",
+    )
+    comparison = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (PortfolioAlternative("Máximo Sharpe", metrics, risk),
+         PortfolioAlternative("Pesos iguales", metrics, risk)),
+        100_000, base_currency="MXN", risk_free_rate=0.05,
+        observations=99, quotes={"AAA": "MXN", "BBB": "MXN"},
+        benchmark_analyses=(analysis,), benchmark_source="Fuente ficticia de prueba",
+    )
+    for report in (basic, comparison):
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+        assert "Comparación contra benchmark" in text
+        assert "IPC ficticio" in text
+        assert "Tracking error" in text
+        assert "Alpha anual" in text
+        assert "Fuente ficticia de prueba" in text
 
 
 def test_both_pdfs_report_explicit_implementation_cost_assumptions():
