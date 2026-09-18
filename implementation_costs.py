@@ -14,6 +14,15 @@ class ImplementationCostAssumptions:
     market_cost_bps: float = 0.0
     vat_rate: float = 0.0
     minimum_commission: float = 0.0
+    annual_fixed_cost: float = 0.0
+    annual_management_rate: float = 0.0
+
+    def annual_recurring_cost(self, portfolio_value: float) -> float:
+        """Return the all-in annual recurring cost declared by the user."""
+        _validate_assumptions(self)
+        if not np.isfinite(portfolio_value) or portfolio_value < 0:
+            raise PortfolioError("El capital para estimar costos no puede ser negativo.")
+        return self.annual_fixed_cost + portfolio_value * self.annual_management_rate
 
 
 @dataclass(frozen=True)
@@ -39,6 +48,8 @@ def _validate_assumptions(assumptions: ImplementationCostAssumptions) -> None:
         assumptions.market_cost_bps,
         assumptions.vat_rate,
         assumptions.minimum_commission,
+        assumptions.annual_fixed_cost,
+        assumptions.annual_management_rate,
     )
     if not np.isfinite(values).all():
         raise PortfolioError("Los supuestos de costo deben ser finitos.")
@@ -50,6 +61,10 @@ def _validate_assumptions(assumptions: ImplementationCostAssumptions) -> None:
         raise PortfolioError("El IVA sobre comisiones debe estar entre 0% y 100%.")
     if not 0 <= assumptions.minimum_commission <= 100_000:
         raise PortfolioError("La comisión mínima debe estar entre 0 y 100,000.")
+    if not 0 <= assumptions.annual_fixed_cost <= 1_000_000:
+        raise PortfolioError("El costo fijo anual debe estar entre 0 y 1,000,000.")
+    if not 0 <= assumptions.annual_management_rate <= 0.20:
+        raise PortfolioError("La administración anual debe estar entre 0% y 20%.")
 
 
 def estimate_implementation_cost(

@@ -5,6 +5,8 @@ El cálculo es un escenario manual y usa la moneda base del análisis. Los valor
 el equipo debe capturar los términos vigentes del contrato concreto.
 Si algún supuesto es distinto de cero, también debe declarar una referencia y su fecha de consulta;
 ambas aparecen en el PDF.
+Como alternativa, el [perfil contractual de costos](broker_tariffs.md) importa en un solo CSV la
+institución, producto, mercado, fecha, fuente y componentes transaccionales y recurrentes.
 
 Por activo calcula la diferencia entre el importe objetivo y el importe actual. Cada diferencia
 positiva es una compra y cada diferencia negativa es una venta. Para cada orden no nula aplica:
@@ -24,14 +26,10 @@ una lista de órdenes autofinanciada después de costos ni modela lotes, profund
 liquidación, custodia, cuotas mensuales, administración anual, tipo de cambio operativo, retenciones
 o impuestos sobre ganancias. Tampoco determina si el IVA aplica a cada concepto del contrato.
 
-Como referencias para documentar un escenario, GBM publica comisiones distintas por producto y
-volumen, Bursanet declara rangos por compraventa y Finamex distingue operación, información y
-administración. Son páginas que pueden cambiar y no se convierten en perfiles automáticos dentro de
-la aplicación:
-
-- [GBM: comisiones por producto](https://gbm.com/faqs/que-comisiones-cobran-al-invertir-en-gbm)
-- [Bursanet: beneficios y comisiones de capitales](https://www.bursanet.mx/beneficios.html)
-- [Finamex Trading](https://www.finamex.com.mx/general/finamex-trading/)
+Los costos recurrentes se mantienen fuera del costo inicial de las órdenes. La app estima por
+separado el costo anual fijo más la administración anual sobre el capital, y suma ambos al costo
+inicial para mostrar un total ilustrativo del primer año. Los valores recurrentes deben capturarse
+después de los impuestos aplicables para evitar que la aplicación infiera tratamientos contractuales.
 
 Antes de entregar un reporte, conserva el tarifario o estado de cuenta usado, su fecha de consulta,
 el tipo de cliente y el producto. No extrapoles una tarifa de acciones a fondos, deuda o divisas.

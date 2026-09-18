@@ -364,6 +364,58 @@ def test_current_holdings_csv_cannot_be_combined_with_manual_weights(monkeypatch
     assert any("sólo una entrada" in item.value for item in app.error)
 
 
+def test_contractual_tariff_profile_overrides_zero_manual_costs(monkeypatch):
+    import access
+
+    monkeypatch.setattr(access, "require_access", lambda: None)
+    rng = np.random.default_rng(281)
+    dates = pd.date_range("2024-01-02", periods=140, freq="B")
+    values = 100 * np.cumprod(1 + rng.normal(0.0005, 0.009, (140, 2)), axis=0)
+    prices = pd.DataFrame(values, columns=["AAPL", "MSFT"])
+    prices.insert(0, "Fecha", dates.strftime("%Y-%m-%d"))
+    tariff = (
+        "Intermediario,Producto,Mercado,FechaConsulta,ComisionOperacionPct,"
+        "IVAPctComision,ComisionMinimaMXN,CostoMercadoPbSupuesto,"
+        "CostoFijoAnualTotalMXN,AdministracionAnualTotalPct,Fuente\n"
+        "Casa de Bolsa,Cuenta de prueba,Capitales MX y SIC,2026-09-01,0.25,16,0,8,"
+        "1032,1.0,Contrato ficticio de prueba\n"
+    )
+    uploads = {
+        "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
+            prices.to_csv(index=False).encode("utf-8-sig")
+        ),
+        "Perfil contractual de costos CSV (opcional)": BytesIO(tariff.encode("utf-8-sig")),
+    }
+    monkeypatch.setattr(st, "file_uploader", lambda label, **_kwargs: uploads.get(label))
+    monkeypatch.setattr(
+        core.yf, "download",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Yahoo no debe consultarse")),
+    )
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
+    ).run()
+    next(item for item in app.text_input if item.label == "Tickers").set_value("AAPL, MSFT")
+    next(
+        item for item in app.text_input
+        if item.label == "Monedas de cotización, en el mismo orden"
+    ).set_value("MXN, MXN")
+    next(
+        item for item in app.selectbox if item.label == "Moneda base del análisis"
+    ).set_value("MXN")
+    next(
+        item for item in app.text_input if item.label == "Fuente declarada de precios CSV"
+    ).set_value("Archivo de precios de prueba")
+    app.run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error, [item.value for item in app.error]
+    assert any(
+        "Casa de Bolsa" in item.value and "Cuenta de prueba" in item.value
+        and "2,032.00 MXN" in item.value
+        for item in app.info
+    )
+
+
 def test_bond_issue_csv_is_integrated_with_auditable_total_return(monkeypatch):
     import access
 

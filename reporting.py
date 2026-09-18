@@ -380,7 +380,7 @@ def _implementation_cost_story(
     if assumptions is None:
         raise ValueError("Faltan los supuestos del costo de implementación.")
     if (
-        not source or len(source) > 120 or any(ord(char) < 32 for char in source)
+        not source or len(source) > 400 or any(ord(char) < 32 for char in source)
         or source_date is None or source_date > date.today()
     ):
         raise ValueError("Falta la referencia fechada del costo de implementación.")
@@ -401,7 +401,7 @@ def _implementation_cost_story(
             )
         ):
             raise ValueError("Estimación de costos inválida.")
-    rows = [["Alternativa", "Compras", "Ventas", "Costo total", "% capital"]]
+    rows = [["Alternativa", "Compras", "Ventas", "Costo inicial", "% capital"]]
     for item in estimates:
         rows.append([
             Paragraph(escape(item.alternative_name), styles["Normal"]),
@@ -421,7 +421,10 @@ def _implementation_cost_story(
         f"Moneda: {escape(currency)}. Comisión: {assumptions.commission_bps:.1f} pb por orden; "
         f"IVA sobre comisión: {assumptions.vat_rate:.2%}; costo de mercado: "
         f"{assumptions.market_cost_bps:.1f} pb sobre nominal; mínimo por orden: "
-        f"{assumptions.minimum_commission:,.2f}."
+        f"{assumptions.minimum_commission:,.2f}. Costo fijo anual total: "
+        f"{assumptions.annual_fixed_cost:,.2f}; administración anual total: "
+        f"{assumptions.annual_management_rate:.3%}; costo recurrente anual estimado: "
+        f"{assumptions.annual_recurring_cost(portfolio_value):,.2f}."
     )
     section = [
         Paragraph("Costo estimado de implementación", styles["Heading2"]),
@@ -429,7 +432,8 @@ def _implementation_cost_story(
         Spacer(1, 2 * mm), table, Spacer(1, 1 * mm),
         Paragraph(
             "Cada compra y venta se cobra por separado. El costo se suma al nominal objetivo; "
-            "no incluye lotes, impuestos sobre ganancias ni una ejecución autofinanciada.",
+            "el costo recurrente anual se presenta por separado. No incluye lotes, impuestos sobre "
+            "ganancias ni una ejecución autofinanciada, y no se descuenta de las métricas.",
             styles["Normal"],
         ),
         Spacer(1, 3 * mm),

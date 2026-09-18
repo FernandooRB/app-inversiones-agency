@@ -64,6 +64,13 @@ def test_zero_reference_capital_has_no_orders_or_costs():
     assert result.total_cost == 0
 
 
+def test_annual_recurring_cost_keeps_fixed_and_asset_based_costs_separate():
+    assumptions = ImplementationCostAssumptions(
+        annual_fixed_cost=1_200, annual_management_rate=0.01,
+    )
+    assert assumptions.annual_recurring_cost(100_000) == pytest.approx(2_200)
+
+
 @pytest.mark.parametrize(
     "assumptions",
     [
@@ -71,6 +78,8 @@ def test_zero_reference_capital_has_no_orders_or_costs():
         ImplementationCostAssumptions(market_cost_bps=501),
         ImplementationCostAssumptions(vat_rate=1.01),
         ImplementationCostAssumptions(minimum_commission=-1),
+        ImplementationCostAssumptions(annual_fixed_cost=1_000_001),
+        ImplementationCostAssumptions(annual_management_rate=0.201),
     ],
 )
 def test_rejects_invalid_cost_assumptions(assumptions):
