@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -8,6 +8,18 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 import portfolio_core as core
+
+
+def rights_manifest(scope: str = "ENTREGABLES_DERIVADOS") -> BytesIO:
+    reviewed = (date.today() - timedelta(days=10)).isoformat()
+    expires = (date.today() + timedelta(days=365)).isoformat()
+    contents = (
+        "Fuente,Producto,Mercados,FechaRevision,VigenciaHasta,EstadoDerechos,"
+        "AlcanceAutorizado,AjusteCorporativo,HoraCorteZona,ReferenciaContractual\n"
+        f"Proveedor de prueba,Cierres diarios,BMV y SIC,{reviewed},{expires},CONFIRMADO,"
+        f"{scope},AJUSTADO,Cierre oficial America/Mexico_City,Contrato ficticio sección 4\n"
+    )
+    return BytesIO(contents.encode("utf-8-sig"))
 
 
 def test_complete_analysis_survives_rerun(monkeypatch):
@@ -258,10 +270,13 @@ def test_uploaded_prices_run_without_yahoo_price_download(monkeypatch):
     table = pd.DataFrame(values, columns=["AAPL", "MSFT", "GOOG", "TSLA"])
     table.insert(0, "Fecha", dates.strftime("%Y-%m-%d"))
     upload = BytesIO(table.to_csv(index=False).encode("utf-8-sig"))
-    monkeypatch.setattr(
-        st, "file_uploader",
-        lambda label, **_kwargs: upload if label.startswith("Precios ajustados CSV") else None,
-    )
+    uploads = {
+        "Precios ajustados CSV aportados por el equipo (opcional)": upload,
+        "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)": (
+            rights_manifest("INVESTIGACION_INTERNA")
+        ),
+    }
+    monkeypatch.setattr(st, "file_uploader", lambda label, **_kwargs: uploads.get(label))
     monkeypatch.setattr(
         core.yf, "download",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Yahoo no debe consultarse")),
@@ -269,14 +284,36 @@ def test_uploaded_prices_run_without_yahoo_price_download(monkeypatch):
     app = AppTest.from_file(
         Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
     ).run()
-    source = next(
-        item for item in app.text_input if item.label == "Fuente declarada de precios CSV"
-    )
-    source.set_value("Archivo de investigación").run()
     app.button[0].click().run()
     assert not app.exception
     assert not app.error
     assert any("Precios CSV aportados" in item.value for item in app.info)
+    assert any("sólo investigación interna" in item.value for item in app.warning)
+
+
+def test_uploaded_prices_require_a_confirmed_rights_manifest(monkeypatch):
+    import access
+
+    monkeypatch.setattr(access, "require_access", lambda: None)
+    dates = pd.date_range("2024-01-02", periods=80, freq="B")
+    prices = pd.DataFrame({
+        "Fecha": dates.strftime("%Y-%m-%d"),
+        "AAPL": np.linspace(100, 120, len(dates)),
+        "MSFT": np.linspace(200, 230, len(dates)),
+        "GOOG": np.linspace(90, 110, len(dates)),
+        "TSLA": np.linspace(180, 210, len(dates)),
+    })
+    upload = BytesIO(prices.to_csv(index=False).encode("utf-8-sig"))
+    monkeypatch.setattr(
+        st, "file_uploader",
+        lambda label, **_kwargs: upload if label.startswith("Precios ajustados CSV") else None,
+    )
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
+    ).run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert any("manifiesto de derechos" in item.value for item in app.error)
 
 
 def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client_data(monkeypatch):
@@ -298,6 +335,7 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
         "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
             prices.to_csv(index=False).encode("utf-8-sig")
         ),
+        "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)": rights_manifest(),
         "Cartera actual valuada en MXN CSV (opcional)": BytesIO(
             holdings.to_csv(index=False).encode("utf-8-sig")
         ),
@@ -318,9 +356,6 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
     next(
         item for item in app.selectbox if item.label == "Moneda base del análisis"
     ).set_value("MXN")
-    next(
-        item for item in app.text_input if item.label == "Fuente declarada de precios CSV"
-    ).set_value("Archivo de precios de prueba")
     next(
         item for item in app.text_input if item.label == "Fuente declarada de la cartera actual"
     ).set_value("Estado de cuenta ficticio")
@@ -384,6 +419,7 @@ def test_contractual_tariff_profile_overrides_zero_manual_costs(monkeypatch):
         "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
             prices.to_csv(index=False).encode("utf-8-sig")
         ),
+        "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)": rights_manifest(),
         "Perfil contractual de costos CSV (opcional)": BytesIO(tariff.encode("utf-8-sig")),
     }
     monkeypatch.setattr(st, "file_uploader", lambda label, **_kwargs: uploads.get(label))
@@ -402,9 +438,6 @@ def test_contractual_tariff_profile_overrides_zero_manual_costs(monkeypatch):
     next(
         item for item in app.selectbox if item.label == "Moneda base del análisis"
     ).set_value("MXN")
-    next(
-        item for item in app.text_input if item.label == "Fuente declarada de precios CSV"
-    ).set_value("Archivo de precios de prueba")
     app.run()
     app.button[0].click().run()
     assert not app.exception
@@ -438,6 +471,7 @@ def test_bond_issue_csv_is_integrated_with_auditable_total_return(monkeypatch):
         "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
             price_table.to_csv(index=False).encode("utf-8-sig")
         ),
+        "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)": rights_manifest(),
         "Serie de Bono M por emisión (opcional)": BytesIO(
             bond_table.to_csv(index=False).encode("utf-8-sig")
         ),
@@ -458,9 +492,6 @@ def test_bond_issue_csv_is_integrated_with_auditable_total_return(monkeypatch):
     next(
         item for item in app.selectbox if item.label == "Moneda base del análisis"
     ).set_value("MXN")
-    next(
-        item for item in app.text_input if item.label == "Fuente declarada de precios CSV"
-    ).set_value("Archivo interno de prueba")
     app.run()
     app.button[0].click().run()
     assert not app.exception
@@ -488,6 +519,7 @@ def test_liquidity_rate_csv_is_integrated_without_future_rate_use(monkeypatch):
         "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
             price_table.to_csv(index=False).encode("utf-8-sig")
         ),
+        "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)": rights_manifest(),
         "Tasas de vehículo de liquidez MXN (opcional)": BytesIO(
             liquidity_table.to_csv(index=False).encode("utf-8-sig")
         ),
@@ -508,9 +540,6 @@ def test_liquidity_rate_csv_is_integrated_without_future_rate_use(monkeypatch):
     next(
         item for item in app.selectbox if item.label == "Moneda base del análisis"
     ).set_value("MXN")
-    next(
-        item for item in app.text_input if item.label == "Fuente declarada de precios CSV"
-    ).set_value("Archivo interno de prueba")
     next(
         item for item in app.text_input
         if item.label == "Fuente declarada de la tasa de liquidez"
@@ -547,6 +576,7 @@ def test_exact_fund_series_csv_is_integrated_with_distributions(monkeypatch):
         "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
             price_table.to_csv(index=False).encode("utf-8-sig")
         ),
+        "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)": rights_manifest(),
         "Serie de fondo de inversión MXN (opcional)": BytesIO(
             fund_table.to_csv(index=False).encode("utf-8-sig")
         ),
@@ -567,9 +597,6 @@ def test_exact_fund_series_csv_is_integrated_with_distributions(monkeypatch):
     next(
         item for item in app.selectbox if item.label == "Moneda base del análisis"
     ).set_value("MXN")
-    next(
-        item for item in app.text_input if item.label == "Fuente declarada de precios CSV"
-    ).set_value("Archivo interno de prueba")
     next(
         item for item in app.text_input if item.label == "Fuente declarada del valor del fondo"
     ).set_value("Estado de cuenta de prueba")

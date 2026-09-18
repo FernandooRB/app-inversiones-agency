@@ -18,8 +18,8 @@ con convención explícita y sin usar tasas futuras para intervalos anteriores.
 El [preparador de fondos MXN](docs/fund_adapter.md) calcula retorno total para un fondo y serie exactos
 desde el valor de la acción y sus distribuciones por acción.
 La [importación manual de precios ajustados](docs/price_upload.md) acepta un CSV
-aportado por el equipo y documenta su fuente y huella, sin verificar por sí sola
-ajustes corporativos, moneda ni derechos de uso.
+aportado por el equipo junto con un [manifiesto de derechos](docs/data_sources.md) fechado;
+documenta ambas huellas y rechaza licencias pendientes, vencidas o sin permiso declarado.
 La [conciliación de cartera actual](docs/current_holdings_import.md) transforma una valuación anónima
 en MXN a pesos ordenados, capital y un archivo de auditoría, sin persistir el CSV.
 La [revisión heurística de precios](docs/price_quality.md) identifica saltos de al menos
@@ -141,6 +141,7 @@ pytest
 app_inversiones.py   Interfaz Streamlit
 portfolio_core.py    Datos, métricas, optimización y riesgo
 price_upload.py       Importación estricta de precios ajustados CSV
+data_rights.py        Manifiesto estricto de fuente, vigencia, ajustes y alcance autorizado
 holdings.py           Conciliación estricta de la cartera actual valuada en MXN
 price_quality.py      Alertas heurísticas sobre precios originales
 implementation_costs.py Estimación explícita de compras, ventas y costos
