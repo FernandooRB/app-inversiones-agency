@@ -161,10 +161,13 @@ def main() -> None:
         base_currency="MXN", risk_free_rate=0.06, observations=1_200,
         quotes=dict.fromkeys(labels, "MXN"),
         data_source=(
-            "datos ficticios para revisión visual; BONOM representa una emisión preparada desde "
-            "precio limpio, interés devengado y cupones; LIQUIDEZ una tasa histórica declarada, y "
-            "FONDOA1 valor de acción y distribuciones de una serie exacta; "
-            "no son cotizaciones de mercado"
+            "CSV ficticio; Proveedor de ejemplo / Cierres diarios; mercados BMV y SIC; derechos "
+            "revisados 2026-09-01; alcance ENTREGABLES_DERIVADOS; cierre oficial "
+            "America/Mexico_City; referencia Contrato ficticio sección 4; precios declarados "
+            "ajustados; SHA-256 datos abcdef012345 y manifiesto 9876543210ab; BONOM representa "
+            "una emisión preparada desde precio limpio, interés devengado y cupones; LIQUIDEZ una "
+            "tasa histórica declarada, y FONDOA1 valor de acción y distribuciones de una serie "
+            "exacta; no son cotizaciones de mercado"
         ),
         price_quality_issues=(
             PriceQualityIssue("ETF_SIC", "Salto de precio", "2024-06-10", "2024-06-11", "+35.40%"),

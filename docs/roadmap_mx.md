@@ -25,7 +25,7 @@
 | Etapa | Entrega | Criterio de aceptación |
 | --- | --- | --- |
 | 1. Comparativo | Máximo Sharpe, mínima volatilidad, pesos iguales y [cartera actual opcional](current_holdings_import.md) en un PDF | Mismos activos, fechas, moneda y supuestos; conciliación exacta del universo; pesos válidos; PDF legible; pruebas automatizadas |
-| 2. Datos mexicanos | [Catálogo piloto](instrument_catalog.md), [ruta de precios CSV aportados](price_upload.md), [revisión heurística](price_quality.md), serie FX independiente y referencias de tasas | Estructura, fuente declarada, huella y alertas disponibles; fuente, licencia, moneda, horario y ajustes todavía necesitan comprobación externa; sin retornos diarios falsos por huecos |
+| 2. Datos mexicanos | [Catálogo piloto](instrument_catalog.md), [ruta de precios CSV aportados](price_upload.md), [manifiesto y matriz de fuentes](data_sources.md), [revisión heurística](price_quality.md), serie FX independiente y referencias de tasas | Estructura, manifiesto, vigencia, alcance, huellas y alertas disponibles; el contrato, moneda, horario, ajustes y datos todavía necesitan comprobación humana; sin retornos diarios falsos por huecos |
 | 3. Instrumentos | Acciones/ETF mexicanos y SIC; CETES, [Bonos M](bonos_m_adapter.md), [liquidez MXN](liquidity_adapter.md) y [fondos MXN](fund_adapter.md) preparados por archivo | Valoración y flujos apropiados por tipo; no tratar tasas como retornos diarios; validar externamente precios, devengado, cupones, tasas, valores de acción y distribuciones |
 | 4. Optimización | Objetivos, límites, [benchmark independiente](benchmarking.md), [política por clase](allocation_policy.md), [atribución de riesgo](risk_attribution.md), [Black-Litterman](black_litterman.md), [sensibilidad histórica](allocation_sensitivity.md) y [covarianza diagonal fija o calibrada](covariance_shrinkage.md) | Restricciones individuales y por clase factibles; comparación con alternativa simple y benchmark en fechas comunes; contribuciones de volatilidad reconciliadas; escenario de retornos implícitos y opiniones trazables; falta validarlo en más regímenes y universos; asignación por perfil solo después de resolver las condiciones legales y laborales |
 | 5. Simulación | [Trayectorias Monte Carlo](monte_carlo.md) y [pruebas de estrés](stress_testing.md) históricas/manuales en app y PDF | Supuestos visibles; resultados hipotéticos; trayectorias sin patrimonio negativo; shocks nombrados por activo o clase declarada; tasas y duración de deuda aún requieren modelos propios |
@@ -73,7 +73,8 @@
    incorporar precios de salida/entrada y ampliar el catálogo con claves oficiales e ISIN.
 3. Obtener y archivar tarifarios reales por contrato, cliente y producto. El importador ya concilia
    un perfil fechado y separa costos iniciales y recurrentes; falta validarlo con contratos reales.
-4. Seleccionar un proveedor de datos apropiado para el uso comercial dentro del presupuesto o
-   delimitar un flujo con datos aportados por el intermediario y fuentes oficiales.
+4. Obtener cotizaciones y contratos para la ruta definida en la [matriz de fuentes](data_sources.md):
+   Banxico como referencia mexicana y precios BMV/SIC aportados bajo un permiso confirmado. El
+   manifiesto ya impide usar archivos con derechos pendientes, vencidos o no autorizados.
 5. La importación anónima y no persistente de la cartera actual ya está disponible. Antes de
    almacenar datos, definir los campos mínimos, finalidad, acceso, conservación y eliminación de expedientes.

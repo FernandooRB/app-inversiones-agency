@@ -17,15 +17,22 @@ superior a siete días naturales, para evitar tratar cierres semanales como diar
 Ese control no demuestra que estén presentes todas las sesiones de cada mercado.
 El límite es 5 MB.
 
-El usuario declara el nombre de la fuente. La app incorpora ese nombre, una huella
-SHA-256 abreviada y la advertencia de que los ajustes no fueron verificados en el
-PDF. No guarda el CSV en una base de datos; la carga existe durante la sesión de
-Streamlit. El archivo debe contener **precios**, no estados de cuenta, posiciones
-identificables ni datos personales de clientes.
+Cada archivo requiere un [manifiesto de derechos](data_sources.md) de una fila con fuente,
+producto, mercados, fecha de revisión, vigencia, estado, alcance autorizado, convención de
+ajustes, hora de corte/zona y referencia contractual. Sólo se acepta `EstadoDerechos=CONFIRMADO`
+y `AjusteCorporativo=AJUSTADO`. La vigencia no puede estar vencida. Los alcances admitidos son
+`INVESTIGACION_INTERNA`, `ENTREGABLES_DERIVADOS` y `REDISTRIBUCION_DATOS`; la app advierte cuando
+el manifiesto sólo permite investigación interna.
 
-La validación informática comprueba estructura, fechas y magnitudes, pero no puede
+La app incorpora al PDF las huellas SHA-256 abreviadas de los precios y del manifiesto. No guarda
+ninguno de los dos CSV en una base de datos; las cargas existen durante la sesión de Streamlit. El
+archivo debe contener **precios**, no estados de cuenta, posiciones identificables ni datos
+personales de clientes.
+
+La validación informática comprueba estructura, fechas, magnitudes y consistencia formal del
+manifiesto, pero no puede
 demostrar que un precio sea de cierre, que incluya eventos corporativos y distribuciones,
 que tenga la moneda o subunidad esperada, que represente el mercado de negociación
-indicado o que el equipo tenga derechos de uso y redistribución. Esas verificaciones
+indicado ni que la declaración reproduzca correctamente el contrato. Esas verificaciones
 requieren la fuente y su licencia. Para SIC, una serie del mercado de origen convertida
 a MXN sigue siendo un proxy económico y no el precio local ejecutable.

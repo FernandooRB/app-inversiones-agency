@@ -18,6 +18,7 @@ from black_litterman import black_litterman_posterior, parse_absolute_views
 from broker_tariffs import read_broker_tariff_csv
 from covariance_calibration import select_diagonal_shrinkage
 from currencies import convert_prices, currency_map, download_fx
+from data_rights import read_data_rights_csv
 from fixed_income import (
     merge_bond_index,
     merge_cetes_index,
@@ -346,9 +347,24 @@ with st.sidebar:
             "de uso con la fuente antes de interpretar o distribuir resultados."
         ),
     )
-    price_source_input = st.text_input(
-        "Fuente declarada de precios CSV",
-        help="Nombre del proveedor o exportación; aparecerá en el PDF si cargas precios.",
+    price_rights_upload = st.file_uploader(
+        "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)",
+        type=["csv"],
+        help=(
+            "Un registro, máximo 100 KB. Debe confirmar el producto, alcance permitido, "
+            "convención de ajustes, hora de corte y referencia contractual vigente."
+        ),
+    )
+    st.download_button(
+        "Descargar plantilla de manifiesto de derechos",
+        (
+            b"Fuente,Producto,Mercados,FechaRevision,VigenciaHasta,EstadoDerechos,"
+            b"AlcanceAutorizado,AjusteCorporativo,HoraCorteZona,ReferenciaContractual\n"
+            b"Proveedor,Precios de cierre,BMV y SIC,2026-09-01,2027-09-01,CONFIRMADO,"
+            b"INVESTIGACION_INTERNA,AJUSTADO,Cierre oficial America/Mexico_City,"
+            b"Contrato o permiso verificable\n"
+        ),
+        "plantilla_derechos_datos.csv", "text/csv",
     )
     st.download_button(
         "Descargar plantilla de precios CSV",
@@ -450,6 +466,12 @@ with st.sidebar:
 
 price_contents = price_upload.getvalue() if price_upload is not None else b""
 price_fingerprint = sha256(price_contents).hexdigest() if price_contents else None
+price_rights_contents = (
+    price_rights_upload.getvalue() if price_rights_upload is not None else b""
+)
+price_rights_fingerprint = (
+    sha256(price_rights_contents).hexdigest() if price_rights_contents else None
+)
 holdings_contents = holdings_upload.getvalue() if holdings_upload is not None else b""
 holdings_fingerprint = sha256(holdings_contents).hexdigest() if holdings_contents else None
 cetes_contents = cetes_upload.getvalue() if cetes_upload is not None else b""
@@ -497,7 +519,7 @@ settings = (
     implementation_source_date,
     tariff_fingerprint,
     price_fingerprint,
-    price_source_input,
+    price_rights_fingerprint,
     cetes_fingerprint,
     cetes_name_input,
     bond_fingerprint,
@@ -544,18 +566,22 @@ try:
     bond_result = None
     liquidity_result = None
     fund_result = None
+    price_rights = None
     with st.spinner("Preparando y validando datos..."):
         if price_contents:
-            price_source = price_source_input.strip()
-            if (
-                not price_source or len(price_source) > 120
-                or any(ord(char) < 32 for char in price_source)
-            ):
-                raise PortfolioError("Declara una fuente de precios CSV de 1 a 120 caracteres.")
+            if not price_rights_contents:
+                raise PortfolioError(
+                    "Carga el manifiesto de derechos correspondiente al archivo de precios."
+                )
+            price_rights = read_data_rights_csv(price_rights_contents)
             download = read_adjusted_price_csv(
                 price_contents, tickers, start_date, end_date
             )
         else:
+            if price_rights_contents:
+                raise PortfolioError(
+                    "El manifiesto de derechos sólo puede usarse junto con un CSV de precios."
+                )
             download = cached_prices(tickers, start_date, end_date)
         if download.rejected_tickers:
             raise PortfolioError("Corrige los tickers sin datos: " + ", ".join(download.rejected_tickers))
@@ -675,9 +701,16 @@ try:
             allocation_policy_table = policy_table(allocation_groups)
         if price_contents:
             data_source = (
-                f"CSV aportado por el equipo; fuente declarada: {price_source}; "
-                f"ajustes no verificados; SHA-256 {price_fingerprint[:12]}"
+                f"CSV aportado por el equipo; {price_rights.source} / {price_rights.product}; "
+                f"mercados {price_rights.markets}; derechos revisados "
+                f"{price_rights.reviewed_on.isoformat()}; alcance "
+                f"{price_rights.authorized_scope}; cierre {price_rights.cutoff_convention}; "
+                f"referencia {price_rights.contractual_reference}; "
+                f"precios declarados ajustados; SHA-256 datos {price_fingerprint[:12]} y "
+                f"manifiesto {price_rights.fingerprint[:12]}"
             )
+            if not price_rights.allows_client_deliverables:
+                data_source += "; USO RESTRINGIDO A INVESTIGACIÓN INTERNA"
             if any(quotes[ticker] != base_currency for ticker in tickers):
                 data_source += "; FX histórico Yahoo mediante yfinance"
         else:
@@ -912,10 +945,22 @@ try:
             )
     if price_contents:
         st.info(
-            f"Precios CSV aportados por el equipo · Fuente declarada: {price_source} · "
-            f"SHA-256 {price_fingerprint[:12]}. "
-            "Confirma con la fuente que son cierres ajustados comparables, su moneda, "
-            "calendario y derechos de uso; la app no puede verificar esos extremos."
+            f"Precios CSV aportados por el equipo · {price_rights.source} / "
+            f"{price_rights.product} · Alcance {price_rights.authorized_scope} · "
+            f"Revisión {price_rights.reviewed_on.isoformat()} · "
+            f"SHA-256 datos {price_fingerprint[:12]} y manifiesto "
+            f"{price_rights.fingerprint[:12]}. La app valida la declaración, pero no sustituye "
+            "la revisión del contrato ni verifica por sí misma los datos del proveedor."
+        )
+        if not price_rights.allows_client_deliverables:
+            st.warning(
+                "Este manifiesto autoriza sólo investigación interna. No entregues a clientes "
+                "el PDF ni resultados derivados de estos precios."
+            )
+    else:
+        st.warning(
+            "Los precios descargados mediante Yahoo/yfinance se reservan para investigación "
+            "interna y pruebas. No uses el PDF como entregable para clientes."
         )
     if holdings_result is not None:
         st.info(
