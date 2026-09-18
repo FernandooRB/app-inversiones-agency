@@ -25,6 +25,7 @@ from fixed_income import (
 )
 from funds import merge_fund_index, read_fund_total_return_csv
 from fx_comparison import render_comparison
+from holdings import read_current_holdings_csv
 from implementation_costs import (
     ImplementationCostAssumptions,
     estimate_implementation_cost,
@@ -232,6 +233,24 @@ with st.sidebar:
             "No se guarda en una base de datos."
         ),
     )
+    holdings_upload = st.file_uploader(
+        "Cartera actual valuada en MXN CSV (opcional)",
+        type=["csv"],
+        help=(
+            "FechaCorte, Instrumento y ValorMXN; incluye exactamente todos los activos del análisis, "
+            "también los de valor cero. Máximo 2 MB. No incluyas nombres, cuentas ni identificadores "
+            "del cliente. Esta opción sustituye los pesos y el valor manuales."
+        ),
+    )
+    holdings_source_input = st.text_input(
+        "Fuente declarada de la cartera actual",
+        help="Estado de cuenta o exportación utilizada; máximo 120 caracteres.",
+    )
+    st.download_button(
+        "Descargar plantilla de cartera actual CSV",
+        b"FechaCorte,Instrumento,ValorMXN\n2026-01-15,AAPL,60000\n2026-01-15,MSFT,40000\n",
+        "plantilla_cartera_actual_mxn.csv", "text/csv",
+    )
     with st.expander("Escenario Black-Litterman"):
         use_black_litterman = st.checkbox("Añadir alternativa Black-Litterman")
         black_litterman_equilibrium_input = st.text_input(
@@ -402,6 +421,8 @@ with st.sidebar:
 
 price_contents = price_upload.getvalue() if price_upload is not None else b""
 price_fingerprint = sha256(price_contents).hexdigest() if price_contents else None
+holdings_contents = holdings_upload.getvalue() if holdings_upload is not None else b""
+holdings_fingerprint = sha256(holdings_contents).hexdigest() if holdings_contents else None
 cetes_contents = cetes_upload.getvalue() if cetes_upload is not None else b""
 cetes_fingerprint = sha256(cetes_contents).hexdigest() if cetes_contents else None
 bond_contents = bond_upload.getvalue() if bond_upload is not None else b""
@@ -428,6 +449,8 @@ settings = (
     quote_input,
     base_currency,
     current_weights_input,
+    holdings_fingerprint,
+    holdings_source_input,
     use_black_litterman,
     black_litterman_equilibrium_input,
     black_litterman_risk_aversion,
@@ -475,6 +498,10 @@ try:
         len(tickers) + bool(cetes_contents) + bool(bond_contents) + bool(liquidity_contents)
         + bool(fund_contents)
     )
+    if holdings_contents and current_weights_input.strip():
+        raise PortfolioError(
+            "Usa sólo una entrada para la cartera actual: el CSV valuado o los pesos manuales."
+        )
     if asset_count * max_weight < 1:
         raise PortfolioError(
             f"Con {asset_count} activos, el peso máximo debe ser al menos {1 / asset_count:.1%}."
@@ -571,6 +598,30 @@ try:
             ]
             prices = merge_fund_index(prices, prepared_fund_index)
         analysis_tickers = tuple(str(column) for column in prices.columns)
+        holdings_result = None
+        current_weights = None
+        holdings_source = None
+        if holdings_contents:
+            if base_currency != "MXN":
+                raise PortfolioError("La cartera valuada en MXN requiere moneda base MXN.")
+            holdings_source = holdings_source_input.strip()
+            if (
+                not holdings_source
+                or len(holdings_source) > 120
+                or any(ord(char) < 32 for char in holdings_source)
+            ):
+                raise PortfolioError(
+                    "Declara una fuente de la cartera actual de 1 a 120 caracteres."
+                )
+            holdings_result = read_current_holdings_csv(
+                holdings_contents, analysis_tickers
+            )
+            current_weights = holdings_result.weights.to_numpy(dtype=float)
+            portfolio_value = holdings_result.total_value
+        elif current_weights_input.strip():
+            current_weights = parse_current_weights(
+                current_weights_input, len(analysis_tickers)
+            )
         analysis_quotes = (
             quotes
             | ({cetes_name: "MXN"} if cetes_result is not None else {})
@@ -622,6 +673,11 @@ try:
                 f"serie {fund_result.series_id}; fuente declarada: {fund_source}; retorno total "
                 f"desde valor de acción y distribuciones; SHA-256 {fund_fingerprint[:12]}"
             )
+        if holdings_result is not None:
+            data_source += (
+                f"; cartera actual al {holdings_result.as_of.date()} desde {holdings_source}; "
+                f"SHA-256 {holdings_fingerprint[:12]}"
+            )
         returns = calculate_returns(prices)
         mean_returns, covariance = annualized_moments(returns)
         max_sharpe = optimize_portfolio(
@@ -658,9 +714,7 @@ try:
             PortfolioMetrics(equal_weights, equal_return, equal_volatility, equal_sharpe),
             calculate_risk_metrics(returns, equal_weights, confidence, horizon),
         ))
-        current_weights = None
-        if current_weights_input.strip():
-            current_weights = parse_current_weights(current_weights_input, len(analysis_tickers))
+        if current_weights is not None:
             current_return, current_volatility, current_sharpe = portfolio_statistics(
                 current_weights, mean_returns, covariance, risk_free_rate
             )
@@ -804,6 +858,24 @@ try:
             f"SHA-256 {price_fingerprint[:12]}. "
             "Confirma con la fuente que son cierres ajustados comparables, su moneda, "
             "calendario y derechos de uso; la app no puede verificar esos extremos."
+        )
+    if holdings_result is not None:
+        st.info(
+            f"Cartera actual conciliada al {holdings_result.as_of.date()} · "
+            f"{holdings_result.total_value:,.2f} MXN · {len(holdings_result.values)} instrumentos · "
+            f"Fuente declarada: {holdings_source} · SHA-256 {holdings_fingerprint[:12]}. "
+            "El total cargado sustituye el valor manual durante este análisis; el archivo no se persiste."
+        )
+        holdings_audit = pd.DataFrame({
+            "Instrumento": holdings_result.values.index,
+            "ValorMXN": holdings_result.values.to_numpy(),
+            "Peso": holdings_result.weights.to_numpy(),
+            "FechaCorte": holdings_result.as_of.date().isoformat(),
+        })
+        st.download_button(
+            "Descargar conciliación de cartera actual CSV",
+            holdings_audit.to_csv(index=False).encode("utf-8-sig"),
+            "conciliacion_cartera_actual.csv", "text/csv",
         )
     with st.expander("Revisión heurística de precios originales", expanded=bool(price_quality_issues)):
         st.caption(
@@ -1543,9 +1615,7 @@ try:
                 backtest = run_holdout_backtest(
                     returns, training_fraction=training_percent / 100,
                     risk_free_rate=risk_free_rate, max_weight=max_weight,
-                    current_weights=(
-                        current_weights if current_weights_input.strip() else None
-                    ),
+                    current_weights=current_weights,
                     trading_cost_bps=entry_cost_bps,
                     allocation_groups=allocation_groups,
                 )
@@ -1573,9 +1643,7 @@ try:
                     diagonal = run_holdout_backtest(
                         returns, training_fraction=training_percent / 100,
                         risk_free_rate=risk_free_rate, max_weight=max_weight,
-                        current_weights=(
-                            current_weights if current_weights_input.strip() else None
-                        ),
+                        current_weights=current_weights,
                         trading_cost_bps=entry_cost_bps,
                         covariance_shrinkage=0.5,
                         allocation_groups=allocation_groups,
@@ -1592,9 +1660,7 @@ try:
                             calibrated = run_holdout_backtest(
                                 returns, training_fraction=training_percent / 100,
                                 risk_free_rate=risk_free_rate, max_weight=max_weight,
-                                current_weights=(
-                                    current_weights if current_weights_input.strip() else None
-                                ),
+                                current_weights=current_weights,
                                 trading_cost_bps=entry_cost_bps,
                                 covariance_shrinkage="cv",
                                 allocation_groups=allocation_groups,
@@ -1672,9 +1738,7 @@ try:
                     }[estimator]
                     multi = run_multi_cut_backtest(
                         returns, risk_free_rate=risk_free_rate, max_weight=max_weight,
-                        current_weights=(
-                            current_weights if current_weights_input.strip() else None
-                        ),
+                        current_weights=current_weights,
                         trading_cost_bps=multi_cost,
                         covariance_shrinkage=method,
                         allocation_groups=allocation_groups,
@@ -1752,9 +1816,7 @@ try:
                     returns, training_fraction=train_percent / 100,
                     cadence_months=cadence, risk_free_rate=risk_free_rate,
                     max_weight=max_weight,
-                    current_weights=(
-                        current_weights if current_weights_input.strip() else None
-                    ),
+                    current_weights=current_weights,
                     trading_cost_bps=cost_bps,
                     allocation_groups=allocation_groups,
                 )
@@ -1780,9 +1842,7 @@ try:
                         returns, training_fraction=train_percent / 100,
                         cadence_months=cadence, risk_free_rate=risk_free_rate,
                         max_weight=max_weight,
-                        current_weights=(
-                            current_weights if current_weights_input.strip() else None
-                        ),
+                        current_weights=current_weights,
                         trading_cost_bps=cost_bps,
                         covariance_shrinkage=0.5,
                         allocation_groups=allocation_groups,
@@ -1796,9 +1856,7 @@ try:
                                 returns, training_fraction=train_percent / 100,
                                 cadence_months=cadence, risk_free_rate=risk_free_rate,
                                 max_weight=max_weight,
-                                current_weights=(
-                                    current_weights if current_weights_input.strip() else None
-                                ),
+                                current_weights=current_weights,
                                 trading_cost_bps=cost_bps,
                                 covariance_shrinkage="cv",
                                 allocation_groups=allocation_groups,

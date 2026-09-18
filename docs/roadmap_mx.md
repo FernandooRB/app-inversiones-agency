@@ -24,7 +24,7 @@
 
 | Etapa | Entrega | Criterio de aceptación |
 | --- | --- | --- |
-| 1. Comparativo | Máximo Sharpe, mínima volatilidad, pesos iguales y cartera actual opcional en un PDF | Mismos activos, fechas, moneda y supuestos; pesos válidos; PDF legible; pruebas automatizadas |
+| 1. Comparativo | Máximo Sharpe, mínima volatilidad, pesos iguales y [cartera actual opcional](current_holdings_import.md) en un PDF | Mismos activos, fechas, moneda y supuestos; conciliación exacta del universo; pesos válidos; PDF legible; pruebas automatizadas |
 | 2. Datos mexicanos | [Catálogo piloto](instrument_catalog.md), [ruta de precios CSV aportados](price_upload.md), [revisión heurística](price_quality.md), serie FX independiente y referencias de tasas | Estructura, fuente declarada, huella y alertas disponibles; fuente, licencia, moneda, horario y ajustes todavía necesitan comprobación externa; sin retornos diarios falsos por huecos |
 | 3. Instrumentos | Acciones/ETF mexicanos y SIC; CETES, [Bonos M](bonos_m_adapter.md), [liquidez MXN](liquidity_adapter.md) y [fondos MXN](fund_adapter.md) preparados por archivo | Valoración y flujos apropiados por tipo; no tratar tasas como retornos diarios; validar externamente precios, devengado, cupones, tasas, valores de acción y distribuciones |
 | 4. Optimización | Objetivos, límites, [benchmark independiente](benchmarking.md), [política por clase](allocation_policy.md), [atribución de riesgo](risk_attribution.md), [Black-Litterman](black_litterman.md), [sensibilidad histórica](allocation_sensitivity.md) y [covarianza diagonal fija o calibrada](covariance_shrinkage.md) | Restricciones individuales y por clase factibles; comparación con alternativa simple y benchmark en fechas comunes; contribuciones de volatilidad reconciliadas; escenario de retornos implícitos y opiniones trazables; falta validarlo en más regímenes y universos; asignación por perfil solo después de resolver las condiciones legales y laborales |
@@ -75,4 +75,5 @@
    separa compra, venta, comisión, IVA y costo de mercado, pero no mantiene perfiles automáticos.
 4. Seleccionar un proveedor de datos apropiado para el uso comercial dentro del presupuesto o
    delimitar un flujo con datos aportados por el intermediario y fuentes oficiales.
-5. Definir los campos mínimos y política de conservación de expedientes antes de almacenar datos.
+5. La importación anónima y no persistente de la cartera actual ya está disponible. Antes de
+   almacenar datos, definir los campos mínimos, finalidad, acceso, conservación y eliminación de expedientes.
