@@ -29,7 +29,7 @@
 | 3. Instrumentos | Acciones/ETF mexicanos y SIC; CETES, [Bonos M](bonos_m_adapter.md), [liquidez MXN](liquidity_adapter.md) y [fondos MXN](fund_adapter.md) preparados por archivo | Valoración y flujos apropiados por tipo; no tratar tasas como retornos diarios; validar externamente precios, devengado, cupones, tasas, valores de acción y distribuciones |
 | 4. Optimización | Objetivos, límites, [benchmark independiente](benchmarking.md), [política por clase](allocation_policy.md), [atribución de riesgo](risk_attribution.md), [Black-Litterman](black_litterman.md), [sensibilidad histórica](allocation_sensitivity.md) y [covarianza diagonal fija o calibrada](covariance_shrinkage.md) | Restricciones individuales y por clase factibles; comparación con alternativa simple y benchmark en fechas comunes; contribuciones de volatilidad reconciliadas; escenario de retornos implícitos y opiniones trazables; falta validarlo en más regímenes y universos; asignación por perfil solo después de resolver las condiciones legales y laborales |
 | 5. Simulación | [Trayectorias Monte Carlo](monte_carlo.md) y [pruebas de estrés](stress_testing.md) históricas/manuales en app y PDF | Supuestos visibles; resultados hipotéticos; trayectorias sin patrimonio negativo; shocks nombrados por activo o clase declarada; tasas y duración de deuda aún requieren modelos propios |
-| 6. Validación | [Fecha de corte y revisiones sucesivas](backtesting.md), [cuatro cortes predefinidos](multi_cut_validation.md), referencias, costos supuestos y [costo explícito de implementación](implementation_costs.md) | Fechas de estimación/evaluación separadas; rebalanceos de 3, 6 o 12 meses sin datos futuros; sensibilidad al corte sin promediar evaluaciones solapadas; compras y ventas separadas; límites y fallos comunicados |
+| 6. Validación | [Fecha de corte y revisiones sucesivas](backtesting.md), [cuatro cortes predefinidos](multi_cut_validation.md), referencias, [perfil contractual](broker_tariffs.md) y [costo explícito de implementación](implementation_costs.md) | Fechas de estimación/evaluación separadas; rebalanceos de 3, 6 o 12 meses sin datos futuros; sensibilidad al corte sin promediar evaluaciones solapadas; costos iniciales y recurrentes separados; límites y fallos comunicados |
 | 7. Datos de clientes | Etapa condicionada a la definición legal del servicio | No guardar perfiles, carteras identificables ni historial de propuestas para clientes hasta definir finalidad, privacidad, autorización laboral y alcance regulatorio |
 
 ## Decisiones metodológicas iniciales
@@ -71,8 +71,8 @@
    de estas dos evaluaciones.
 2. Obtener series por emisión para validar renovaciones del [preparador CETES](cetes_adapter.md),
    incorporar precios de salida/entrada y ampliar el catálogo con claves oficiales e ISIN.
-3. Obtener y archivar tarifarios reales por contrato, cliente y producto; el estimador manual ya
-   separa compra, venta, comisión, IVA y costo de mercado, pero no mantiene perfiles automáticos.
+3. Obtener y archivar tarifarios reales por contrato, cliente y producto. El importador ya concilia
+   un perfil fechado y separa costos iniciales y recurrentes; falta validarlo con contratos reales.
 4. Seleccionar un proveedor de datos apropiado para el uso comercial dentro del presupuesto o
    delimitar un flujo con datos aportados por el intermediario y fuentes oficiales.
 5. La importación anónima y no persistente de la cartera actual ya está disponible. Antes de

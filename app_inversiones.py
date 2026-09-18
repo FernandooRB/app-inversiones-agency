@@ -15,6 +15,7 @@ from allocation_policy import parse_asset_classes, parse_class_limits, policy_ta
 from backtesting import run_holdout_backtest
 from benchmarking import analyze_benchmark
 from black_litterman import black_litterman_posterior, parse_absolute_views
+from broker_tariffs import read_broker_tariff_csv
 from covariance_calibration import select_diagonal_shrinkage
 from currencies import convert_prices, currency_map, download_fx
 from fixed_income import (
@@ -301,12 +302,40 @@ with st.sidebar:
             f"Comisión mínima por orden ({base_currency})", min_value=0.0,
             max_value=100_000.0, value=0.0, step=1.0,
         )
+        implementation_annual_fixed = st.number_input(
+            f"Costo fijo anual total ({base_currency})", min_value=0.0,
+            max_value=1_000_000.0, value=0.0, step=100.0,
+            help="Importe anual total, después de impuestos aplicables, por plataforma, datos o cuenta.",
+        )
+        implementation_annual_management_percent = st.number_input(
+            "Administración anual total sobre saldo (%)", min_value=0.0, max_value=20.0,
+            value=0.0, step=0.01, format="%.3f",
+            help="Tasa anual total, después de impuestos aplicables, calculada sobre el capital.",
+        )
         implementation_source_input = st.text_input(
             "Referencia del tarifario",
-            help="Institución, producto, contrato o nombre del documento; máximo 120 caracteres.",
+            help="Institución, producto, contrato o nombre del documento; máximo 400 caracteres.",
         )
         implementation_source_date = st.date_input(
             "Fecha de consulta del tarifario", value=date.today(), max_value=date.today(),
+        )
+        tariff_upload = st.file_uploader(
+            "Perfil contractual de costos CSV (opcional)", type=["csv"],
+            help=(
+                "Un perfil, máximo 100 KB. Sustituye todos los supuestos manuales de este bloque. "
+                "Usa los términos del contrato o tarifario aplicable al producto y mercado concretos."
+            ),
+        )
+        st.download_button(
+            "Descargar plantilla de perfil de costos CSV",
+            (
+                b"Intermediario,Producto,Mercado,FechaConsulta,ComisionOperacionPct,"
+                b"IVAPctComision,ComisionMinimaMXN,CostoMercadoPbSupuesto,"
+                b"CostoFijoAnualTotalMXN,AdministracionAnualTotalPct,Fuente\n"
+                b"Casa de Bolsa,Cuenta de ejemplo,Capitales MX y SIC,2026-01-15,0.25,16,0,"
+                b"8,0,0,Contrato o tarifario de ejemplo\n"
+            ),
+            "plantilla_perfil_costos.csv", "text/csv",
         )
     price_upload = st.file_uploader(
         "Precios ajustados CSV aportados por el equipo (opcional)",
@@ -431,6 +460,8 @@ liquidity_contents = liquidity_upload.getvalue() if liquidity_upload is not None
 liquidity_fingerprint = sha256(liquidity_contents).hexdigest() if liquidity_contents else None
 fund_contents = fund_upload.getvalue() if fund_upload is not None else b""
 fund_fingerprint = sha256(fund_contents).hexdigest() if fund_contents else None
+tariff_contents = tariff_upload.getvalue() if tariff_upload is not None else b""
+tariff_fingerprint = sha256(tariff_contents).hexdigest() if tariff_contents else None
 settings = (
     tickers_input,
     start_date,
@@ -460,8 +491,11 @@ settings = (
     implementation_vat_percent,
     implementation_market_bps,
     implementation_minimum,
+    implementation_annual_fixed,
+    implementation_annual_management_percent,
     implementation_source_input,
     implementation_source_date,
+    tariff_fingerprint,
     price_fingerprint,
     price_source_input,
     cetes_fingerprint,
@@ -770,27 +804,51 @@ try:
             )
             for alternative in alternatives
         )
-        implementation_assumptions = ImplementationCostAssumptions(
-            commission_bps=implementation_commission_percent * 100,
-            market_cost_bps=implementation_market_bps,
-            vat_rate=implementation_vat_percent / 100,
-            minimum_commission=implementation_minimum,
+        tariff_profile = None
+        manual_cost_values = (
+            implementation_commission_percent, implementation_vat_percent,
+            implementation_market_bps, implementation_minimum,
+            implementation_annual_fixed, implementation_annual_management_percent,
         )
+        if tariff_contents:
+            if base_currency != "MXN":
+                raise PortfolioError("El perfil contractual en MXN requiere moneda base MXN.")
+            if any(manual_cost_values) or implementation_source_input.strip():
+                raise PortfolioError(
+                    "Usa sólo una entrada de costos: el perfil contractual CSV o los supuestos manuales."
+                )
+            tariff_profile = read_broker_tariff_csv(tariff_contents)
+            implementation_assumptions = tariff_profile.assumptions
+            implementation_source = (
+                f"{tariff_profile.source}; CSV SHA-256 {tariff_fingerprint[:12]}"
+            )
+            implementation_source_date = tariff_profile.consulted_on
+        else:
+            implementation_assumptions = ImplementationCostAssumptions(
+                commission_bps=implementation_commission_percent * 100,
+                market_cost_bps=implementation_market_bps,
+                vat_rate=implementation_vat_percent / 100,
+                minimum_commission=implementation_minimum,
+                annual_fixed_cost=implementation_annual_fixed,
+                annual_management_rate=implementation_annual_management_percent / 100,
+            )
+            implementation_source = implementation_source_input.strip()
         has_implementation_cost = any((
             implementation_assumptions.commission_bps,
             implementation_assumptions.market_cost_bps,
             implementation_assumptions.vat_rate,
             implementation_assumptions.minimum_commission,
+            implementation_assumptions.annual_fixed_cost,
+            implementation_assumptions.annual_management_rate,
         ))
-        implementation_source = implementation_source_input.strip()
         if has_implementation_cost and (
-            not implementation_source or len(implementation_source) > 120
+            not implementation_source or len(implementation_source) > 400
             or any(ord(char) < 32 for char in implementation_source)
         ):
             raise PortfolioError(
-                "Declara la referencia del tarifario de costos en 1 a 120 caracteres."
+                "Declara la referencia del tarifario de costos en 1 a 400 caracteres."
             )
-        if not has_implementation_cost:
+        if not has_implementation_cost and tariff_profile is None:
             implementation_source = "Sin tarifario; supuestos de costo en cero"
         implementation_estimates = tuple(
             estimate_implementation_cost(
@@ -1233,6 +1291,19 @@ try:
             f"Referencia: {implementation_source} · Consulta: "
             f"{implementation_source_date.isoformat()}."
         )
+        if tariff_profile is not None:
+            profile_recurring_cost = tariff_profile.assumptions.annual_recurring_cost(portfolio_value)
+            st.info(
+                f"Perfil contractual: {tariff_profile.intermediary} · {tariff_profile.product} · "
+                f"{tariff_profile.market} · SHA-256 {tariff_fingerprint[:12]}. "
+                f"Costo recurrente anual estimado: {profile_recurring_cost:,.2f} MXN. "
+                "Los importes recurrentes se muestran por separado y no se descuentan de las métricas."
+            )
+        annual_recurring_cost = implementation_assumptions.annual_recurring_cost(portfolio_value)
+        first_year_cost_by_alternative = {
+            item.alternative_name: item.total_cost + annual_recurring_cost
+            for item in implementation_estimates
+        }
         cost_summary = pd.DataFrame([
             {
                 "Alternativa": item.alternative_name,
@@ -1243,7 +1314,13 @@ try:
                 "IVA sobre comisión": item.vat,
                 "Costo de mercado": item.market_cost,
                 "Costo total": item.total_cost,
+                "Costo recurrente anual": annual_recurring_cost,
+                "Costo estimado primer año": first_year_cost_by_alternative[item.alternative_name],
                 "Costo / capital": item.total_cost / portfolio_value if portfolio_value else np.nan,
+                "Primer año / capital": (
+                    first_year_cost_by_alternative[item.alternative_name] / portfolio_value
+                    if portfolio_value else np.nan
+                ),
             }
             for item in implementation_estimates
         ])
@@ -1253,6 +1330,9 @@ try:
                 "Nominal negociado": "{:,.2f}", "Comisión": "{:,.2f}",
                 "IVA sobre comisión": "{:,.2f}", "Costo de mercado": "{:,.2f}",
                 "Costo total": "{:,.2f}", "Costo / capital": "{:.3%}",
+                "Costo recurrente anual": "{:,.2f}",
+                "Costo estimado primer año": "{:,.2f}",
+                "Primer año / capital": "{:.3%}",
             }), use_container_width=True, hide_index=True,
         )
         detail_parts = []

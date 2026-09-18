@@ -176,7 +176,7 @@ def test_comparison_pdf_documents_black_litterman_assumptions():
 def test_both_pdfs_report_explicit_implementation_cost_assumptions():
     metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
     risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
-    assumptions = ImplementationCostAssumptions(25, 10, 0.16, 20)
+    assumptions = ImplementationCostAssumptions(25, 10, 0.16, 20, 1_032, 0.01)
     estimate = estimate_implementation_cost(
         ("AAA", "BBB"), metrics.weights, 100_000, assumptions,
         alternative_name="Máximo Sharpe",
@@ -206,6 +206,8 @@ def test_both_pdfs_report_explicit_implementation_cost_assumptions():
         assert "comisión: 16.00%" in text
         assert "390.00" in text
         assert "Tarifario de prueba" in text
+        assert "costo recurrente anual estimado" in text
+        assert "2,032.00" in text
 
 
 def test_both_pdfs_include_heuristic_price_review_with_original_quote_context():

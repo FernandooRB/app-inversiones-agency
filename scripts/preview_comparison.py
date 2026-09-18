@@ -115,6 +115,7 @@ def main() -> None:
     }
     cost_assumptions = ImplementationCostAssumptions(
         commission_bps=25, market_cost_bps=8, vat_rate=0.16, minimum_commission=20,
+        annual_fixed_cost=1_032, annual_management_rate=0.01,
     )
     current_weights = next(
         alternative.metrics.weights
@@ -174,8 +175,10 @@ def main() -> None:
         ),
         implementation_costs=implementation_costs,
         implementation_cost_assumptions=cost_assumptions,
-        implementation_cost_source="Tarifario ficticio para revisión visual",
-        implementation_cost_source_date=date(2026, 9, 16),
+        implementation_cost_source=(
+            "Perfil contractual ficticio para revisión visual; CSV SHA-256 0123456789ab"
+        ),
+        implementation_cost_source_date=date(2026, 9, 17),
         simulation=SimulationReport(
             "Máximo Sharpe", result, 0, 40_000, 0.01, 10, 0.04, 6, 21,
         ),
