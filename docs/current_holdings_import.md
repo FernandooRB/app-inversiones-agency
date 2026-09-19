@@ -27,3 +27,6 @@ No incluyas nombre, RFC, CURP, número de cuenta, contrato, correo ni otro ident
 restricción a tres columnas reduce la posibilidad de importar esos datos por error, pero el equipo
 debe revisar el archivo antes de cargarlo. La conciliación comprueba estructura y aritmética; no
 demuestra que la valuación sea oficial, completa, fiscal o ejecutable, ni comprueba derechos de uso.
+
+Cuando se requiere revisar el efecto de ventas, un [archivo fiscal separado](tax_reserve.md) aporta
+el costo fiscal actualizado sin ampliar este CSV ni mezclarlo con identificadores del cliente.

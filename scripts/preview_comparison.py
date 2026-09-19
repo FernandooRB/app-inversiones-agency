@@ -20,6 +20,7 @@ from reporting import (
 from risk_attribution import attribute_volatility
 from simulation import simulate_portfolio_paths
 from stress import deterministic_shock, historical_worst_windows
+from tax_impact import estimate_tax_reserve, read_tax_basis_csv
 
 
 def main() -> None:
@@ -129,6 +130,25 @@ def main() -> None:
         )
         for alternative in alternatives
     )
+    tax_rows = pd.DataFrame({
+        "FechaCorte": ["2026-09-17"] * len(labels),
+        "Instrumento": labels,
+        "CostoFiscalActualizadoMXN": current_weights * 800_000,
+        "TratamientoFiscal": [
+            "NO_ESTIMADO", "NO_ESTIMADO", "PF_ACCIONES_BOLSA_ART129",
+            "PF_ACCIONES_BOLSA_ART129", "NO_ESTIMADO", "NO_ESTIMADO",
+        ],
+        "TasaEscenarioPct": [np.nan, np.nan, 10, 10, np.nan, np.nan],
+        "Fuente": ["Base fiscal ficticia para revisión visual"] * len(labels),
+    })
+    tax_basis_profile = read_tax_basis_csv(
+        tax_rows.to_csv(index=False).encode("utf-8-sig"), labels, date(2026, 9, 17)
+    )
+    current_values = pd.Series(current_weights * 1_000_000, index=labels)
+    tax_reserve_estimates = tuple(
+        estimate_tax_reserve(item, current_values, tax_basis_profile)
+        for item in implementation_costs
+    )
     allocation_policy = pd.DataFrame({
         "Clase": ["deuda_gubernamental", "renta_variable", "efectivo", "fondo"],
         "Mínimo": [0.20, 0.30, 0.05, 0.0],
@@ -182,6 +202,8 @@ def main() -> None:
             "Perfil contractual ficticio para revisión visual; CSV SHA-256 0123456789ab"
         ),
         implementation_cost_source_date=date(2026, 9, 17),
+        tax_reserve_estimates=tax_reserve_estimates,
+        tax_basis_profile=tax_basis_profile,
         simulation=SimulationReport(
             "Máximo Sharpe", result, 0, 40_000, 0.01, 10, 0.04, 6, 21,
         ),
