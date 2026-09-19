@@ -33,6 +33,8 @@ comisión, IVA configurable y costo de mercado para cada alternativa, partiendo 
 cartera actual.
 El [perfil contractual de costos](docs/broker_tariffs.md) añade trazabilidad por intermediario,
 producto, mercado, fecha y fuente, y separa los cargos iniciales de los recurrentes anuales.
+La [reserva fiscal ilustrativa](docs/tax_reserve.md) vincula ventas estimadas con costos fiscales
+actualizados aportados por el equipo, conserva pendientes sin clasificar y no sustituye el cálculo anual.
 La [política por clase de activo](docs/allocation_policy.md) aplica mínimos y máximos declarados a
 Markowitz, la frontera, la nube de carteras y las validaciones históricas; si pesos iguales no es
 factible, utiliza la referencia permitida más cercana.
@@ -129,8 +131,8 @@ pytest
 - Yahoo Finance no debe asumirse como fuente contractual para un servicio de inversión en producción.
 - Las monedas se declaran explícitamente; no hay detección automática de unidades.
 - Las simulaciones, pruebas de rebalanceo y estimación de implementación usan costos supuestos;
-  se muestran por separado y no se descuentan de las métricas optimizadas. No modelan impuestos,
-  profundidad ni una ejecución real.
+  se muestran por separado y no se descuentan de las métricas optimizadas. La reserva fiscal de
+  ventas también es separada y parcial; no modelan la declaración anual, profundidad ni ejecución real.
 - La media histórica no es un pronóstico.
 - No existe gestión de clientes ni persistencia de información personal.
 - Antes de un uso comercial deben revisarse licenciamiento de datos, privacidad y cumplimiento aplicable.
@@ -146,6 +148,7 @@ holdings.py           Conciliación estricta de la cartera actual valuada en MXN
 price_quality.py      Alertas heurísticas sobre precios originales
 implementation_costs.py Estimación explícita de compras, ventas y costos
 broker_tariffs.py    Importación estricta de un perfil contractual de costos
+tax_impact.py         Bases fiscales auditables y reserva ilustrativa sobre ventas
 allocation_policy.py  Lectura y presentación de límites por clase declarada
 benchmarking.py       Comparación histórica contra una referencia independiente
 risk_attribution.py   Contribuciones de Euler y diagnósticos de diversificación
@@ -170,7 +173,8 @@ tests/               Pruebas unitarias
 - Diseñar perfiles IR1–IR5 sólo después de definir su metodología y encuadre; el motor de
   restricciones por clase ya está disponible para escenarios internos declarados.
 - Cobertura cambiaria y validación de metadatos de instrumentos.
-- Validar perfiles contractuales reales; modelar impuestos por régimen e instrumento y ejecución.
+- Validar perfiles contractuales reales; ampliar la reserva fiscal a dividendos, intereses, pérdidas,
+  fondos y reglas por régimen sin confundir retenciones provisionales con impuesto definitivo.
 - Expediente de cliente y audit trail.
 
 ## Licencia

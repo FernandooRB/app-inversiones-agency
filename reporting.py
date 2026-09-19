@@ -33,6 +33,7 @@ from price_quality import PriceQualityIssue
 from risk_attribution import RiskAttribution
 from simulation import SimulationResult
 from stress import ShockResult
+from tax_impact import TaxBasisProfile, TaxReserveEstimate
 
 
 @dataclass(frozen=True)
@@ -441,6 +442,61 @@ def _implementation_cost_story(
     return [KeepTogether(section)]
 
 
+def _tax_reserve_story(
+    estimates: tuple[TaxReserveEstimate, ...],
+    profile: TaxBasisProfile | None,
+    currency: str,
+    styles,
+) -> list:
+    if not estimates and profile is None:
+        return []
+    if not estimates or profile is None:
+        raise ValueError("La reserva fiscal requiere estimaciones y bases fiscales.")
+    if len({item.alternative_name for item in estimates}) != len(estimates):
+        raise ValueError("Las alternativas de la reserva fiscal deben ser únicas.")
+    rows = [["Alternativa", "Ganancia", "Pérdida", "Reserva", "Venta sin estimar"]]
+    for item in estimates:
+        values = np.array([
+            item.sell_notional, item.estimated_gross_gain, item.estimated_loss,
+            item.estimated_tax_reserve, item.unestimated_sell_notional,
+        ])
+        if not np.isfinite(values).all() or (values < 0).any():
+            raise ValueError("La reserva fiscal contiene importes inválidos.")
+        rows.append([
+            Paragraph(escape(item.alternative_name), styles["Normal"]),
+            f"{item.estimated_gross_gain:,.2f}",
+            f"{item.estimated_loss:,.2f}",
+            f"{item.estimated_tax_reserve:,.2f}",
+            f"{item.unestimated_sell_notional:,.2f}",
+        ])
+    table = Table(rows, colWidths=[45 * mm, 31 * mm, 31 * mm, 34 * mm, 40 * mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEBF1")),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
+    ]))
+    section = [
+        Paragraph("Reserva fiscal ilustrativa por ventas", styles["Heading2"]),
+        Paragraph(
+            f"Bases fiscales al {profile.as_of.date().isoformat()}; moneda: {escape(currency)}; "
+            f"CSV SHA-256 {profile.fingerprint[:12]}. La estimación usa costo fiscal actualizado "
+            "aportado y resta la comisión de venta declarada.",
+            styles["Normal"],
+        ),
+        Spacer(1, 2 * mm), table, Spacer(1, 1 * mm),
+        Paragraph(
+            "La reserva aplica la tasa declarada sólo a ganancias brutas estimadas. No compensa "
+            "pérdidas entre emisoras, intermediarios o ejercicios; no calcula dividendos, intereses, "
+            "deducciones, acreditamientos ni el resultado fiscal anual. Las ventas sin estimación "
+            "requieren clasificación. Es un escenario para revisión fiscal humana, no el impuesto a pagar.",
+            styles["Normal"],
+        ),
+        Spacer(1, 3 * mm),
+    ]
+    return [KeepTogether(section)]
+
+
 def _price_quality_story(
     issues: tuple[PriceQualityIssue, ...], styles, *, compact: bool = False
 ) -> list:
@@ -574,6 +630,8 @@ def create_comparison_pdf_report(
     implementation_cost_assumptions: ImplementationCostAssumptions | None = None,
     implementation_cost_source: str | None = None,
     implementation_cost_source_date: date | None = None,
+    tax_reserve_estimates: tuple[TaxReserveEstimate, ...] = (),
+    tax_basis_profile: TaxBasisProfile | None = None,
     allocation_policy: pd.DataFrame | None = None,
     benchmark_analyses: tuple[BenchmarkAnalysis, ...] = (),
     benchmark_source: str | None = None,
@@ -735,6 +793,9 @@ def create_comparison_pdf_report(
         implementation_costs, implementation_cost_assumptions,
         portfolio_value, base_currency,
         implementation_cost_source, implementation_cost_source_date, styles,
+    ))
+    story.extend(_tax_reserve_story(
+        tax_reserve_estimates, tax_basis_profile, base_currency, styles,
     ))
     story.extend([
         Paragraph("Método y límites", styles["Heading2"]),
@@ -991,6 +1052,8 @@ def create_pdf_report(
     implementation_cost_assumptions: ImplementationCostAssumptions | None = None,
     implementation_cost_source: str | None = None,
     implementation_cost_source_date: date | None = None,
+    tax_reserve_estimates: tuple[TaxReserveEstimate, ...] = (),
+    tax_basis_profile: TaxBasisProfile | None = None,
     allocation_policy: pd.DataFrame | None = None,
     benchmark_analyses: tuple[BenchmarkAnalysis, ...] = (),
     benchmark_source: str | None = None,
@@ -1128,6 +1191,9 @@ def create_pdf_report(
         implementation_costs, implementation_cost_assumptions,
         portfolio_value, base_currency,
         implementation_cost_source, implementation_cost_source_date, styles,
+    ))
+    story.extend(_tax_reserve_story(
+        tax_reserve_estimates, tax_basis_profile, base_currency, styles,
     ))
 
     def footer(canvas, doc):

@@ -20,6 +20,7 @@ from reporting import (
 from risk_attribution import attribute_volatility
 from simulation import simulate_portfolio_paths
 from stress import deterministic_shock, historical_worst_windows
+from tax_impact import estimate_tax_reserve, read_tax_basis_csv
 
 
 def test_pdf_report_is_created():
@@ -208,6 +209,45 @@ def test_both_pdfs_report_explicit_implementation_cost_assumptions():
         assert "Tarifario de prueba" in text
         assert "costo recurrente anual estimado" in text
         assert "2,032.00" in text
+
+
+def test_both_pdfs_report_auditable_tax_reserve_without_calling_it_tax_due():
+    metrics = PortfolioMetrics(np.array([0.2, 0.8]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    implementation = estimate_implementation_cost(
+        ("AAA", "BBB"), metrics.weights, 100_000,
+        ImplementationCostAssumptions(commission_bps=10),
+        alternative_name="Máximo Sharpe", current_weights=np.array([0.6, 0.4]),
+    )
+    fiscal_csv = (
+        "FechaCorte,Instrumento,CostoFiscalActualizadoMXN,TratamientoFiscal,"
+        "TasaEscenarioPct,Fuente\n"
+        f"{date.today().isoformat()},AAA,40000,PF_ACCIONES_BOLSA_ART129,10,Fuente fiscal\n"
+        f"{date.today().isoformat()},BBB,30000,NO_ESTIMADO,,Pendiente\n"
+    ).encode()
+    profile = read_tax_basis_csv(fiscal_csv, ("AAA", "BBB"), date.today())
+    reserve = estimate_tax_reserve(
+        implementation, pd.Series({"AAA": 60_000.0, "BBB": 40_000.0}), profile
+    )
+    basic = create_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        metrics, risk, 100_000, base_currency="MXN",
+        tax_reserve_estimates=(reserve,), tax_basis_profile=profile,
+    )
+    comparison = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (PortfolioAlternative("Máximo Sharpe", metrics, risk),
+         PortfolioAlternative("Pesos iguales", metrics, risk)),
+        100_000, base_currency="MXN", risk_free_rate=0.05,
+        observations=252, quotes={"AAA": "MXN", "BBB": "MXN"},
+        tax_reserve_estimates=(reserve,), tax_basis_profile=profile,
+    )
+    for report in (basic, comparison):
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+        normalized = " ".join(text.split())
+        assert "Reserva fiscal ilustrativa por ventas" in text
+        assert profile.fingerprint[:12] in text
+        assert "no el impuesto a pagar" in normalized
 
 
 def test_both_pdfs_include_heuristic_price_review_with_original_quote_context():

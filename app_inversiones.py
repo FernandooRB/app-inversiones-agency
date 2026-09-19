@@ -69,6 +69,7 @@ from stress import (
     parse_class_shocks,
     validate_scenario_metadata,
 )
+from tax_impact import estimate_tax_reserve, read_tax_basis_csv
 from walk_forward import run_walk_forward_backtest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -252,6 +253,26 @@ with st.sidebar:
         "Descargar plantilla de cartera actual CSV",
         b"FechaCorte,Instrumento,ValorMXN\n2026-01-15,AAPL,60000\n2026-01-15,MSFT,40000\n",
         "plantilla_cartera_actual_mxn.csv", "text/csv",
+    )
+    tax_basis_upload = st.file_uploader(
+        "Bases fiscales actualizadas CSV (opcional; requiere cartera actual)",
+        type=["csv"],
+        help=(
+            "Una fila por instrumento con la misma fecha de corte de la cartera. No incluyas RFC, "
+            "cuentas ni otros identificadores. El resultado es una reserva de revisión, no el ISR "
+            "definitivo ni una declaración fiscal."
+        ),
+    )
+    st.download_button(
+        "Descargar plantilla de bases fiscales CSV",
+        (
+            "FechaCorte,Instrumento,CostoFiscalActualizadoMXN,TratamientoFiscal,"
+            "TasaEscenarioPct,Fuente\n"
+            "2026-01-15,AAPL,45000,PF_ACCIONES_BOLSA_ART129,10,"
+            "Constancia o cálculo fiscal revisado\n"
+            "2026-01-15,MSFT,35000,NO_ESTIMADO,,Pendiente de revisión fiscal\n"
+        ).encode("utf-8-sig"),
+        "plantilla_bases_fiscales_mxn.csv", "text/csv",
     )
     with st.expander("Escenario Black-Litterman"):
         use_black_litterman = st.checkbox("Añadir alternativa Black-Litterman")
@@ -474,6 +495,8 @@ price_rights_fingerprint = (
 )
 holdings_contents = holdings_upload.getvalue() if holdings_upload is not None else b""
 holdings_fingerprint = sha256(holdings_contents).hexdigest() if holdings_contents else None
+tax_basis_contents = tax_basis_upload.getvalue() if tax_basis_upload is not None else b""
+tax_basis_fingerprint = sha256(tax_basis_contents).hexdigest() if tax_basis_contents else None
 cetes_contents = cetes_upload.getvalue() if cetes_upload is not None else b""
 cetes_fingerprint = sha256(cetes_contents).hexdigest() if cetes_contents else None
 bond_contents = bond_upload.getvalue() if bond_upload is not None else b""
@@ -504,6 +527,7 @@ settings = (
     current_weights_input,
     holdings_fingerprint,
     holdings_source_input,
+    tax_basis_fingerprint,
     use_black_litterman,
     black_litterman_equilibrium_input,
     black_litterman_risk_aversion,
@@ -659,6 +683,7 @@ try:
             prices = merge_fund_index(prices, prepared_fund_index)
         analysis_tickers = tuple(str(column) for column in prices.columns)
         holdings_result = None
+        tax_basis_profile = None
         current_weights = None
         holdings_source = None
         if holdings_contents:
@@ -681,6 +706,14 @@ try:
         elif current_weights_input.strip():
             current_weights = parse_current_weights(
                 current_weights_input, len(analysis_tickers)
+            )
+        if tax_basis_contents:
+            if holdings_result is None:
+                raise PortfolioError(
+                    "Las bases fiscales requieren una cartera actual valuada en MXN."
+                )
+            tax_basis_profile = read_tax_basis_csv(
+                tax_basis_contents, analysis_tickers, holdings_result.as_of
             )
         analysis_quotes = (
             quotes
@@ -890,6 +923,13 @@ try:
                 current_weights=current_weights,
             )
             for alternative in alternatives
+        )
+        tax_reserve_estimates = (
+            tuple(
+                estimate_tax_reserve(item, holdings_result.values, tax_basis_profile)
+                for item in implementation_estimates
+            )
+            if tax_basis_profile is not None else ()
         )
         benchmark_analyses = ()
         benchmark_source = None
@@ -1399,6 +1439,54 @@ try:
                 cost_detail.to_csv(index=False).encode("utf-8-sig"),
                 "costos_implementacion.csv", "text/csv",
             )
+
+    if tax_basis_profile is not None:
+        with st.expander("Reserva fiscal ilustrativa por ventas", expanded=True):
+            st.caption(
+                f"Bases al {tax_basis_profile.as_of.date().isoformat()} · SHA-256 "
+                f"{tax_basis_profile.fingerprint[:12]}. La reserva usa costo fiscal actualizado "
+                "aportado, asignación proporcional y comisión de venta; no compensa pérdidas entre "
+                "emisoras, intermediarios o ejercicios y no calcula dividendos, intereses ni la "
+                "declaración anual. Requiere revisión fiscal humana."
+            )
+            tax_summary = pd.DataFrame([
+                {
+                    "Alternativa": item.alternative_name,
+                    "Ventas": item.sell_notional,
+                    "Ganancia bruta estimada": item.estimated_gross_gain,
+                    "Pérdida estimada": item.estimated_loss,
+                    "Reserva fiscal estimada": item.estimated_tax_reserve,
+                    "Ventas sin estimación": item.unestimated_sell_notional,
+                }
+                for item in tax_reserve_estimates
+            ])
+            st.dataframe(
+                tax_summary.style.format({
+                    "Ventas": "{:,.2f}", "Ganancia bruta estimada": "{:,.2f}",
+                    "Pérdida estimada": "{:,.2f}", "Reserva fiscal estimada": "{:,.2f}",
+                    "Ventas sin estimación": "{:,.2f}",
+                }), hide_index=True, use_container_width=True,
+            )
+            tax_details = []
+            for item in tax_reserve_estimates:
+                part = item.detail.copy()
+                part.insert(0, "Alternativa", item.alternative_name)
+                tax_details.append(part)
+            tax_detail = pd.concat(tax_details, ignore_index=True) if tax_details else pd.DataFrame()
+            if not tax_detail.empty:
+                selected_tax_alternative = st.selectbox(
+                    "Ver ventas y bases fiscales",
+                    [item.alternative_name for item in tax_reserve_estimates],
+                )
+                selected_tax_detail = tax_detail[
+                    tax_detail["Alternativa"].eq(selected_tax_alternative)
+                ]
+                st.dataframe(selected_tax_detail, hide_index=True, use_container_width=True)
+                st.download_button(
+                    "Descargar reserva fiscal CSV",
+                    tax_detail.to_csv(index=False).encode("utf-8-sig"),
+                    "reserva_fiscal_ventas.csv", "text/csv",
+                )
 
     with st.expander("Sensibilidad de pesos a la longitud de la muestra"):
         st.caption(
@@ -2035,6 +2123,8 @@ try:
         implementation_cost_assumptions=implementation_assumptions,
         implementation_cost_source=implementation_source,
         implementation_cost_source_date=implementation_source_date,
+        tax_reserve_estimates=tax_reserve_estimates[:1],
+        tax_basis_profile=tax_basis_profile,
         allocation_policy=allocation_policy_table,
         benchmark_analyses=benchmark_analyses[:1],
         benchmark_source=benchmark_source,
@@ -2059,6 +2149,8 @@ try:
         implementation_cost_assumptions=implementation_assumptions,
         implementation_cost_source=implementation_source,
         implementation_cost_source_date=implementation_source_date,
+        tax_reserve_estimates=tax_reserve_estimates,
+        tax_basis_profile=tax_basis_profile,
         simulation=simulation_report,
         stress=stress_report,
         allocation_policy=allocation_policy_table,
