@@ -31,7 +31,14 @@ confirmados, con el mismo universo y periodo. Exige proveedores distintos y al m
 Para cada instrumento muestra la diferencia relativa mediana y máxima, las fechas que exceden el
 umbral **declarado por el equipo**, y la cobertura entre calendarios. Señala diferencias en el mercado
 o la convención de corte de los manifiestos. La app permite descargar sólo fechas, símbolos y diferencias
-relativas, sin precios crudos. Las huellas SHA-256 identifican los cuatro archivos de entrada.
+relativas, sin precios crudos. Las huellas SHA-256 identifican los archivos de precios, derechos e
+identidad que se aportaron.
+Si se aportan manifiestos de identidad para el contraste, deben existir **ambos**. El módulo exige
+igual ISIN, mercado y símbolo de negociación, mercado y moneda de la serie y tipo de serie para cada
+ticker. Detiene la comparación si alguno difiere: un cierre local del SIC y un proxy del mercado de
+origen no son la misma serie, aunque compartan ticker. Las fuentes y fechas de verificación de los
+manifiestos pueden diferir. Sin ambos manifiestos, el contraste de precios sigue disponible, pero la
+app advierte expresamente que no ha contrastado la identidad del instrumento.
 
 `SIN_ALERTAS_AUTOMATICAS` significa únicamente que esos controles no encontraron discrepancias con los
 umbrales escogidos. No certifica que ambos proveedores sean correctos, que las cotizaciones representen

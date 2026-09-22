@@ -369,6 +369,14 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
         "Manifiesto de derechos de la referencia CSV": rights_manifest(
             source="Proveedor independiente de prueba"
         ),
+        "Identidad de instrumentos de la referencia CSV (opcional)": BytesIO((
+            "Instrumento,ISIN,MercadoNegociacion,SimboloNegociacion,MercadoSerie,"
+            "MonedaSerie,TipoSerie,FechaVerificacion,Fuente\n"
+            f"AAPL,US0378331005,SIC,AAPL,SIC,MXN,CIERRE_LOCAL_AJUSTADO,{cutoff},"
+            "Ficha independiente ficticia\n"
+            f"MSFT,US5949181045,SIC,MSFT,SIC,MXN,CIERRE_LOCAL_AJUSTADO,{cutoff},"
+            "Ficha independiente ficticia\n"
+        ).encode("utf-8-sig")),
         "Cartera actual valuada en MXN CSV (opcional)": BytesIO(
             holdings.to_csv(index=False).encode("utf-8-sig")
         ),

@@ -30,6 +30,16 @@ def rights(source: str, *, market: str = "BMV", cutoff: str = "Cierre local") ->
     ).encode("utf-8-sig")
 
 
+def identity(source: str = "Ficha A") -> bytes:
+    today = date.today().isoformat()
+    return (
+        "Instrumento,ISIN,MercadoNegociacion,SimboloNegociacion,MercadoSerie,"
+        "MonedaSerie,TipoSerie,FechaVerificacion,Fuente\n"
+        f"A,US0378331005,BMV,A,BMV,MXN,CIERRE_LOCAL_AJUSTADO,{today},{source}\n"
+        f"B,US5949181045,SIC,B,SIC,MXN,CIERRE_LOCAL_AJUSTADO,{today},{source}\n"
+    ).encode("utf-8-sig")
+
+
 def compare(reference=None, reference_rights=None, **kwargs):
     return compare_price_sources(
         prices(), rights("Proveedor A"),
@@ -50,6 +60,39 @@ def test_identical_licensed_sources_have_no_automatic_alerts_but_no_certificatio
     assert (result.summary["Fechas fuera de umbral"] == 0).all()
     assert len(result.primary_fingerprint) == 64
     assert result.primary_source != result.reference_source
+    assert result.identity_fingerprints is None
+
+
+def test_compares_exact_security_and_series_identity_when_both_manifests_are_given():
+    result = compare(
+        primary_identity_csv=identity("Registro A"),
+        reference_identity_csv=identity("Registro B"),
+    )
+    assert result.status == "SIN_ALERTAS_AUTOMATICAS"
+    assert result.identity_fingerprints is not None
+    assert result.identity_fingerprints[0] != result.identity_fingerprints[1]
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "field"),
+    [
+        ("US0378331005", "US0231351067", "ISIN"),
+        (
+            "SIC,B,SIC,MXN,CIERRE_LOCAL_AJUSTADO",
+            "SIC,B,ORIGEN_EXTRANJERO,MXN,PROXY_ORIGEN_AJUSTADO",
+            "MercadoSerie",
+        ),
+    ],
+)
+def test_rejects_comparison_of_different_security_or_market_series(old, new, field):
+    reference = identity().replace(old.encode(), new.encode())
+    with pytest.raises(PortfolioError, match=field):
+        compare(primary_identity_csv=identity(), reference_identity_csv=reference)
+
+
+def test_rejects_single_identity_manifest():
+    with pytest.raises(PortfolioError, match="manifiestos de ambas fuentes"):
+        compare(primary_identity_csv=identity())
 
 
 def test_flags_one_material_difference_and_keeps_raw_prices_out_of_export():

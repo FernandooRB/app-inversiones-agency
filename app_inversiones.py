@@ -432,6 +432,13 @@ with st.sidebar:
         reference_rights_upload = st.file_uploader(
             "Manifiesto de derechos de la referencia CSV", type=["csv"],
         )
+        reference_identity_upload = st.file_uploader(
+            "Identidad de instrumentos de la referencia CSV (opcional)", type=["csv"],
+            help=(
+                "Usa la misma plantilla que la fuente principal. Si adjuntas uno de los "
+                "manifiestos de identidad para el contraste, adjunta ambos."
+            ),
+        )
         price_tolerance_pct = st.number_input(
             "Diferencia máxima declarada entre fuentes (%)",
             min_value=0.0, max_value=100.0, value=1.0, step=0.1,
@@ -569,11 +576,17 @@ reference_price_contents = (
 reference_rights_contents = (
     reference_rights_upload.getvalue() if reference_rights_upload is not None else b""
 )
+reference_identity_contents = (
+    reference_identity_upload.getvalue() if reference_identity_upload is not None else b""
+)
 reference_price_fingerprint = (
     sha256(reference_price_contents).hexdigest() if reference_price_contents else None
 )
 reference_rights_fingerprint = (
     sha256(reference_rights_contents).hexdigest() if reference_rights_contents else None
+)
+reference_identity_fingerprint = (
+    sha256(reference_identity_contents).hexdigest() if reference_identity_contents else None
 )
 holdings_contents = holdings_upload.getvalue() if holdings_upload is not None else b""
 holdings_fingerprint = sha256(holdings_contents).hexdigest() if holdings_contents else None
@@ -632,6 +645,7 @@ settings = (
     price_rights_fingerprint,
     reference_price_fingerprint,
     reference_rights_fingerprint,
+    reference_identity_fingerprint,
     price_tolerance_pct,
     price_minimum_coverage_pct,
     cetes_fingerprint,
@@ -695,7 +709,7 @@ try:
             download = read_adjusted_price_csv(
                 price_contents, tickers, start_date, end_date
             )
-            if reference_price_contents or reference_rights_contents:
+            if reference_price_contents or reference_rights_contents or reference_identity_contents:
                 if not reference_price_contents or not reference_rights_contents:
                     raise PortfolioError(
                         "El contraste requiere precios y manifiesto de derechos de la referencia."
@@ -706,9 +720,11 @@ try:
                     tickers, quotes, start_date, end_date,
                     tolerance_pct=price_tolerance_pct,
                     minimum_coverage_pct=price_minimum_coverage_pct,
+                    primary_identity_csv=identity_contents,
+                    reference_identity_csv=reference_identity_contents,
                 )
         else:
-            if reference_price_contents or reference_rights_contents:
+            if reference_price_contents or reference_rights_contents or reference_identity_contents:
                 raise PortfolioError(
                     "El contraste independiente requiere el archivo principal de precios."
                 )
@@ -871,6 +887,11 @@ try:
             data_source += (
                 f"; identidad de instrumentos CSV SHA-256 {identity_profile.fingerprint[:12]}; "
                 f"series proxy de origen {', '.join(identity_profile.proxy_assets) or 'ninguna'}"
+            )
+        if price_source_comparison is not None and price_source_comparison.identity_fingerprints:
+            data_source += (
+                "; identidad de referencia CSV SHA-256 "
+                f"{price_source_comparison.identity_fingerprints[1][:12]}"
             )
         if cetes_result is not None:
             data_source += (
@@ -1137,6 +1158,18 @@ try:
                     f"Estado: {result.status} · {result.common_sessions} fechas comunes · "
                     f"cobertura {result.coverage_ratio:.1%} · umbral {result.tolerance:.2%}."
                 )
+                if result.identity_fingerprints:
+                    st.caption(
+                        "Identidad y serie declaradas coinciden entre fuentes · SHA-256 "
+                        f"{result.identity_fingerprints[0][:12]} / "
+                        f"{result.identity_fingerprints[1][:12]}. "
+                        "La coincidencia no verifica los registros externos."
+                    )
+                else:
+                    st.warning(
+                        "No se contrastó identidad por ISIN y tipo de serie entre fuentes. "
+                        "Un resultado sin alertas de precio no confirma que sean el mismo valor."
+                    )
                 for reason in result.review_reasons:
                     st.warning(reason)
                 st.dataframe(
