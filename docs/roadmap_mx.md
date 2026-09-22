@@ -78,5 +78,7 @@
    manifiesto ya impide usar archivos con derechos pendientes, vencidos o no autorizados.
 5. La importación anónima y no persistente de la cartera actual ya está disponible. Antes de
    almacenar datos, definir los campos mínimos, finalidad, acceso, conservación y eliminación de expedientes.
-6. La reserva fiscal ya cubre ventas con bases actualizadas y tasas declaradas. Falta validarla con
-   constancias reales y ampliar dividendos, intereses, fondos, pérdidas y personas morales con revisión fiscal.
+6. La reserva fiscal de ventas y el [registro de flujos fiscales](tax_cash_flows.md) cubren escenarios
+   documentados y controles ilustrativos de dividendos e intereses. Falta contrastar constancias reales,
+   validar fiscalidad de fondos, pérdidas y personas morales con especialista, así como mantener las
+   reglas actualizadas por ejercicio.

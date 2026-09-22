@@ -20,6 +20,7 @@ from reporting import (
 from risk_attribution import attribute_volatility
 from simulation import simulate_portfolio_paths
 from stress import deterministic_shock, historical_worst_windows
+from tax_cash_flows import read_tax_cash_flows_csv
 from tax_impact import estimate_tax_reserve, read_tax_basis_csv
 
 
@@ -149,6 +150,29 @@ def main() -> None:
         estimate_tax_reserve(item, current_values, tax_basis_profile)
         for item in implementation_costs
     )
+    cash_flows = pd.DataFrame({
+        "FechaPago": ["2026-09-01"] * 4,
+        "Instrumento": ["CETES28", "ACCION_MX", "ETF_SIC", "FONDOA1"],
+        "TipoFlujo": [
+            "INTERES", "DIVIDENDO_MEX", "DIVIDENDO_EXTRANJERO_SIC",
+            "DISTRIBUCION_FONDO_RV",
+        ],
+        "ImporteBrutoMXN": [2_000, 5_000, 3_000, 1_500],
+        "ISRRetenidoMXN": [22.19, 500, 0, 0],
+        "ImpuestoExtranjeroRetenidoMXN": [0, 0, 450, 0],
+        "TratamientoFiscal": [
+            "PF_INTERES_LIF2026", "PF_DIVIDENDO_MEX_ART140",
+            "RETENCION_DOCUMENTADA", "NO_ESTIMADO",
+        ],
+        "BaseRetencionMXN": [50_000, 5_000, np.nan, np.nan],
+        "DiasPeriodo": [18, np.nan, np.nan, np.nan],
+        "TasaControlPct": [0.90, 10, np.nan, np.nan],
+        "TasaReservaAdicionalPct": [np.nan] * 4,
+        "Fuente": ["Constancia fiscal ficticia para revisión visual"] * 4,
+    })
+    tax_cash_flow_ledger = read_tax_cash_flows_csv(
+        cash_flows.to_csv(index=False).encode("utf-8-sig"), labels, date(2026, 9, 17)
+    )
     allocation_policy = pd.DataFrame({
         "Clase": ["deuda_gubernamental", "renta_variable", "efectivo", "fondo"],
         "Mínimo": [0.20, 0.30, 0.05, 0.0],
@@ -204,6 +228,7 @@ def main() -> None:
         implementation_cost_source_date=date(2026, 9, 17),
         tax_reserve_estimates=tax_reserve_estimates,
         tax_basis_profile=tax_basis_profile,
+        tax_cash_flow_ledger=tax_cash_flow_ledger,
         simulation=SimulationReport(
             "Máximo Sharpe", result, 0, 40_000, 0.01, 10, 0.04, 6, 21,
         ),

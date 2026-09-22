@@ -35,6 +35,8 @@ El [perfil contractual de costos](docs/broker_tariffs.md) añade trazabilidad po
 producto, mercado, fecha y fuente, y separa los cargos iniciales de los recurrentes anuales.
 La [reserva fiscal ilustrativa](docs/tax_reserve.md) vincula ventas estimadas con costos fiscales
 actualizados aportados por el equipo, conserva pendientes sin clasificar y no sustituye el cálculo anual.
+El [registro de flujos fiscales](docs/tax_cash_flows.md) separa dividendos, intereses y distribuciones
+de fondos ya cobrados, retenciones documentadas y una reserva adicional declarada, sin estimar ISR anual.
 La [política por clase de activo](docs/allocation_policy.md) aplica mínimos y máximos declarados a
 Markowitz, la frontera, la nube de carteras y las validaciones históricas; si pesos iguales no es
 factible, utiliza la referencia permitida más cercana.
@@ -149,6 +151,7 @@ price_quality.py      Alertas heurísticas sobre precios originales
 implementation_costs.py Estimación explícita de compras, ventas y costos
 broker_tariffs.py    Importación estricta de un perfil contractual de costos
 tax_impact.py         Bases fiscales auditables y reserva ilustrativa sobre ventas
+tax_cash_flows.py     Registro auditable de intereses, dividendos y distribuciones
 allocation_policy.py  Lectura y presentación de límites por clase declarada
 benchmarking.py       Comparación histórica contra una referencia independiente
 risk_attribution.py   Contribuciones de Euler y diagnósticos de diversificación
@@ -173,8 +176,8 @@ tests/               Pruebas unitarias
 - Diseñar perfiles IR1–IR5 sólo después de definir su metodología y encuadre; el motor de
   restricciones por clase ya está disponible para escenarios internos declarados.
 - Cobertura cambiaria y validación de metadatos de instrumentos.
-- Validar perfiles contractuales reales; ampliar la reserva fiscal a dividendos, intereses, pérdidas,
-  fondos y reglas por régimen sin confundir retenciones provisionales con impuesto definitivo.
+- Validar perfiles contractuales y constancias fiscales reales; ampliar pérdidas, fondos y reglas por
+  régimen sin confundir retenciones provisionales con impuesto definitivo.
 - Expediente de cliente y audit trail.
 
 ## Licencia

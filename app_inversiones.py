@@ -69,6 +69,7 @@ from stress import (
     parse_class_shocks,
     validate_scenario_metadata,
 )
+from tax_cash_flows import read_tax_cash_flows_csv
 from tax_impact import estimate_tax_reserve, read_tax_basis_csv
 from walk_forward import run_walk_forward_backtest
 
@@ -273,6 +274,28 @@ with st.sidebar:
             "2026-01-15,MSFT,35000,NO_ESTIMADO,,Pendiente de revisión fiscal\n"
         ).encode("utf-8-sig"),
         "plantilla_bases_fiscales_mxn.csv", "text/csv",
+    )
+    tax_flows_upload = st.file_uploader(
+        "Flujos fiscales documentados CSV (opcional; MXN)",
+        type=["csv"],
+        help=(
+            "Intereses, dividendos y distribuciones cobrados en un solo ejercicio. "
+            "No incluyas RFC, cuentas ni identificadores. Retenciones y reservas adicionales "
+            "son conceptos distintos; no se determina el ISR anual."
+        ),
+    )
+    st.download_button(
+        "Descargar plantilla de flujos fiscales CSV",
+        (
+            "FechaPago,Instrumento,TipoFlujo,ImporteBrutoMXN,ISRRetenidoMXN,"
+            "ImpuestoExtranjeroRetenidoMXN,TratamientoFiscal,BaseRetencionMXN,"
+            "DiasPeriodo,TasaControlPct,TasaReservaAdicionalPct,Fuente\n"
+            "2026-01-15,AAPL,DIVIDENDO_EXTRANJERO_SIC,1000,0,150,"
+            "NO_ESTIMADO,,,,,Constancia ficticia\n"
+            "2026-01-16,MSFT,DIVIDENDO_EXTRANJERO_SIC,500,0,75,"
+            "RETENCION_DOCUMENTADA,,,,,Constancia ficticia\n"
+        ).encode("utf-8-sig"),
+        "plantilla_flujos_fiscales_mxn.csv", "text/csv",
     )
     with st.expander("Escenario Black-Litterman"):
         use_black_litterman = st.checkbox("Añadir alternativa Black-Litterman")
@@ -497,6 +520,8 @@ holdings_contents = holdings_upload.getvalue() if holdings_upload is not None el
 holdings_fingerprint = sha256(holdings_contents).hexdigest() if holdings_contents else None
 tax_basis_contents = tax_basis_upload.getvalue() if tax_basis_upload is not None else b""
 tax_basis_fingerprint = sha256(tax_basis_contents).hexdigest() if tax_basis_contents else None
+tax_flows_contents = tax_flows_upload.getvalue() if tax_flows_upload is not None else b""
+tax_flows_fingerprint = sha256(tax_flows_contents).hexdigest() if tax_flows_contents else None
 cetes_contents = cetes_upload.getvalue() if cetes_upload is not None else b""
 cetes_fingerprint = sha256(cetes_contents).hexdigest() if cetes_contents else None
 bond_contents = bond_upload.getvalue() if bond_upload is not None else b""
@@ -528,6 +553,7 @@ settings = (
     holdings_fingerprint,
     holdings_source_input,
     tax_basis_fingerprint,
+    tax_flows_fingerprint,
     use_black_litterman,
     black_litterman_equilibrium_input,
     black_litterman_risk_aversion,
@@ -684,6 +710,7 @@ try:
         analysis_tickers = tuple(str(column) for column in prices.columns)
         holdings_result = None
         tax_basis_profile = None
+        tax_cash_flow_ledger = None
         current_weights = None
         holdings_source = None
         if holdings_contents:
@@ -714,6 +741,14 @@ try:
                 )
             tax_basis_profile = read_tax_basis_csv(
                 tax_basis_contents, analysis_tickers, holdings_result.as_of
+            )
+        if tax_flows_contents:
+            if base_currency != "MXN":
+                raise PortfolioError("Los flujos fiscales en MXN requieren moneda base MXN.")
+            tax_cash_flow_ledger = read_tax_cash_flows_csv(
+                tax_flows_contents,
+                analysis_tickers,
+                holdings_result.as_of if holdings_result is not None else date.today(),
             )
         analysis_quotes = (
             quotes
@@ -1488,6 +1523,32 @@ try:
                     "reserva_fiscal_ventas.csv", "text/csv",
                 )
 
+    if tax_cash_flow_ledger is not None:
+        with st.expander("Flujos fiscales documentados", expanded=True):
+            st.caption(
+                f"Ejercicio {tax_cash_flow_ledger.fiscal_year} · corte "
+                f"{tax_cash_flow_ledger.cutoff_date.date().isoformat()} · CSV SHA-256 "
+                f"{tax_cash_flow_ledger.fingerprint[:12]}. El control de retenciones no sustituye "
+                "la constancia. Dividendos SIC y fondos requieren clasificación fiscal; no se "
+                "calcula declaración anual ni acreditamiento extranjero."
+            )
+            st.dataframe(
+                tax_cash_flow_ledger.summary.style.format({
+                    "Importe bruto": "{:,.2f}", "ISR retenido": "{:,.2f}",
+                    "Impuesto extranjero retenido": "{:,.2f}",
+                    "Reserva adicional": "{:,.2f}",
+                }),
+                hide_index=True, use_container_width=True,
+            )
+            st.metric("Flujos sin estimación fiscal (MXN)",
+                      f"{tax_cash_flow_ledger.unestimated_gross_income:,.2f}")
+            st.dataframe(tax_cash_flow_ledger.detail, hide_index=True, use_container_width=True)
+            st.download_button(
+                "Descargar detalle de flujos fiscales CSV",
+                tax_cash_flow_ledger.detail.to_csv(index=False).encode("utf-8-sig"),
+                "flujos_fiscales_auditados.csv", "text/csv",
+            )
+
     with st.expander("Sensibilidad de pesos a la longitud de la muestra"):
         st.caption(
             "Reestima máximo Sharpe y mínima volatilidad con los últimos 60, 126 y 252 "
@@ -2125,6 +2186,7 @@ try:
         implementation_cost_source_date=implementation_source_date,
         tax_reserve_estimates=tax_reserve_estimates[:1],
         tax_basis_profile=tax_basis_profile,
+        tax_cash_flow_ledger=tax_cash_flow_ledger,
         allocation_policy=allocation_policy_table,
         benchmark_analyses=benchmark_analyses[:1],
         benchmark_source=benchmark_source,
@@ -2151,6 +2213,7 @@ try:
         implementation_cost_source_date=implementation_source_date,
         tax_reserve_estimates=tax_reserve_estimates,
         tax_basis_profile=tax_basis_profile,
+        tax_cash_flow_ledger=tax_cash_flow_ledger,
         simulation=simulation_report,
         stress=stress_report,
         allocation_policy=allocation_policy_table,

@@ -339,6 +339,15 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
         "TasaEscenarioPct": [10, 10],
         "Fuente": ["Estado fiscal ficticio"] * 2,
     })
+    tax_flows = pd.DataFrame({
+        "FechaPago": [cutoff], "Instrumento": ["AAPL"],
+        "TipoFlujo": ["DIVIDENDO_EXTRANJERO_SIC"],
+        "ImporteBrutoMXN": [1000], "ISRRetenidoMXN": [0],
+        "ImpuestoExtranjeroRetenidoMXN": [150],
+        "TratamientoFiscal": ["NO_ESTIMADO"], "BaseRetencionMXN": [""],
+        "DiasPeriodo": [""], "TasaControlPct": [""],
+        "TasaReservaAdicionalPct": [""], "Fuente": ["Constancia ficticia"],
+    })
     uploads = {
         "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
             prices.to_csv(index=False).encode("utf-8-sig")
@@ -349,6 +358,9 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
         ),
         "Bases fiscales actualizadas CSV (opcional; requiere cartera actual)": BytesIO(
             tax_basis.to_csv(index=False).encode("utf-8-sig")
+        ),
+        "Flujos fiscales documentados CSV (opcional; MXN)": BytesIO(
+            tax_flows.to_csv(index=False).encode("utf-8-sig")
         ),
     }
     monkeypatch.setattr(st, "file_uploader", lambda label, **_kwargs: uploads.get(label))
@@ -384,6 +396,7 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
         for frame in app.dataframe
     )
     assert any("Reserva fiscal estimada" in frame.value.columns for frame in app.dataframe)
+    assert any("Impuesto extranjero retenido" in frame.value.columns for frame in app.dataframe)
 
 
 def test_current_holdings_csv_cannot_be_combined_with_manual_weights(monkeypatch):
