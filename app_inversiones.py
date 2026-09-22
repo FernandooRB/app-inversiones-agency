@@ -61,6 +61,7 @@ from price_quality import assess_price_quality
 from price_source_validation import compare_price_sources
 from price_upload import read_adjusted_price_csv
 from reporting import (
+    HoldingsAuditReport,
     PortfolioAlternative,
     SimulationReport,
     StressReport,
@@ -1057,44 +1058,18 @@ try:
                 f"serie {fund_result.series_id}; fuente declarada: {fund_source}; retorno total "
                 f"desde valor de acción y distribuciones; SHA-256 {fund_fingerprint[:12]}"
             )
-        if holdings_result is not None:
-            data_source += (
-                f"; cartera actual al {holdings_result.as_of.date()} desde {holdings_source}; "
-                f"SHA-256 {holdings_fingerprint[:12]}"
-            )
-            if holdings_detail_result is not None:
-                data_source += (
-                    f"; detalle por instrumento cotejado desde {holdings_detail_source}; "
-                    f"SHA-256 {holdings_detail_result.fingerprint[:12]}"
-                )
-            if holdings_control_result is not None:
-                data_source += (
-                    "; subtotal de posiciones analizadas conciliado "
-                    f"{holdings_control_result.statement_total:.2f} MXN desde "
-                    f"{holdings_control_result.source}; "
-                    f"SHA-256 {holdings_control_result.fingerprint[:12]}"
-                )
-            if holdings_coverage_result is not None:
-                data_source += (
-                    f"; cobertura de cuenta: cartera analizada "
-                    f"{holdings_coverage_result.analyzed_value:.2f} MXN, componentes externos "
-                    f"{holdings_coverage_result.outside_analysis_total:.2f} MXN y total de cuenta "
-                    f"{holdings_coverage_result.account_total:.2f} MXN desde "
-                    f"{holdings_coverage_result.source}; "
-                    f"SHA-256 {holdings_coverage_result.fingerprint[:12]}"
-                )
-            if cash_bridge_result is not None:
-                data_source += (
-                    f"; puente de efectivo liquidado {cash_bridge_result.start_date} a "
-                    f"{cash_bridge_result.end_date}: saldo inicial "
-                    f"{cash_bridge_result.opening_cash:.2f} MXN, movimientos netos "
-                    f"{cash_bridge_result.net_movements:.2f} MXN, saldo final "
-                    f"{cash_bridge_result.closing_cash:.2f} MXN, "
-                    f"{cash_bridge_result.movement_count} movimientos "
-                    f"({cash_bridge_result.other_movement_count} clasificados como otros) desde "
-                    f"{cash_bridge_result.source}; "
-                    f"SHA-256 {cash_bridge_result.fingerprint[:12]}"
-                )
+        holdings_report_audit = (
+            HoldingsAuditReport(
+                holdings=holdings_result,
+                holdings_source=holdings_source,
+                holdings_fingerprint=holdings_fingerprint,
+                detail=holdings_detail_result,
+                detail_source=holdings_detail_source,
+                subtotal=holdings_control_result,
+                coverage=holdings_coverage_result,
+                cash_bridge=cash_bridge_result,
+            ) if holdings_result is not None else None
+        )
         returns = calculate_returns(prices)
         mean_returns, covariance = annualized_moments(returns)
         max_sharpe = optimize_portfolio(
@@ -2564,6 +2539,7 @@ try:
         observations=len(returns),
         quotes=analysis_quotes,
         data_source=data_source,
+        holdings_audit=holdings_report_audit,
         price_quality_issues=price_quality_issues,
         implementation_costs=(implementation_estimates[0],),
         implementation_cost_assumptions=implementation_assumptions,
@@ -2591,6 +2567,7 @@ try:
         observations=len(returns),
         quotes=analysis_quotes,
         data_source=data_source,
+        holdings_audit=holdings_report_audit,
         price_quality_issues=price_quality_issues,
         implementation_costs=implementation_estimates,
         implementation_cost_assumptions=implementation_assumptions,

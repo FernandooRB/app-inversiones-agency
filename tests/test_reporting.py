@@ -1,4 +1,5 @@
 from datetime import date
+from hashlib import sha256
 from io import BytesIO
 
 import numpy as np
@@ -7,10 +8,18 @@ from pypdf import PdfReader
 
 from benchmarking import analyze_benchmark
 from black_litterman import AbsoluteView, black_litterman_posterior
+from cash_bridge import read_cash_bridge_csv
+from holdings import read_current_holdings_csv
+from holdings_control import (
+    compare_holdings_detail_csv,
+    read_holdings_control_csv,
+    read_holdings_coverage_csv,
+)
 from implementation_costs import ImplementationCostAssumptions, estimate_implementation_cost
 from portfolio_core import PortfolioMetrics, RiskMetrics, optimize_portfolio
 from price_quality import PriceQualityIssue
 from reporting import (
+    HoldingsAuditReport,
     PortfolioAlternative,
     SimulationReport,
     StressReport,
@@ -30,6 +39,83 @@ def test_pdf_report_is_created():
     report = create_pdf_report(("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1), metrics, risk, 100_000)
     assert report.startswith(b"%PDF")
     assert len(report) > 1_000
+
+
+def test_both_pdfs_show_structured_holdings_and_cash_audit():
+    cutoff = date.today().isoformat()
+    holdings_csv = (
+        f"FechaCorte,Instrumento,ValorMXN\n{cutoff},AAA,60000\n{cutoff},BBB,40000\n"
+    ).encode()
+    holdings = read_current_holdings_csv(holdings_csv, ("AAA", "BBB"))
+    detail = compare_holdings_detail_csv(
+        (f"FechaCorte,Instrumento,ValorMXN\n{cutoff},BBB,40000\n"
+         f"{cutoff},AAA,60000\n").encode(), holdings, holdings_csv
+    )
+    subtotal = read_holdings_control_csv(
+        f"FechaCorte,TotalMXN,Fuente\n{cutoff},100000.00,Subtotal ficticio\n".encode(),
+        holdings,
+    )
+    coverage = read_holdings_coverage_csv((
+        "FechaCorte,ValorCarteraAnalizadaMXN,EfectivoFueraAnalisisMXN,"
+        "PendienteLiquidacionMXN,OtrosFueraAnalisisMXN,TotalCuentaMXN,Fuente\n"
+        f"{cutoff},100000.00,5000.00,-1000.00,250.00,104250.00,Cobertura ficticia\n"
+    ).encode(), holdings)
+    bridge = read_cash_bridge_csv((
+        "Fecha,Tipo,ImporteMXN\n"
+        f"{cutoff},SALDO_INICIAL,4000.00\n"
+        f"{cutoff},DEPOSITO,1000.00\n"
+        f"{cutoff},SALDO_FINAL,5000.00\n"
+    ).encode(), coverage, "Movimientos ficticios")
+    audit = HoldingsAuditReport(
+        holdings, "Estado ficticio", sha256(holdings_csv).hexdigest(),
+        detail, "Detalle ficticio", subtotal, coverage, bridge,
+    )
+    metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    basic = create_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        metrics, risk, 100_000, base_currency="MXN", holdings_audit=audit,
+    )
+    comparison = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (PortfolioAlternative("Máximo Sharpe", metrics, risk),
+         PortfolioAlternative("Pesos iguales", metrics, risk)),
+        100_000, base_currency="MXN", risk_free_rate=0.05,
+        observations=252, quotes={"AAA": "MXN", "BBB": "MXN"}, holdings_audit=audit,
+    )
+    for report in (basic, comparison):
+        pages = [page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages]
+        assert len(pages) == 2
+        assert "Conciliación de cartera y efectivo" not in pages[0]
+        assert "Conciliación de cartera y efectivo" in pages[1]
+        text = "\n".join(pages)
+        assert "Conciliación de cartera y efectivo" in text
+        assert "Cobertura de cuenta" in text
+        assert "104,250.00" in text
+        assert "Puente de efectivo" in text
+        assert "5,000.00" in text
+        assert "Movimientos ficticios" in text
+        assert "no se suman al capital optimizado" in text
+    with np.testing.assert_raises_regex(ValueError, "capital del reporte"):
+        create_pdf_report(
+            ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+            metrics, risk, 120_000, base_currency="MXN", holdings_audit=audit,
+        )
+
+
+def test_pdf_marks_unprovided_holdings_controls():
+    cutoff = date.today().isoformat()
+    contents = f"FechaCorte,Instrumento,ValorMXN\n{cutoff},AAA,100000\n".encode()
+    holdings = read_current_holdings_csv(contents, ("AAA",))
+    audit = HoldingsAuditReport(holdings, "Estado ficticio", sha256(contents).hexdigest())
+    metrics = PortfolioMetrics(np.array([1.0]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    report = create_pdf_report(
+        ("AAA",), date(2023, 1, 1), date(2024, 1, 1),
+        metrics, risk, 100_000, base_currency="MXN", holdings_audit=audit,
+    )
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+    assert text.count("No aportado") >= 4
 
 
 def test_both_pdfs_include_declared_asset_class_policy():

@@ -19,9 +19,11 @@ liquidez o fondo cuando se hayan añadido. Una posición sin saldo se incluye co
 reordena las filas según el universo analizado, calcula los pesos y sustituye el capital manual con
 la suma de `ValorMXN`.
 
-La carga exige moneda base MXN y una fuente declarada. Registra en el PDF la fecha de corte, la
-fuente y una huella SHA-256 abreviada; también permite descargar la conciliación ordenada con valor
-y peso. No se pueden combinar el CSV y los pesos manuales en el mismo análisis.
+La carga exige moneda base MXN y una fuente declarada. Ambos PDF muestran una sección de
+**conciliación de cartera y efectivo** con fecha de corte, capital analizado, estado de cada control,
+fuentes y huellas SHA-256 abreviadas. Los controles opcionales que no se aportaron figuran como
+«No aportado». También se puede descargar la conciliación ordenada con valor y peso. No se pueden
+combinar el CSV y los pesos manuales en el mismo análisis.
 
 No incluyas nombre, RFC, CURP, número de cuenta, contrato, correo ni otro identificador. La
 restricción a tres columnas reduce la posibilidad de importar esos datos por error, pero el equipo
@@ -38,8 +40,8 @@ FechaCorte,TotalMXN,Fuente
 La fecha debe coincidir con la cartera importada y `TotalMXN` debe ser positivo, sin separadores de
 miles y con máximo dos decimales. El sistema redondea la suma de posiciones al centavo y exige igualdad
 con el subtotal declarado. No debe incluir efectivo ni partidas fuera del universo importado. El archivo
-ocupa menos de 100 KB, se procesa en memoria y su huella SHA-256 queda en la descripción de fuente del
-PDF. Un control correcto sólo demuestra que fecha y suma coinciden con el dato transcrito.
+ocupa menos de 100 KB, se procesa en memoria y su huella SHA-256 queda en la sección de conciliación
+del PDF. Un control correcto sólo demuestra que fecha y suma coinciden con el dato transcrito.
 
 Para comprobar la cobertura completa puede añadirse un resumen separado:
 

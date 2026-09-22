@@ -3,6 +3,7 @@
 import io
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from xml.sax.saxutils import escape
 
 import numpy as np
@@ -24,6 +25,13 @@ from reportlab.platypus import (
 
 from benchmarking import BenchmarkAnalysis
 from black_litterman import BlackLittermanResult
+from cash_bridge import CashBridge
+from holdings import CurrentHoldings
+from holdings_control import (
+    HoldingsCoverageControl,
+    HoldingsDetailControl,
+    HoldingsTotalControl,
+)
 from implementation_costs import (
     ImplementationCostAssumptions,
     ImplementationCostEstimate,
@@ -65,6 +73,160 @@ class StressReport:
     class_shocks: pd.Series | None = None
     shock_name: str | None = None
     shock_rationale: str | None = None
+
+
+@dataclass(frozen=True)
+class HoldingsAuditReport:
+    holdings: CurrentHoldings
+    holdings_source: str
+    holdings_fingerprint: str
+    detail: HoldingsDetailControl | None = None
+    detail_source: str | None = None
+    subtotal: HoldingsTotalControl | None = None
+    coverage: HoldingsCoverageControl | None = None
+    cash_bridge: CashBridge | None = None
+
+
+def _holdings_audit_story(
+    audit: HoldingsAuditReport | None, portfolio_value: float, base_currency: str, styles
+) -> list:
+    if audit is None:
+        return []
+    if base_currency != "MXN":
+        raise ValueError("La conciliación de cartera requiere moneda base MXN.")
+    as_of = audit.holdings.as_of.date()
+    analyzed = sum(
+        (Decimal(str(value)) for value in audit.holdings.values), Decimal(0)
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if (not audit.holdings_source or len(audit.holdings_fingerprint) != 64
+            or analyzed <= 0 or analyzed != Decimal(str(portfolio_value)).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )):
+        raise ValueError("La cartera declarada no coincide con el capital del reporte.")
+    if audit.detail is not None and (
+        audit.detail.as_of != as_of or audit.detail.asset_count != len(audit.holdings.values)
+        or not audit.detail_source
+    ):
+        raise ValueError("El detalle por instrumento no corresponde a la cartera del reporte.")
+    if audit.subtotal is not None and (
+        audit.subtotal.as_of != as_of or audit.subtotal.statement_total != analyzed
+    ):
+        raise ValueError("El subtotal no corresponde a la cartera del reporte.")
+    coverage = audit.coverage
+    if coverage is not None and (
+        coverage.as_of != as_of or coverage.analyzed_value != analyzed
+        or coverage.analyzed_value + coverage.outside_analysis_total != coverage.account_total
+    ):
+        raise ValueError("La cobertura no corresponde a la cartera del reporte.")
+    bridge = audit.cash_bridge
+    if bridge is not None and (
+        coverage is None or bridge.end_date != as_of
+        or bridge.closing_cash != coverage.outside_cash
+        or bridge.opening_cash + bridge.net_movements != bridge.closing_cash
+    ):
+        raise ValueError("El puente de efectivo no corresponde a la cobertura del reporte.")
+
+    def cell(value: str) -> Paragraph:
+        return Paragraph(escape(value), styles["Normal"])
+
+    def source_cell(source: str | None, fingerprint: str | None) -> Paragraph:
+        if source is None or fingerprint is None:
+            return cell("No aportado")
+        return Paragraph(
+            f"{escape(source)}<br/><font size='7'>SHA-256 {escape(fingerprint[:12])}</font>",
+            styles["Normal"],
+        )
+
+    rows = [[cell("Control"), cell("Resultado"), cell("Fuente y huella")]]
+    rows.append([
+        cell("Cartera actual"),
+        cell(f"{len(audit.holdings.values)} instrumentos; {analyzed:,.2f} MXN"),
+        source_cell(audit.holdings_source, audit.holdings_fingerprint),
+    ])
+    rows.append([
+        cell("Detalle por instrumento"),
+        cell(f"Coinciden {audit.detail.asset_count} importes" if audit.detail else "No aportado"),
+        source_cell(audit.detail_source, audit.detail.fingerprint if audit.detail else None),
+    ])
+    rows.append([
+        cell("Subtotal analizado"),
+        cell(f"Coincide: {audit.subtotal.statement_total:,.2f} MXN" if audit.subtotal else "No aportado"),
+        source_cell(audit.subtotal.source, audit.subtotal.fingerprint)
+        if audit.subtotal else cell("No aportado"),
+    ])
+    rows.append([
+        cell("Cobertura de cuenta"),
+        cell(f"Concilia: {coverage.account_total:,.2f} MXN" if coverage else "No aportado"),
+        source_cell(coverage.source, coverage.fingerprint) if coverage else cell("No aportado"),
+    ])
+    rows.append([
+        cell("Efectivo liquidado"),
+        cell(
+            f"{bridge.start_date} a {bridge.end_date}; {bridge.movement_count} movimientos; "
+            f"{bridge.other_movement_count} como otros" if bridge else "No aportado"
+        ),
+        source_cell(bridge.source, bridge.fingerprint) if bridge else cell("No aportado"),
+    ])
+    table = Table(rows, colWidths=[38 * mm, 82 * mm, 65 * mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEBF1")),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story = [
+        KeepTogether([
+            Paragraph("Conciliación de cartera y efectivo", styles["Heading2"]),
+            Paragraph(
+                f"Fecha de corte: {as_of}. Capital analizado: {analyzed:,.2f} MXN. "
+                "Los controles opcionales se muestran según los archivos aportados.",
+                styles["Normal"],
+            ),
+            Spacer(1, 2 * mm),
+        ]),
+        table,
+    ]
+    if coverage is not None:
+        amounts = [
+            ("Posiciones analizadas", coverage.analyzed_value),
+            ("Efectivo fuera del análisis", coverage.outside_cash),
+            ("Pendiente de liquidación", coverage.pending_settlement),
+            ("Otras partidas externas", coverage.other_outside),
+            ("Total de cuenta declarado", coverage.account_total),
+        ]
+        breakdown = Table(
+            [[cell("Desglose de cuenta"), cell("Importe MXN")]]
+            + [[cell(label), cell(f"{amount:,.2f}")] for label, amount in amounts],
+            colWidths=[120 * mm, 65 * mm], repeatRows=1,
+        )
+        breakdown.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8F1F6")),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.extend([Spacer(1, 2 * mm), breakdown])
+    if bridge is not None:
+        story.append(Paragraph(
+            f"Puente de efectivo: {bridge.opening_cash:,.2f} MXN de saldo inicial + "
+            f"{bridge.net_movements:,.2f} MXN de movimientos netos = "
+            f"{bridge.closing_cash:,.2f} MXN de saldo final.",
+            styles["Normal"],
+        ))
+    story.extend([
+        Spacer(1, 2 * mm),
+        Paragraph(
+            "La conciliación comprueba los archivos declarados y su aritmética. El equipo debe "
+            "verificar el estado original, movimientos y operaciones. El efectivo externo y las "
+            "otras partidas no se suman al capital optimizado.",
+            styles["Normal"],
+        ),
+        Spacer(1, 3 * mm),
+    ])
+    return story
 
 
 def _risk_attribution_story(
@@ -669,6 +831,7 @@ def create_comparison_pdf_report(
     observations: int,
     quotes: dict[str, str],
     data_source: str = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico",
+    holdings_audit: HoldingsAuditReport | None = None,
     simulation: SimulationReport | None = None,
     stress: StressReport | None = None,
     price_quality_issues: tuple[PriceQualityIssue, ...] = (),
@@ -1068,6 +1231,10 @@ def create_comparison_pdf_report(
             ),
         ])
 
+    if holdings_audit is not None:
+        story.append(PageBreak())
+        story.extend(_holdings_audit_story(holdings_audit, portfolio_value, base_currency, styles))
+
     def footer(canvas, doc):
         canvas.saveState()
         canvas.setStrokeColor(colors.HexColor("#C7D2DD"))
@@ -1095,6 +1262,7 @@ def create_pdf_report(
     observations: int | None = None,
     quotes: dict | None = None,
     data_source: str = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico",
+    holdings_audit: HoldingsAuditReport | None = None,
     price_quality_issues: tuple[PriceQualityIssue, ...] = (),
     implementation_costs: tuple[ImplementationCostEstimate, ...] = (),
     implementation_cost_assumptions: ImplementationCostAssumptions | None = None,
@@ -1245,6 +1413,10 @@ def create_pdf_report(
         tax_reserve_estimates, tax_basis_profile, base_currency, styles,
     ))
     story.extend(_tax_cash_flow_story(tax_cash_flow_ledger, base_currency, styles))
+
+    if holdings_audit is not None:
+        story.append(PageBreak())
+        story.extend(_holdings_audit_story(holdings_audit, portfolio_value, base_currency, styles))
 
     def footer(canvas, doc):
         canvas.saveState()

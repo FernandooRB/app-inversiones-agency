@@ -27,6 +27,8 @@ en MXN a pesos ordenados, capital y un archivo de auditoría; controles opcional
 valores por instrumento, subtotal analizado, efectivo y otras partidas del total de cuenta, sin
 persistir los CSV ni sumar componentes externos al capital optimizado. Un puente opcional coteja
 movimientos de efectivo liquidado con el efectivo declarado, sin validar operaciones de títulos.
+Ambos PDF presentan estos controles en una sección de conciliación con fuentes, huellas y controles
+no aportados visibles para la revisión humana.
 La [revisión heurística de precios](docs/price_quality.md) identifica saltos de al menos
 30 % y tramos sin variación en las series originales; deja alertas en la app, un CSV
 descargable y ambos PDF para que el equipo compruebe la fuente.
