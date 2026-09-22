@@ -36,3 +36,7 @@ que tenga la moneda o subunidad esperada, que represente el mercado de negociaci
 indicado ni que la declaración reproduzca correctamente el contrato. Esas verificaciones
 requieren la fuente y su licencia. Para SIC, una serie del mercado de origen convertida
 a MXN sigue siendo un proxy económico y no el precio local ejecutable.
+
+Para la [validación del piloto real](real_data_pilot.md) se puede añadir un segundo CSV de precios y
+su manifiesto, procedentes de otro proveedor. El contraste interno informa cobertura y discrepancias
+por instrumento; no sustituye la revisión de unidad, horario, contrato y eventos corporativos.

@@ -51,6 +51,7 @@ from portfolio_core import (
     random_portfolios,
 )
 from price_quality import assess_price_quality
+from price_source_validation import compare_price_sources
 from price_upload import read_adjusted_price_csv
 from reporting import (
     PortfolioAlternative,
@@ -399,6 +400,29 @@ with st.sidebar:
             "convención de ajustes, hora de corte y referencia contractual vigente."
         ),
     )
+    with st.expander("Contraste independiente de precios"):
+        reference_price_upload = st.file_uploader(
+            "Precios ajustados de referencia CSV (opcional)", type=["csv"],
+            help=(
+                "Mismos tickers y unidades de cotización que el archivo principal, "
+                "desde una fuente independiente con derechos confirmados. Sin datos personales."
+            ),
+        )
+        reference_rights_upload = st.file_uploader(
+            "Manifiesto de derechos de la referencia CSV", type=["csv"],
+        )
+        price_tolerance_pct = st.number_input(
+            "Diferencia máxima declarada entre fuentes (%)",
+            min_value=0.0, max_value=100.0, value=1.0, step=0.1,
+        )
+        price_minimum_coverage_pct = st.number_input(
+            "Cobertura mínima de fechas comunes (%)",
+            min_value=0.1, max_value=100.0, value=95.0, step=0.5,
+        )
+        st.caption(
+            "El contraste genera alertas internas; no certifica moneda, mercado, ajustes "
+            "corporativos ni exactitud de la fuente. No se incluyen precios crudos en el CSV de diferencias."
+        )
     st.download_button(
         "Descargar plantilla de manifiesto de derechos",
         (
@@ -516,6 +540,18 @@ price_rights_contents = (
 price_rights_fingerprint = (
     sha256(price_rights_contents).hexdigest() if price_rights_contents else None
 )
+reference_price_contents = (
+    reference_price_upload.getvalue() if reference_price_upload is not None else b""
+)
+reference_rights_contents = (
+    reference_rights_upload.getvalue() if reference_rights_upload is not None else b""
+)
+reference_price_fingerprint = (
+    sha256(reference_price_contents).hexdigest() if reference_price_contents else None
+)
+reference_rights_fingerprint = (
+    sha256(reference_rights_contents).hexdigest() if reference_rights_contents else None
+)
 holdings_contents = holdings_upload.getvalue() if holdings_upload is not None else b""
 holdings_fingerprint = sha256(holdings_contents).hexdigest() if holdings_contents else None
 tax_basis_contents = tax_basis_upload.getvalue() if tax_basis_upload is not None else b""
@@ -570,6 +606,10 @@ settings = (
     tariff_fingerprint,
     price_fingerprint,
     price_rights_fingerprint,
+    reference_price_fingerprint,
+    reference_rights_fingerprint,
+    price_tolerance_pct,
+    price_minimum_coverage_pct,
     cetes_fingerprint,
     cetes_name_input,
     bond_fingerprint,
@@ -617,6 +657,7 @@ try:
     liquidity_result = None
     fund_result = None
     price_rights = None
+    price_source_comparison = None
     with st.spinner("Preparando y validando datos..."):
         if price_contents:
             if not price_rights_contents:
@@ -627,7 +668,23 @@ try:
             download = read_adjusted_price_csv(
                 price_contents, tickers, start_date, end_date
             )
+            if reference_price_contents or reference_rights_contents:
+                if not reference_price_contents or not reference_rights_contents:
+                    raise PortfolioError(
+                        "El contraste requiere precios y manifiesto de derechos de la referencia."
+                    )
+                price_source_comparison = compare_price_sources(
+                    price_contents, price_rights_contents,
+                    reference_price_contents, reference_rights_contents,
+                    tickers, quotes, start_date, end_date,
+                    tolerance_pct=price_tolerance_pct,
+                    minimum_coverage_pct=price_minimum_coverage_pct,
+                )
         else:
+            if reference_price_contents or reference_rights_contents:
+                raise PortfolioError(
+                    "El contraste independiente requiere el archivo principal de precios."
+                )
             if price_rights_contents:
                 raise PortfolioError(
                     "El manifiesto de derechos sólo puede usarse junto con un CSV de precios."
@@ -1032,6 +1089,41 @@ try:
                 "Este manifiesto autoriza sólo investigación interna. No entregues a clientes "
                 "el PDF ni resultados derivados de estos precios."
             )
+        if price_source_comparison is not None:
+            with st.expander("Contraste independiente de precios", expanded=True):
+                result = price_source_comparison
+                st.caption(
+                    f"{result.primary_source} frente a {result.reference_source} · "
+                    f"datos SHA-256 {result.primary_fingerprint[:12]} / "
+                    f"{result.reference_fingerprint[:12]} · manifiestos SHA-256 "
+                    f"{result.primary_rights_fingerprint[:12]} / "
+                    f"{result.reference_rights_fingerprint[:12]}. "
+                    "Comparación interna de cotizaciones declaradas en la misma unidad; "
+                    "no certifica exactitud ni autoriza la entrega a clientes."
+                )
+                st.info(
+                    f"Estado: {result.status} · {result.common_sessions} fechas comunes · "
+                    f"cobertura {result.coverage_ratio:.1%} · umbral {result.tolerance:.2%}."
+                )
+                for reason in result.review_reasons:
+                    st.warning(reason)
+                st.dataframe(
+                    result.summary.style.format({
+                        "Diferencia mediana absoluta": "{:.2%}",
+                        "Diferencia máxima absoluta": "{:.2%}",
+                    }), hide_index=True, use_container_width=True,
+                )
+                st.caption(
+                    f"Fechas sólo en referencia: {len(result.missing_in_primary)}; "
+                    f"sólo en fuente principal: {len(result.missing_in_reference)}."
+                )
+                if not result.discrepancies.empty:
+                    st.dataframe(result.discrepancies, hide_index=True, use_container_width=True)
+                    st.download_button(
+                        "Descargar diferencias entre fuentes CSV",
+                        result.discrepancies.to_csv(index=False).encode("utf-8-sig"),
+                        "diferencias_precios_fuentes.csv", "text/csv",
+                    )
     else:
         st.warning(
             "Los precios descargados mediante Yahoo/yfinance se reservan para investigación "

@@ -11,7 +11,9 @@
   habilitada mientras falte una ruta regulatoria y laboral confirmada.
 - Clientes personas físicas y morales en México; instrumentos de mercados mexicanos y del SIC.
 - Presupuesto recurrente inicial para datos y alojamiento: menos de MXN 1,000 al mes.
-- Primera entrega: comparativo histórico en MXN para un caso ficticio, sin expedientes reales.
+- Primera entrega técnica: comparativo histórico en MXN para un caso ficticio, sin expedientes reales.
+  El producto previsto para clientes usará datos reales tras completar la
+  [validación del piloto](real_data_pilot.md), privacidad y las condiciones legales y laborales.
 - Intermediarios prioritarios para investigar costos e importación: GBM, Actinver, Bursanet,
   Finamex y Kuspit. Finsus requiere evaluar por separado sus productos y disponibilidad de datos.
 - Canal previsto de contratación: [stochasticsinvestmentgroup.com](https://stochasticsinvestmentgroup.com/).
@@ -82,3 +84,6 @@
    documentados y controles ilustrativos de dividendos e intereses. Falta contrastar constancias reales,
    validar fiscalidad de fondos, pérdidas y personas morales con especialista, así como mantener las
    reglas actualizadas por ejercicio.
+7. Ejecutar la [matriz de piloto con datos reales](real_data_pilot.md). El contraste independiente
+   de precios ya identifica discrepancias y cobertura, pero no existe evidencia contractual ni
+   validación completa de instrumentos, posiciones, costos y modelos para clientes reales.

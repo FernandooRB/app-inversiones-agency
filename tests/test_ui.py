@@ -10,13 +10,15 @@ from streamlit.testing.v1 import AppTest
 import portfolio_core as core
 
 
-def rights_manifest(scope: str = "ENTREGABLES_DERIVADOS") -> BytesIO:
+def rights_manifest(
+    scope: str = "ENTREGABLES_DERIVADOS", source: str = "Proveedor de prueba"
+) -> BytesIO:
     reviewed = (date.today() - timedelta(days=10)).isoformat()
     expires = (date.today() + timedelta(days=365)).isoformat()
     contents = (
         "Fuente,Producto,Mercados,FechaRevision,VigenciaHasta,EstadoDerechos,"
         "AlcanceAutorizado,AjusteCorporativo,HoraCorteZona,ReferenciaContractual\n"
-        f"Proveedor de prueba,Cierres diarios,BMV y SIC,{reviewed},{expires},CONFIRMADO,"
+        f"{source},Cierres diarios,BMV y SIC,{reviewed},{expires},CONFIRMADO,"
         f"{scope},AJUSTADO,Cierre oficial America/Mexico_City,Contrato ficticio sección 4\n"
     )
     return BytesIO(contents.encode("utf-8-sig"))
@@ -353,6 +355,12 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
             prices.to_csv(index=False).encode("utf-8-sig")
         ),
         "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)": rights_manifest(),
+        "Precios ajustados de referencia CSV (opcional)": BytesIO(
+            prices.to_csv(index=False).encode("utf-8-sig")
+        ),
+        "Manifiesto de derechos de la referencia CSV": rights_manifest(
+            source="Proveedor independiente de prueba"
+        ),
         "Cartera actual valuada en MXN CSV (opcional)": BytesIO(
             holdings.to_csv(index=False).encode("utf-8-sig")
         ),
@@ -392,11 +400,13 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
         for item in app.info
     )
     assert any(
-        frame.value.astype(str).eq("Cartera actual").any().any()
+        "Alternativa" in frame.value.columns
+        and frame.value["Alternativa"].eq("Cartera actual").any()
         for frame in app.dataframe
     )
     assert any("Reserva fiscal estimada" in frame.value.columns for frame in app.dataframe)
     assert any("Impuesto extranjero retenido" in frame.value.columns for frame in app.dataframe)
+    assert any("SIN_ALERTAS_AUTOMATICAS" in item.value for item in app.info)
 
 
 def test_current_holdings_csv_cannot_be_combined_with_manual_weights(monkeypatch):
