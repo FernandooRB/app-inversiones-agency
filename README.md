@@ -2,6 +2,8 @@
 
 Aplicación educativa de uso interno en Streamlit para analizar asignaciones de activos con datos históricos. Calcula
 portafolios de máximo Sharpe y mínima volatilidad, una frontera eficiente, VaR, CVaR y un reporte PDF.
+Los ejemplos ficticios verifican el software; el producto previsto para clientes utilizará datos
+reales sólo después de completar la [matriz de validación del piloto](docs/real_data_pilot.md).
 Incluye [escenarios Monte Carlo](docs/monte_carlo.md) para investigación interna,
 con métodos histórico por bloques y lognormal correlacionado, y
 [pruebas de estrés](docs/stress_testing.md) históricas e hipotéticas con shocks documentados
@@ -25,6 +27,8 @@ en MXN a pesos ordenados, capital y un archivo de auditoría, sin persistir el C
 La [revisión heurística de precios](docs/price_quality.md) identifica saltos de al menos
 30 % y tramos sin variación en las series originales; deja alertas en la app, un CSV
 descargable y ambos PDF para que el equipo compruebe la fuente.
+El [contraste independiente](docs/real_data_pilot.md) compara dos archivos autorizados de precios
+ajustados, fechas comunes y diferencias por instrumento sin exportar los precios crudos.
 La [validación fuera de muestra](docs/backtesting.md) compara Markowitz, pesos iguales y una
 cartera actual opcional, tanto con asignación fija como con revisiones de 3, 6 o 12 meses
 y costos supuestos.
@@ -148,6 +152,7 @@ price_upload.py       Importación estricta de precios ajustados CSV
 data_rights.py        Manifiesto estricto de fuente, vigencia, ajustes y alcance autorizado
 holdings.py           Conciliación estricta de la cartera actual valuada en MXN
 price_quality.py      Alertas heurísticas sobre precios originales
+price_source_validation.py Contraste independiente de dos archivos de precios
 implementation_costs.py Estimación explícita de compras, ventas y costos
 broker_tariffs.py    Importación estricta de un perfil contractual de costos
 tax_impact.py         Bases fiscales auditables y reserva ilustrativa sobre ventas
