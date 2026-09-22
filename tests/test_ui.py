@@ -380,6 +380,10 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
         "Cartera actual valuada en MXN CSV (opcional)": BytesIO(
             holdings.to_csv(index=False).encode("utf-8-sig")
         ),
+        "Detalle del estado de cuenta CSV para contraste (opcional)": BytesIO((
+            f"FechaCorte,Instrumento,ValorMXN\n{cutoff},AAPL,70000\n"
+            f"{cutoff},MSFT,30000\n"
+        ).encode("utf-8-sig")),
         "Total del estado de cuenta CSV (opcional; requiere cartera actual)": BytesIO((
             f"FechaCorte,TotalMXN,Fuente\n{cutoff},100000.00,Estado de cuenta ficticio\n"
         ).encode("utf-8-sig")),
@@ -409,6 +413,9 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
     next(
         item for item in app.text_input if item.label == "Fuente declarada de la cartera actual"
     ).set_value("Estado de cuenta ficticio")
+    next(
+        item for item in app.text_input if item.label == "Fuente del detalle de referencia"
+    ).set_value("Transcripción ficticia del estado de cuenta")
     app.run()
     app.button[0].click().run()
     assert not app.exception
@@ -428,6 +435,7 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
     assert any("SIN_ALERTAS_AUTOMATICAS" in item.value for item in app.info)
     assert any("ISIN" in frame.value.columns for frame in app.dataframe)
     assert any("Total y fecha conciliados" in item.value for item in app.success)
+    assert any("importes por instrumento" in item.value for item in app.success)
 
 
 def test_current_holdings_csv_cannot_be_combined_with_manual_weights(monkeypatch):

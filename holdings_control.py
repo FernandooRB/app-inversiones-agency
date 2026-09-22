@@ -9,7 +9,7 @@ from io import BytesIO
 
 import pandas as pd
 
-from holdings import CurrentHoldings
+from holdings import CurrentHoldings, read_current_holdings_csv
 from portfolio_core import PortfolioError
 
 MAX_CONTROL_CSV_BYTES = 100_000
@@ -25,6 +25,46 @@ class HoldingsTotalControl:
     calculated_total: Decimal
     source: str
     fingerprint: str
+
+
+@dataclass(frozen=True)
+class HoldingsDetailControl:
+    as_of: date
+    asset_count: int
+    fingerprint: str
+
+
+def compare_holdings_detail_csv(
+    contents: bytes,
+    primary: CurrentHoldings,
+    primary_contents: bytes,
+) -> HoldingsDetailControl:
+    """Check every position against a separately prepared statement transcription."""
+    if contents == primary_contents:
+        raise PortfolioError(
+            "El detalle de referencia es idéntico al archivo principal; "
+            "prepara el control por separado desde el estado de cuenta."
+        )
+    reference = read_current_holdings_csv(contents, tuple(primary.values.index))
+    if reference.as_of != primary.as_of:
+        raise PortfolioError("La fecha del detalle de referencia no coincide con la cartera actual.")
+    try:
+        mismatched = [
+            asset
+            for asset in primary.values.index
+            if Decimal(str(primary.values[asset])).quantize(CENT, rounding=ROUND_HALF_UP)
+            != Decimal(str(reference.values[asset])).quantize(CENT, rounding=ROUND_HALF_UP)
+        ]
+    except InvalidOperation as exc:
+        raise PortfolioError("El detalle de posiciones no se puede conciliar al centavo.") from exc
+    if mismatched:
+        assets = ", ".join(mismatched[:8]) + ("…" if len(mismatched) > 8 else "")
+        raise PortfolioError(
+            "El detalle del estado de cuenta difiere por instrumento: " + assets + "."
+        )
+    return HoldingsDetailControl(
+        primary.as_of.date(), len(primary.values), sha256(contents).hexdigest()
+    )
 
 
 def read_holdings_control_csv(contents: bytes, holdings: CurrentHoldings) -> HoldingsTotalControl:

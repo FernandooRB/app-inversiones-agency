@@ -42,5 +42,13 @@ queda en la descripción de fuente del PDF. Un control correcto sólo demuestra 
 coinciden con el dato transcrito; el equipo debe comprobar el estado de cuenta, su cobertura de
 efectivo y movimientos y cualquier diferencia antes de usarlo para un caso real.
 
+También se puede cargar un **detalle de referencia** preparado por separado desde el estado de cuenta.
+Usa exactamente las mismas tres columnas que el primer CSV, con cada instrumento del análisis una vez.
+La app exige la misma fecha, el mismo universo y valores iguales por instrumento al centavo; rechaza
+una copia idéntica del archivo principal y detiene el análisis si algún importe difiere, aunque el
+total sea igual. Se declara la fuente del detalle y se añade su huella SHA-256 al PDF. Esta comparación
+no comprueba por sí sola que la transcripción corresponda al documento original ni que incluya todos
+los movimientos, efectivo o posiciones fuera del universo analizado.
+
 Cuando se requiere revisar el efecto de ventas, un [archivo fiscal separado](tax_reserve.md) aporta
 el costo fiscal actualizado sin ampliar este CSV ni mezclarlo con identificadores del cliente.
