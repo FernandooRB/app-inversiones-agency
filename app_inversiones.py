@@ -16,6 +16,7 @@ from backtesting import run_holdout_backtest
 from benchmarking import analyze_benchmark
 from black_litterman import black_litterman_posterior, parse_absolute_views
 from broker_tariffs import read_broker_tariff_csv
+from cash_bridge import read_cash_bridge_csv
 from covariance_calibration import select_diagonal_shrinkage
 from currencies import convert_prices, currency_map, download_fx
 from data_rights import read_data_rights_csv
@@ -299,6 +300,29 @@ with st.sidebar:
             b"Estado de cuenta de ejemplo\n"
         ),
         "plantilla_cobertura_cuenta_mxn.csv", "text/csv",
+    )
+    cash_bridge_upload = st.file_uploader(
+        "Movimientos de efectivo liquidado CSV (opcional; requiere cobertura)",
+        type=["csv"],
+        help=(
+            "Saldo inicial, movimientos liquidados en MXN y saldo final. El saldo final debe "
+            "coincidir con el efectivo externo de la cobertura. Sin nombres ni números de cuenta."
+        ),
+    )
+    cash_bridge_source_input = st.text_input(
+        "Fuente de los movimientos de efectivo",
+        help="Documento y periodo, sin identificadores del cliente; máximo 120 caracteres.",
+    )
+    st.download_button(
+        "Descargar plantilla de movimientos de efectivo CSV",
+        (
+            b"Fecha,Tipo,ImporteMXN\n"
+            b"2026-01-01,SALDO_INICIAL,4000.00\n"
+            b"2026-01-10,DEPOSITO,1500.00\n"
+            b"2026-01-15,COMISION_IMPUESTO,500.00\n"
+            b"2026-01-15,SALDO_FINAL,5000.00\n"
+        ),
+        "plantilla_movimientos_efectivo_mxn.csv", "text/csv",
     )
     st.download_button(
         "Descargar plantilla de cartera actual CSV",
@@ -656,6 +680,8 @@ holdings_coverage_contents = (
 holdings_coverage_fingerprint = (
     sha256(holdings_coverage_contents).hexdigest() if holdings_coverage_contents else None
 )
+cash_bridge_contents = cash_bridge_upload.getvalue() if cash_bridge_upload is not None else b""
+cash_bridge_fingerprint = sha256(cash_bridge_contents).hexdigest() if cash_bridge_contents else None
 tax_basis_contents = tax_basis_upload.getvalue() if tax_basis_upload is not None else b""
 tax_basis_fingerprint = sha256(tax_basis_contents).hexdigest() if tax_basis_contents else None
 tax_flows_contents = tax_flows_upload.getvalue() if tax_flows_upload is not None else b""
@@ -693,6 +719,8 @@ settings = (
     holdings_detail_source_input,
     holdings_control_fingerprint,
     holdings_coverage_fingerprint,
+    cash_bridge_fingerprint,
+    cash_bridge_source_input,
     holdings_source_input,
     tax_basis_fingerprint,
     tax_flows_fingerprint,
@@ -883,6 +911,7 @@ try:
         holdings_detail_source = None
         holdings_control_result = None
         holdings_coverage_result = None
+        cash_bridge_result = None
         tax_basis_profile = None
         tax_cash_flow_ledger = None
         current_weights = None
@@ -923,19 +952,29 @@ try:
                 holdings_coverage_result = read_holdings_coverage_csv(
                     holdings_coverage_contents, holdings_result
                 )
+            if cash_bridge_contents:
+                if holdings_coverage_result is None:
+                    raise PortfolioError(
+                        "Los movimientos de efectivo requieren el resumen de cobertura de cuenta."
+                    )
+                cash_bridge_result = read_cash_bridge_csv(
+                    cash_bridge_contents, holdings_coverage_result, cash_bridge_source_input
+                )
             current_weights = holdings_result.weights.to_numpy(dtype=float)
             portfolio_value = holdings_result.total_value
         elif current_weights_input.strip():
-            if holdings_control_contents or holdings_detail_contents or holdings_coverage_contents:
+            if (holdings_control_contents or holdings_detail_contents
+                    or holdings_coverage_contents or cash_bridge_contents):
                 raise PortfolioError(
-                    "Los controles de posiciones requieren la cartera actual valuada en CSV."
+                    "Los controles de cartera y efectivo requieren la cartera actual valuada en CSV."
                 )
             current_weights = parse_current_weights(
                 current_weights_input, len(analysis_tickers)
             )
-        elif holdings_control_contents or holdings_detail_contents or holdings_coverage_contents:
+        elif (holdings_control_contents or holdings_detail_contents
+              or holdings_coverage_contents or cash_bridge_contents):
             raise PortfolioError(
-                "Los controles de posiciones requieren la cartera actual valuada en CSV."
+                "Los controles de cartera y efectivo requieren la cartera actual valuada en CSV."
             )
         if tax_basis_contents:
             if holdings_result is None:
@@ -1043,6 +1082,18 @@ try:
                     f"{holdings_coverage_result.account_total:.2f} MXN desde "
                     f"{holdings_coverage_result.source}; "
                     f"SHA-256 {holdings_coverage_result.fingerprint[:12]}"
+                )
+            if cash_bridge_result is not None:
+                data_source += (
+                    f"; puente de efectivo liquidado {cash_bridge_result.start_date} a "
+                    f"{cash_bridge_result.end_date}: saldo inicial "
+                    f"{cash_bridge_result.opening_cash:.2f} MXN, movimientos netos "
+                    f"{cash_bridge_result.net_movements:.2f} MXN, saldo final "
+                    f"{cash_bridge_result.closing_cash:.2f} MXN, "
+                    f"{cash_bridge_result.movement_count} movimientos "
+                    f"({cash_bridge_result.other_movement_count} clasificados como otros) desde "
+                    f"{cash_bridge_result.source}; "
+                    f"SHA-256 {cash_bridge_result.fingerprint[:12]}"
                 )
         returns = calculate_returns(prices)
         mean_returns, covariance = annualized_moments(returns)
@@ -1364,6 +1415,19 @@ try:
                     "El efectivo y las demás partidas fuera del análisis no forman parte del capital "
                     "optimizado. Para modelar efectivo invertible, incorpóralo como un vehículo de "
                     "liquidez identificado y evita duplicarlo en este resumen."
+                )
+        if cash_bridge_result is not None:
+            st.success(
+                f"Efectivo liquidado conciliado del {cash_bridge_result.start_date} al "
+                f"{cash_bridge_result.end_date}: {cash_bridge_result.opening_cash:,.2f} MXN "
+                f"con movimientos netos de {cash_bridge_result.net_movements:,.2f} MXN = "
+                f"{cash_bridge_result.closing_cash:,.2f} MXN · "
+                f"SHA-256 {cash_bridge_result.fingerprint[:12]}."
+            )
+            if cash_bridge_result.other_movement_count:
+                st.warning(
+                    f"Hay {cash_bridge_result.other_movement_count} movimiento(s) en OTRA_ENTRADA "
+                    "u OTRA_SALIDA; revisa su clasificación contra el estado original."
                 )
         holdings_audit = pd.DataFrame({
             "Instrumento": holdings_result.values.index,

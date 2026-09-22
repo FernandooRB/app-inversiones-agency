@@ -25,7 +25,8 @@ documenta ambas huellas y rechaza licencias pendientes, vencidas o sin permiso d
 La [conciliación de cartera actual](docs/current_holdings_import.md) transforma una valuación anónima
 en MXN a pesos ordenados, capital y un archivo de auditoría; controles opcionales cotejan fecha,
 valores por instrumento, subtotal analizado, efectivo y otras partidas del total de cuenta, sin
-persistir los CSV ni sumar componentes externos al capital optimizado.
+persistir los CSV ni sumar componentes externos al capital optimizado. Un puente opcional coteja
+movimientos de efectivo liquidado con el efectivo declarado, sin validar operaciones de títulos.
 La [revisión heurística de precios](docs/price_quality.md) identifica saltos de al menos
 30 % y tramos sin variación en las series originales; deja alertas en la app, un CSV
 descargable y ambos PDF para que el equipo compruebe la fuente.

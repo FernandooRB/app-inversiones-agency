@@ -60,7 +60,7 @@ class HoldingsCoverageControl:
         return self.outside_cash + self.pending_settlement + self.other_outside
 
 
-def _parse_money(value: str, field: str, *, signed: bool = False) -> Decimal:
+def parse_control_money(value: str, field: str, *, signed: bool = False) -> Decimal:
     raw = value.strip()
     pattern = SIGNED_MONEY_PATTERN if signed else MONEY_PATTERN
     if not pattern.fullmatch(raw):
@@ -100,13 +100,13 @@ def read_holdings_coverage_csv(
         raise PortfolioError("FechaCorte del resumen debe usar una fecha YYYY-MM-DD válida.") from exc
     if as_of != holdings.as_of.date():
         raise PortfolioError("La fecha del resumen de cobertura no coincide con la cartera actual.")
-    analyzed = _parse_money(row["ValorCarteraAnalizadaMXN"], "ValorCarteraAnalizadaMXN")
-    cash = _parse_money(row["EfectivoFueraAnalisisMXN"], "EfectivoFueraAnalisisMXN")
-    pending = _parse_money(
+    analyzed = parse_control_money(row["ValorCarteraAnalizadaMXN"], "ValorCarteraAnalizadaMXN")
+    cash = parse_control_money(row["EfectivoFueraAnalisisMXN"], "EfectivoFueraAnalisisMXN")
+    pending = parse_control_money(
         row["PendienteLiquidacionMXN"], "PendienteLiquidacionMXN", signed=True
     )
-    other = _parse_money(row["OtrosFueraAnalisisMXN"], "OtrosFueraAnalisisMXN", signed=True)
-    account_total = _parse_money(row["TotalCuentaMXN"], "TotalCuentaMXN")
+    other = parse_control_money(row["OtrosFueraAnalisisMXN"], "OtrosFueraAnalisisMXN", signed=True)
+    account_total = parse_control_money(row["TotalCuentaMXN"], "TotalCuentaMXN")
     if account_total <= 0:
         raise PortfolioError("TotalCuentaMXN debe ser positivo.")
     try:
