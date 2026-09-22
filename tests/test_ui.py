@@ -380,6 +380,9 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
         "Cartera actual valuada en MXN CSV (opcional)": BytesIO(
             holdings.to_csv(index=False).encode("utf-8-sig")
         ),
+        "Total del estado de cuenta CSV (opcional; requiere cartera actual)": BytesIO((
+            f"FechaCorte,TotalMXN,Fuente\n{cutoff},100000.00,Estado de cuenta ficticio\n"
+        ).encode("utf-8-sig")),
         "Bases fiscales actualizadas CSV (opcional; requiere cartera actual)": BytesIO(
             tax_basis.to_csv(index=False).encode("utf-8-sig")
         ),
@@ -424,6 +427,7 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
     assert any("Impuesto extranjero retenido" in frame.value.columns for frame in app.dataframe)
     assert any("SIN_ALERTAS_AUTOMATICAS" in item.value for item in app.info)
     assert any("ISIN" in frame.value.columns for frame in app.dataframe)
+    assert any("Total y fecha conciliados" in item.value for item in app.success)
 
 
 def test_current_holdings_csv_cannot_be_combined_with_manual_weights(monkeypatch):

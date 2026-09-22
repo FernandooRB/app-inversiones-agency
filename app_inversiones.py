@@ -28,6 +28,7 @@ from fixed_income import (
 from funds import merge_fund_index, read_fund_total_return_csv
 from fx_comparison import render_comparison
 from holdings import read_current_holdings_csv
+from holdings_control import read_holdings_control_csv
 from implementation_costs import (
     ImplementationCostAssumptions,
     estimate_implementation_cost,
@@ -251,6 +252,19 @@ with st.sidebar:
     holdings_source_input = st.text_input(
         "Fuente declarada de la cartera actual",
         help="Estado de cuenta o exportación utilizada; máximo 120 caracteres.",
+    )
+    holdings_control_upload = st.file_uploader(
+        "Total del estado de cuenta CSV (opcional; requiere cartera actual)",
+        type=["csv"],
+        help=(
+            "Una fila con fecha de corte, total MXN y fuente, copiada por separado del estado de "
+            "cuenta. Sin nombres, cuentas ni identificadores. Comprueba suma y fecha, no autenticidad."
+        ),
+    )
+    st.download_button(
+        "Descargar plantilla de control de total CSV",
+        b"FechaCorte,TotalMXN,Fuente\n2026-01-15,100000.00,Estado de cuenta de ejemplo\n",
+        "plantilla_control_total_mxn.csv", "text/csv",
     )
     st.download_button(
         "Descargar plantilla de cartera actual CSV",
@@ -590,6 +604,12 @@ reference_identity_fingerprint = (
 )
 holdings_contents = holdings_upload.getvalue() if holdings_upload is not None else b""
 holdings_fingerprint = sha256(holdings_contents).hexdigest() if holdings_contents else None
+holdings_control_contents = (
+    holdings_control_upload.getvalue() if holdings_control_upload is not None else b""
+)
+holdings_control_fingerprint = (
+    sha256(holdings_control_contents).hexdigest() if holdings_control_contents else None
+)
 tax_basis_contents = tax_basis_upload.getvalue() if tax_basis_upload is not None else b""
 tax_basis_fingerprint = sha256(tax_basis_contents).hexdigest() if tax_basis_contents else None
 tax_flows_contents = tax_flows_upload.getvalue() if tax_flows_upload is not None else b""
@@ -623,6 +643,7 @@ settings = (
     base_currency,
     current_weights_input,
     holdings_fingerprint,
+    holdings_control_fingerprint,
     holdings_source_input,
     tax_basis_fingerprint,
     tax_flows_fingerprint,
@@ -809,6 +830,7 @@ try:
             prices = merge_fund_index(prices, prepared_fund_index)
         analysis_tickers = tuple(str(column) for column in prices.columns)
         holdings_result = None
+        holdings_control_result = None
         tax_basis_profile = None
         tax_cash_flow_ledger = None
         current_weights = None
@@ -828,12 +850,20 @@ try:
             holdings_result = read_current_holdings_csv(
                 holdings_contents, analysis_tickers
             )
+            if holdings_control_contents:
+                holdings_control_result = read_holdings_control_csv(
+                    holdings_control_contents, holdings_result
+                )
             current_weights = holdings_result.weights.to_numpy(dtype=float)
             portfolio_value = holdings_result.total_value
         elif current_weights_input.strip():
+            if holdings_control_contents:
+                raise PortfolioError("El control de total requiere la cartera actual valuada en CSV.")
             current_weights = parse_current_weights(
                 current_weights_input, len(analysis_tickers)
             )
+        elif holdings_control_contents:
+            raise PortfolioError("El control de total requiere la cartera actual valuada en CSV.")
         if tax_basis_contents:
             if holdings_result is None:
                 raise PortfolioError(
@@ -923,6 +953,13 @@ try:
                 f"; cartera actual al {holdings_result.as_of.date()} desde {holdings_source}; "
                 f"SHA-256 {holdings_fingerprint[:12]}"
             )
+            if holdings_control_result is not None:
+                data_source += (
+                    "; total del estado de cuenta conciliado "
+                    f"{holdings_control_result.statement_total:.2f} MXN desde "
+                    f"{holdings_control_result.source}; "
+                    f"SHA-256 {holdings_control_result.fingerprint[:12]}"
+                )
         returns = calculate_returns(prices)
         mean_returns, covariance = annualized_moments(returns)
         max_sharpe = optimize_portfolio(
@@ -1215,6 +1252,14 @@ try:
             f"Fuente declarada: {holdings_source} · SHA-256 {holdings_fingerprint[:12]}. "
             "El total cargado sustituye el valor manual durante este análisis; el archivo no se persiste."
         )
+        if holdings_control_result is not None:
+            st.success(
+                f"Total y fecha conciliados con el control declarado: "
+                f"{holdings_control_result.statement_total:,.2f} MXN al "
+                f"{holdings_control_result.as_of.isoformat()} · "
+                f"SHA-256 {holdings_control_result.fingerprint[:12]}. "
+                "Esto no verifica la autenticidad ni la cobertura del estado de cuenta."
+            )
         holdings_audit = pd.DataFrame({
             "Instrumento": holdings_result.values.index,
             "ValorMXN": holdings_result.values.to_numpy(),

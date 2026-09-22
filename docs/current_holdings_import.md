@@ -28,5 +28,19 @@ restricción a tres columnas reduce la posibilidad de importar esos datos por er
 debe revisar el archivo antes de cargarlo. La conciliación comprueba estructura y aritmética; no
 demuestra que la valuación sea oficial, completa, fiscal o ejecutable, ni comprueba derechos de uso.
 
+Para cotejar el total con el estado de cuenta, se puede cargar un segundo CSV de **una fila**:
+
+```csv
+FechaCorte,TotalMXN,Fuente
+2026-01-15,100000.00,Estado de cuenta de ejemplo
+```
+
+La fecha debe coincidir con la cartera importada y `TotalMXN` debe ser positivo, sin separadores de
+miles y con máximo dos decimales. El sistema redondea la suma de posiciones al centavo y exige igualdad
+con el total declarado. El archivo ocupa menos de 100 KB, se procesa en memoria y su huella SHA-256
+queda en la descripción de fuente del PDF. Un control correcto sólo demuestra que fecha y suma
+coinciden con el dato transcrito; el equipo debe comprobar el estado de cuenta, su cobertura de
+efectivo y movimientos y cualquier diferencia antes de usarlo para un caso real.
+
 Cuando se requiere revisar el efecto de ventas, un [archivo fiscal separado](tax_reserve.md) aporta
 el costo fiscal actualizado sin ampliar este CSV ni mezclarlo con identificadores del cliente.
