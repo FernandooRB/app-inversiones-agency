@@ -28,7 +28,7 @@ from fixed_income import (
 from funds import merge_fund_index, read_fund_total_return_csv
 from fx_comparison import render_comparison
 from holdings import read_current_holdings_csv
-from holdings_control import read_holdings_control_csv
+from holdings_control import compare_holdings_detail_csv, read_holdings_control_csv
 from implementation_costs import (
     ImplementationCostAssumptions,
     estimate_implementation_cost,
@@ -252,6 +252,18 @@ with st.sidebar:
     holdings_source_input = st.text_input(
         "Fuente declarada de la cartera actual",
         help="Estado de cuenta o exportación utilizada; máximo 120 caracteres.",
+    )
+    holdings_detail_upload = st.file_uploader(
+        "Detalle del estado de cuenta CSV para contraste (opcional)", type=["csv"],
+        help=(
+            "Misma plantilla de tres columnas que la cartera actual, preparada por separado "
+            "desde el estado de cuenta. Debe incluir cada instrumento, incluso los de valor cero. "
+            "Sin datos personales."
+        ),
+    )
+    holdings_detail_source_input = st.text_input(
+        "Fuente del detalle de referencia",
+        help="Documento y fecha de consulta, sin nombre ni cuenta del cliente; máximo 120 caracteres.",
     )
     holdings_control_upload = st.file_uploader(
         "Total del estado de cuenta CSV (opcional; requiere cartera actual)",
@@ -604,6 +616,12 @@ reference_identity_fingerprint = (
 )
 holdings_contents = holdings_upload.getvalue() if holdings_upload is not None else b""
 holdings_fingerprint = sha256(holdings_contents).hexdigest() if holdings_contents else None
+holdings_detail_contents = (
+    holdings_detail_upload.getvalue() if holdings_detail_upload is not None else b""
+)
+holdings_detail_fingerprint = (
+    sha256(holdings_detail_contents).hexdigest() if holdings_detail_contents else None
+)
 holdings_control_contents = (
     holdings_control_upload.getvalue() if holdings_control_upload is not None else b""
 )
@@ -643,6 +661,8 @@ settings = (
     base_currency,
     current_weights_input,
     holdings_fingerprint,
+    holdings_detail_fingerprint,
+    holdings_detail_source_input,
     holdings_control_fingerprint,
     holdings_source_input,
     tax_basis_fingerprint,
@@ -830,6 +850,8 @@ try:
             prices = merge_fund_index(prices, prepared_fund_index)
         analysis_tickers = tuple(str(column) for column in prices.columns)
         holdings_result = None
+        holdings_detail_result = None
+        holdings_detail_source = None
         holdings_control_result = None
         tax_basis_profile = None
         tax_cash_flow_ledger = None
@@ -850,6 +872,19 @@ try:
             holdings_result = read_current_holdings_csv(
                 holdings_contents, analysis_tickers
             )
+            if holdings_detail_contents:
+                holdings_detail_source = holdings_detail_source_input.strip()
+                if (
+                    not holdings_detail_source or len(holdings_detail_source) > 120
+                    or holdings_detail_source[0] in "=+-@"
+                    or any(ord(char) < 32 for char in holdings_detail_source)
+                ):
+                    raise PortfolioError(
+                        "Declara una fuente válida del detalle de referencia, sin fórmulas."
+                    )
+                holdings_detail_result = compare_holdings_detail_csv(
+                    holdings_detail_contents, holdings_result, holdings_contents
+                )
             if holdings_control_contents:
                 holdings_control_result = read_holdings_control_csv(
                     holdings_control_contents, holdings_result
@@ -857,13 +892,17 @@ try:
             current_weights = holdings_result.weights.to_numpy(dtype=float)
             portfolio_value = holdings_result.total_value
         elif current_weights_input.strip():
-            if holdings_control_contents:
-                raise PortfolioError("El control de total requiere la cartera actual valuada en CSV.")
+            if holdings_control_contents or holdings_detail_contents:
+                raise PortfolioError(
+                    "Los controles de posiciones requieren la cartera actual valuada en CSV."
+                )
             current_weights = parse_current_weights(
                 current_weights_input, len(analysis_tickers)
             )
-        elif holdings_control_contents:
-            raise PortfolioError("El control de total requiere la cartera actual valuada en CSV.")
+        elif holdings_control_contents or holdings_detail_contents:
+            raise PortfolioError(
+                "Los controles de posiciones requieren la cartera actual valuada en CSV."
+            )
         if tax_basis_contents:
             if holdings_result is None:
                 raise PortfolioError(
@@ -950,6 +989,11 @@ try:
                 f"; cartera actual al {holdings_result.as_of.date()} desde {holdings_source}; "
                 f"SHA-256 {holdings_fingerprint[:12]}"
             )
+            if holdings_detail_result is not None:
+                data_source += (
+                    f"; detalle por instrumento cotejado desde {holdings_detail_source}; "
+                    f"SHA-256 {holdings_detail_result.fingerprint[:12]}"
+                )
             if holdings_control_result is not None:
                 data_source += (
                     "; total del estado de cuenta conciliado "
@@ -1249,6 +1293,13 @@ try:
             f"Fuente declarada: {holdings_source} · SHA-256 {holdings_fingerprint[:12]}. "
             "El total cargado sustituye el valor manual durante este análisis; el archivo no se persiste."
         )
+        if holdings_detail_result is not None:
+            st.success(
+                f"Fecha y {holdings_detail_result.asset_count} importes por instrumento "
+                f"coinciden al centavo con el detalle declarado · "
+                f"SHA-256 {holdings_detail_result.fingerprint[:12]}. "
+                "Verifica el documento original y sus movimientos antes de usar datos reales."
+            )
         if holdings_control_result is not None:
             st.success(
                 f"Total y fecha conciliados con el control declarado: "

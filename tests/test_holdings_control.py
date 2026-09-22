@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from holdings import read_current_holdings_csv
-from holdings_control import read_holdings_control_csv
+from holdings_control import compare_holdings_detail_csv, read_holdings_control_csv
 from portfolio_core import PortfolioError
 
 
@@ -22,6 +22,45 @@ def control(total="100000.00", *, cutoff=None, source="Estado de cuenta ficticio
     return (
         f"FechaCorte,TotalMXN,Fuente\n{cutoff},{total},{source}\n"
     ).encode("utf-8-sig")
+
+
+def primary_detail():
+    cutoff = date.today().isoformat()
+    return (
+        f"FechaCorte,Instrumento,ValorMXN\n{cutoff},AAA,60000.001\n"
+        f"{cutoff},BBB,39999.999\n"
+    ).encode()
+
+
+def statement_detail(first="39999.999", second="60000.001", *, cutoff=None):
+    cutoff = cutoff or date.today().isoformat()
+    return (
+        f"FechaCorte,Instrumento,ValorMXN\n{cutoff},BBB,{first}\n"
+        f"{cutoff},AAA,{second}\n"
+    ).encode("utf-8-sig")
+
+
+def test_reconciles_each_instrument_from_separately_prepared_detail():
+    result = compare_holdings_detail_csv(statement_detail(), holdings(), primary_detail())
+    assert result.as_of == date.today()
+    assert result.asset_count == 2
+    assert len(result.fingerprint) == 64
+
+
+def test_rejects_offsetting_instrument_errors_even_when_total_matches():
+    with pytest.raises(PortfolioError, match="AAA, BBB|BBB, AAA"):
+        compare_holdings_detail_csv(
+            statement_detail("49999.999", "50000.001"), holdings(), primary_detail()
+        )
+
+
+def test_rejects_identical_file_as_reference_and_wrong_cutoff():
+    with pytest.raises(PortfolioError, match="idéntico"):
+        compare_holdings_detail_csv(primary_detail(), holdings(), primary_detail())
+    with pytest.raises(PortfolioError, match="fecha.*no coincide"):
+        compare_holdings_detail_csv(
+            statement_detail(cutoff="2020-01-01"), holdings(), primary_detail()
+        )
 
 
 def test_reconciles_statement_total_at_cent_precision_and_keeps_fingerprint():

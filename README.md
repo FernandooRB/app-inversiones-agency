@@ -23,8 +23,8 @@ La [importación manual de precios ajustados](docs/price_upload.md) acepta un CS
 aportado por el equipo junto con un [manifiesto de derechos](docs/data_sources.md) fechado;
 documenta ambas huellas y rechaza licencias pendientes, vencidas o sin permiso declarado.
 La [conciliación de cartera actual](docs/current_holdings_import.md) transforma una valuación anónima
-en MXN a pesos ordenados, capital y un archivo de auditoría; un control opcional coteja fecha y total
-declarados del estado de cuenta, sin persistir los CSV.
+en MXN a pesos ordenados, capital y un archivo de auditoría; controles opcionales cotejan fecha, total
+y valores por instrumento declarados del estado de cuenta, sin persistir los CSV.
 La [revisión heurística de precios](docs/price_quality.md) identifica saltos de al menos
 30 % y tramos sin variación en las series originales; deja alertas en la app, un CSV
 descargable y ambos PDF para que el equipo compruebe la fuente.
