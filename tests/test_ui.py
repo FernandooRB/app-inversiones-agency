@@ -393,6 +393,13 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
             f"{cutoff},100000.00,5000.00,-1000.00,250.00,104250.00,"
             "Estado de cuenta ficticio\n"
         ).encode("utf-8-sig")),
+        "Movimientos de efectivo liquidado CSV (opcional; requiere cobertura)": BytesIO((
+            "Fecha,Tipo,ImporteMXN\n"
+            f"{cutoff},SALDO_INICIAL,4000.00\n"
+            f"{cutoff},DEPOSITO,1500.00\n"
+            f"{cutoff},COMISION_IMPUESTO,500.00\n"
+            f"{cutoff},SALDO_FINAL,5000.00\n"
+        ).encode("utf-8-sig")),
         "Bases fiscales actualizadas CSV (opcional; requiere cartera actual)": BytesIO(
             tax_basis.to_csv(index=False).encode("utf-8-sig")
         ),
@@ -422,6 +429,9 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
     next(
         item for item in app.text_input if item.label == "Fuente del detalle de referencia"
     ).set_value("Transcripción ficticia del estado de cuenta")
+    next(
+        item for item in app.text_input if item.label == "Fuente de los movimientos de efectivo"
+    ).set_value("Movimientos ficticios del estado de cuenta")
     app.run()
     app.button[0].click().run()
     assert not app.exception
@@ -443,6 +453,7 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
     assert any("Subtotal y fecha conciliados" in item.value for item in app.success)
     assert any("importes por instrumento" in item.value for item in app.success)
     assert any("Cobertura aritmética conciliada" in item.value for item in app.success)
+    assert any("Efectivo liquidado conciliado" in item.value for item in app.success)
     assert any("no forman parte del capital optimizado" in item.value for item in app.warning)
 
 

@@ -56,6 +56,35 @@ externas se muestran y documentan, pero no se convierten silenciosamente en un a
 modelar efectivo invertible, debe incorporarse como un vehículo de liquidez identificado y no volver a
 incluirse como efectivo externo.
 
+El **puente opcional de efectivo liquidado** requiere el resumen de cobertura anterior y un CSV de
+movimientos sin identificadores personales:
+
+```csv
+Fecha,Tipo,ImporteMXN
+2026-01-01,SALDO_INICIAL,4000.00
+2026-01-10,DEPOSITO,1500.00
+2026-01-15,COMISION_IMPUESTO,500.00
+2026-01-15,SALDO_FINAL,5000.00
+```
+
+La primera fila representa el saldo antes de los movimientos incluidos, incluso si tienen la misma
+fecha. La última debe tener la fecha de corte y el importe de `EfectivoFueraAnalisisMXN` del resumen.
+Las fechas van en orden y los importes de movimientos son positivos; el tipo determina si entran o
+salen. Se aceptan `DEPOSITO`, `RETIRO`, `COMPRA_LIQUIDADA`, `VENTA_LIQUIDADA`,
+`DIVIDENDO_INTERES`, `COMISION_IMPUESTO`, `OTRA_ENTRADA` y `OTRA_SALIDA`. Las dos últimas
+categorías requieren revisión de clasificación. Las compras y ventas se registran cuando afectan el
+efectivo **liquidado**, no por su fecha de operación si aún están pendientes. El archivo admite 2 a
+1000 filas y menos de 100 KB; se procesa en memoria. La fuente declarada y la huella SHA-256 quedan
+en el PDF.
+Cada efecto de caja debe registrarse una sola vez: si una venta o un dividendo ya aparece neto de
+comisiones o retenciones en el saldo del intermediario, no se vuelve a cargar la misma deducción
+como `COMISION_IMPUESTO`.
+
+Este puente comprueba `saldo inicial + entradas - salidas = saldo final` y lo coteja con el efectivo
+de la cobertura. No prueba que se hayan incluido todas las operaciones ni reconcilia cantidades,
+precios o valores de los instrumentos. El equipo debe cotejar el periodo y cada movimiento con el
+estado original; no incluir nombres, referencias de cuenta ni números de operación en el CSV.
+
 También se puede cargar un **detalle de referencia** preparado por separado desde el estado de cuenta.
 Usa exactamente las mismas tres columnas que el primer CSV, con cada instrumento del análisis una vez.
 La app exige la misma fecha, el mismo universo y valores iguales por instrumento al centavo; rechaza
