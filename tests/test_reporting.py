@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from hashlib import sha256
 from io import BytesIO
@@ -17,6 +18,7 @@ from holdings_control import (
 )
 from implementation_costs import ImplementationCostAssumptions, estimate_implementation_cost
 from portfolio_core import PortfolioMetrics, RiskMetrics, optimize_portfolio
+from position_bridge import read_position_bridge_csv
 from price_quality import PriceQualityIssue
 from reporting import (
     HoldingsAuditReport,
@@ -66,9 +68,19 @@ def test_both_pdfs_show_structured_holdings_and_cash_audit():
         f"{cutoff},DEPOSITO,1000.00\n"
         f"{cutoff},SALDO_FINAL,5000.00\n"
     ).encode(), coverage, "Movimientos ficticios")
+    position_bridge = read_position_bridge_csv((
+        "Fecha,Instrumento,Unidad,Tipo,Cantidad\n"
+        "2020-01-01,AAA,TITULOS,SALDO_INICIAL,10\n"
+        "2020-01-01,BBB,TITULOS,SALDO_INICIAL,5\n"
+        f"{cutoff},AAA,TITULOS,COMPRA,2\n"
+    ).encode(), (
+        "FechaCorte,Instrumento,Unidad,CantidadFinal,ValorMXN\n"
+        f"{cutoff},BBB,TITULOS,5,40000.00\n"
+        f"{cutoff},AAA,TITULOS,12,60000.00\n"
+    ).encode(), holdings, "Operaciones ficticias", "Cierre ficticio")
     audit = HoldingsAuditReport(
         holdings, "Estado ficticio", sha256(holdings_csv).hexdigest(),
-        detail, "Detalle ficticio", subtotal, coverage, bridge,
+        detail, "Detalle ficticio", subtotal, coverage, bridge, position_bridge,
     )
     metrics = PortfolioMetrics(np.array([0.6, 0.4]), 0.10, 0.15, 0.40)
     risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
@@ -95,11 +107,23 @@ def test_both_pdfs_show_structured_holdings_and_cash_audit():
         assert "Puente de efectivo" in text
         assert "5,000.00" in text
         assert "Movimientos ficticios" in text
+        assert "Cantidades de títulos" in text
+        assert "Operaciones ficticias" in text
+        assert "Cierre ficticio" in text
+        assert "Puente de títulos" in text
         assert "no se suman al capital optimizado" in text
     with np.testing.assert_raises_regex(ValueError, "capital del reporte"):
         create_pdf_report(
             ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
             metrics, risk, 120_000, base_currency="MXN", holdings_audit=audit,
+        )
+    changed_line = replace(position_bridge.lines[0], closing_value=59_999)
+    bad_bridge = replace(position_bridge, lines=(changed_line, *position_bridge.lines[1:]))
+    with np.testing.assert_raises_regex(ValueError, "puente de títulos"):
+        create_pdf_report(
+            ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+            metrics, risk, 100_000, base_currency="MXN",
+            holdings_audit=replace(audit, position_bridge=bad_bridge),
         )
 
 
