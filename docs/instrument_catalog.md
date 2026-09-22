@@ -36,6 +36,8 @@ todos los costos ni que la serie esté disponible para un cliente determinado.
 ## Reglas operativas
 
 1. Confirmar símbolo, serie, ISIN, mercado y moneda con una fuente autorizada antes de analizar.
+   El [manifiesto de identidad](instrument_identity.md) detecta inconsistencias formales para los
+   tickers de precios, pero no sustituye esa confirmación externa.
 2. Registrar la fuente y fecha de corte utilizadas en cada expediente de investigación.
 3. No sustituir un instrumento sin datos con un índice o ETF sin marcarlo explícitamente como proxy.
 4. Validar derechos de uso comercial y distribución de datos antes de generar entregables para terceros.

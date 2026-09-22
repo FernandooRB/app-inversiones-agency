@@ -16,7 +16,7 @@ no equivale a aprobarlo.
 | Alcance legal y laboral | Revisión jurídica de contratos, reportes y recomendaciones previstas; definición de requisitos CNBV y respuesta del empleador sobre la actividad externa | Pendiente |
 | Privacidad y recepción | Finalidad y aviso de privacidad; acceso mínimo, canal cifrado, retención, borrado y respuesta a incidentes probados | Pendiente |
 | Derechos de mercado | Contrato vigente por producto, mercado y uso; permiso expreso para cálculo y entregables derivados, con revisión humana del manifiesto | Pendiente |
-| Identidad del instrumento | Clave/ISIN, mercado BMV o SIC, serie exacta, moneda y subunidad, horario, calendario, ajustes y eventos corporativos contrastados | Pendiente |
+| Identidad del instrumento | [Manifiesto](instrument_identity.md) de clave/ISIN, mercado BMV/BIVA o SIC, serie exacta, moneda y subunidad, horario, calendario, ajustes y eventos corporativos contrastados | Herramienta formal disponible; contraste externo pendiente |
 | Precios independientes | Comparación entre dos fuentes autorizadas en fechas y unidades equivalentes; documentar cada discrepancia material y los huecos | Herramienta disponible; evidencia real pendiente |
 | Deuda y fondos | CETES, Bonos M, liquidez y fondos conciliados por emisión/serie con precios, devengado, cupones, distribuciones y estados independientes | Pendiente |
 | Posiciones y operaciones | Total, fecha, universo, valuación, efectivo y movimientos conciliados contra estado del intermediario; sin datos personales en repositorio | Pendiente |

@@ -85,5 +85,6 @@
    validar fiscalidad de fondos, pérdidas y personas morales con especialista, así como mantener las
    reglas actualizadas por ejercicio.
 7. Ejecutar la [matriz de piloto con datos reales](real_data_pilot.md). El contraste independiente
-   de precios ya identifica discrepancias y cobertura, pero no existe evidencia contractual ni
+   de precios y el [manifiesto de identidad](instrument_identity.md) ya identifican discrepancias,
+   cobertura y proxys declarados, pero no existe evidencia contractual ni
    validación completa de instrumentos, posiciones, costos y modelos para clientes reales.

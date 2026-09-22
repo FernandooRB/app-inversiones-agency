@@ -29,6 +29,8 @@ La [revisión heurística de precios](docs/price_quality.md) identifica saltos d
 descargable y ambos PDF para que el equipo compruebe la fuente.
 El [contraste independiente](docs/real_data_pilot.md) compara dos archivos autorizados de precios
 ajustados, fechas comunes y diferencias por instrumento sin exportar los precios crudos.
+El [manifiesto de identidad](docs/instrument_identity.md) concilia tickers, ISIN, mercado y moneda
+de las series aportadas e identifica cuáles son proxys del mercado de origen.
 La [validación fuera de muestra](docs/backtesting.md) compara Markowitz, pesos iguales y una
 cartera actual opcional, tanto con asignación fija como con revisiones de 3, 6 o 12 meses
 y costos supuestos.
@@ -153,6 +155,7 @@ data_rights.py        Manifiesto estricto de fuente, vigencia, ajustes y alcance
 holdings.py           Conciliación estricta de la cartera actual valuada en MXN
 price_quality.py      Alertas heurísticas sobre precios originales
 price_source_validation.py Contraste independiente de dos archivos de precios
+instrument_identity.py Validación formal de ISIN, mercado y moneda de series
 implementation_costs.py Estimación explícita de compras, ventas y costos
 broker_tariffs.py    Importación estricta de un perfil contractual de costos
 tax_impact.py         Bases fiscales auditables y reserva ilustrativa sobre ventas
