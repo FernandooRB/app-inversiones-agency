@@ -20,6 +20,7 @@ from reporting import (
 from risk_attribution import attribute_volatility
 from simulation import simulate_portfolio_paths
 from stress import deterministic_shock, historical_worst_windows
+from tax_cash_flows import read_tax_cash_flows_csv
 from tax_impact import estimate_tax_reserve, read_tax_basis_csv
 
 
@@ -248,6 +249,42 @@ def test_both_pdfs_report_auditable_tax_reserve_without_calling_it_tax_due():
         assert "Reserva fiscal ilustrativa por ventas" in text
         assert profile.fingerprint[:12] in text
         assert "no el impuesto a pagar" in normalized
+
+
+def test_both_pdfs_keep_cash_flow_withholding_apart_from_additional_reserve():
+    metrics = PortfolioMetrics(np.array([0.2, 0.8]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    contents = (
+        b"FechaPago,Instrumento,TipoFlujo,ImporteBrutoMXN,ISRRetenidoMXN,"
+        b"ImpuestoExtranjeroRetenidoMXN,TratamientoFiscal,BaseRetencionMXN,"
+        b"DiasPeriodo,TasaControlPct,TasaReservaAdicionalPct,Fuente\n"
+        b"2026-09-01,AAA,DIVIDENDO_MEX,10000,1000,0,"
+        b"PF_DIVIDENDO_MEX_ART140,10000,,10,,Constancia ficticia\n"
+        b"2026-09-02,BBB,DIVIDENDO_EXTRANJERO_SIC,5000,0,750,"
+        b"ESCENARIO_TASA_ADICIONAL,,,,20,Constancia ficticia\n"
+    )
+    ledger = read_tax_cash_flows_csv(contents, ("AAA", "BBB"), date(2026, 9, 19))
+    basic = create_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        metrics, risk, 100_000, base_currency="MXN", tax_cash_flow_ledger=ledger,
+    )
+    comparison = create_comparison_pdf_report(
+        ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+        (PortfolioAlternative("Máximo Sharpe", metrics, risk),
+         PortfolioAlternative("Pesos iguales", metrics, risk)),
+        100_000, base_currency="MXN", risk_free_rate=0.05,
+        observations=252, quotes={"AAA": "MXN", "BBB": "MXN"},
+        tax_cash_flow_ledger=ledger,
+    )
+    for report in (basic, comparison):
+        text = " ".join(
+            (page.extract_text() or "") for page in PdfReader(BytesIO(report)).pages
+        )
+        assert "Flujos fiscales documentados" in text
+        assert ledger.fingerprint[:12] in text
+        assert "1,000.00" in text
+        assert "750.00" in text
+        assert "saldo a pagar" in text
 
 
 def test_both_pdfs_include_heuristic_price_review_with_original_quote_context():

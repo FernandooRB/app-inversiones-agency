@@ -18,6 +18,9 @@ El CSV contiene exactamente:
   queda documentada por la fuente. No convierte una tasa corporativa o marginal en impuesto definitivo.
 - `NO_ESTIMADO` deja la tasa vacía y conserva el nominal vendido como pendiente de clasificación.
 
+Los [flujos fiscales documentados](tax_cash_flows.md) tienen un archivo y resumen propios; no se
+combinan automáticamente con esta reserva de ventas.
+
 Para cada venta, el motor asigna el costo fiscal en proporción al valor actual vendido, resta la
 comisión de venta declarada del ingreso y separa ganancia y pérdida. La reserva aplica la tasa sólo a
 la ganancia positiva de cada instrumento. Esta aproximación no compensa pérdidas entre emisoras,

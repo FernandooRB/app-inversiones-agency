@@ -33,6 +33,7 @@ from price_quality import PriceQualityIssue
 from risk_attribution import RiskAttribution
 from simulation import SimulationResult
 from stress import ShockResult
+from tax_cash_flows import TaxCashFlowLedger
 from tax_impact import TaxBasisProfile, TaxReserveEstimate
 
 
@@ -497,6 +498,51 @@ def _tax_reserve_story(
     return [KeepTogether(section)]
 
 
+def _tax_cash_flow_story(ledger: TaxCashFlowLedger | None, currency: str, styles) -> list:
+    if ledger is None:
+        return []
+    amounts = np.array([
+        ledger.gross_income, ledger.domestic_withholding, ledger.foreign_withholding,
+        ledger.expected_control_withholding, ledger.additional_reserve,
+        ledger.unestimated_gross_income,
+    ])
+    if not np.isfinite(amounts).all() or (amounts < 0).any():
+        raise ValueError("El resumen de flujos fiscales contiene importes inválidos.")
+    rows = [["Tipo de flujo", "Bruto", "ISR retenido", "Exterior", "Reserva adicional"]]
+    for row in ledger.summary.itertuples(index=False, name=None):
+        rows.append([
+            Paragraph(escape(str(row[0])), styles["Normal"]),
+            *[f"{float(value):,.2f}" for value in row[1:]],
+        ])
+    table = Table(rows, colWidths=[53 * mm, 30 * mm, 33 * mm, 30 * mm, 35 * mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEBF1")),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C7D2DD")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
+    ]))
+    return [KeepTogether([
+        Paragraph("Flujos fiscales documentados", styles["Heading2"]),
+        Paragraph(
+            f"Ejercicio {ledger.fiscal_year}; corte {ledger.cutoff_date.date().isoformat()}; "
+            f"moneda: {escape(currency)}; CSV SHA-256 {ledger.fingerprint[:12]}. "
+            "Importes pagados, retenciones y reserva adicional declarada por separado.",
+            styles["Normal"],
+        ),
+        Spacer(1, 2 * mm), table, Spacer(1, 1 * mm),
+        Paragraph(
+            f"Control de retenciones calculado: {ledger.expected_control_withholding:,.2f}; "
+            f"flujos sin estimación: {ledger.unestimated_gross_income:,.2f}. "
+            "El control no sustituye la constancia. Los dividendos extranjeros y distribuciones "
+            "de fondos requieren clasificación; las retenciones extranjeras no se acreditan "
+            "automáticamente. No se suman aquí las reservas por venta, ni se calcula el ISR anual "
+            "o un saldo a pagar. Requiere revisión fiscal humana.",
+            styles["Normal"],
+        ),
+        Spacer(1, 3 * mm),
+    ])]
+
+
 def _price_quality_story(
     issues: tuple[PriceQualityIssue, ...], styles, *, compact: bool = False
 ) -> list:
@@ -632,6 +678,7 @@ def create_comparison_pdf_report(
     implementation_cost_source_date: date | None = None,
     tax_reserve_estimates: tuple[TaxReserveEstimate, ...] = (),
     tax_basis_profile: TaxBasisProfile | None = None,
+    tax_cash_flow_ledger: TaxCashFlowLedger | None = None,
     allocation_policy: pd.DataFrame | None = None,
     benchmark_analyses: tuple[BenchmarkAnalysis, ...] = (),
     benchmark_source: str | None = None,
@@ -797,6 +844,7 @@ def create_comparison_pdf_report(
     story.extend(_tax_reserve_story(
         tax_reserve_estimates, tax_basis_profile, base_currency, styles,
     ))
+    story.extend(_tax_cash_flow_story(tax_cash_flow_ledger, base_currency, styles))
     story.extend([
         Paragraph("Método y límites", styles["Heading2"]),
         Paragraph(
@@ -1054,6 +1102,7 @@ def create_pdf_report(
     implementation_cost_source_date: date | None = None,
     tax_reserve_estimates: tuple[TaxReserveEstimate, ...] = (),
     tax_basis_profile: TaxBasisProfile | None = None,
+    tax_cash_flow_ledger: TaxCashFlowLedger | None = None,
     allocation_policy: pd.DataFrame | None = None,
     benchmark_analyses: tuple[BenchmarkAnalysis, ...] = (),
     benchmark_source: str | None = None,
@@ -1195,6 +1244,7 @@ def create_pdf_report(
     story.extend(_tax_reserve_story(
         tax_reserve_estimates, tax_basis_profile, base_currency, styles,
     ))
+    story.extend(_tax_cash_flow_story(tax_cash_flow_ledger, base_currency, styles))
 
     def footer(canvas, doc):
         canvas.saveState()
