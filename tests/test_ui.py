@@ -384,8 +384,14 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
             f"FechaCorte,Instrumento,ValorMXN\n{cutoff},AAPL,70000\n"
             f"{cutoff},MSFT,30000\n"
         ).encode("utf-8-sig")),
-        "Total del estado de cuenta CSV (opcional; requiere cartera actual)": BytesIO((
+        "Subtotal de posiciones analizadas CSV (opcional; requiere cartera actual)": BytesIO((
             f"FechaCorte,TotalMXN,Fuente\n{cutoff},100000.00,Estado de cuenta ficticio\n"
+        ).encode("utf-8-sig")),
+        "Resumen de cobertura de la cuenta CSV (opcional; requiere cartera actual)": BytesIO((
+            "FechaCorte,ValorCarteraAnalizadaMXN,EfectivoFueraAnalisisMXN,"
+            "PendienteLiquidacionMXN,OtrosFueraAnalisisMXN,TotalCuentaMXN,Fuente\n"
+            f"{cutoff},100000.00,5000.00,-1000.00,250.00,104250.00,"
+            "Estado de cuenta ficticio\n"
         ).encode("utf-8-sig")),
         "Bases fiscales actualizadas CSV (opcional; requiere cartera actual)": BytesIO(
             tax_basis.to_csv(index=False).encode("utf-8-sig")
@@ -434,8 +440,10 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
     assert any("Impuesto extranjero retenido" in frame.value.columns for frame in app.dataframe)
     assert any("SIN_ALERTAS_AUTOMATICAS" in item.value for item in app.info)
     assert any("ISIN" in frame.value.columns for frame in app.dataframe)
-    assert any("Total y fecha conciliados" in item.value for item in app.success)
+    assert any("Subtotal y fecha conciliados" in item.value for item in app.success)
     assert any("importes por instrumento" in item.value for item in app.success)
+    assert any("Cobertura aritmética conciliada" in item.value for item in app.success)
+    assert any("no forman parte del capital optimizado" in item.value for item in app.warning)
 
 
 def test_current_holdings_csv_cannot_be_combined_with_manual_weights(monkeypatch):

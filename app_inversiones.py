@@ -28,7 +28,11 @@ from fixed_income import (
 from funds import merge_fund_index, read_fund_total_return_csv
 from fx_comparison import render_comparison
 from holdings import read_current_holdings_csv
-from holdings_control import compare_holdings_detail_csv, read_holdings_control_csv
+from holdings_control import (
+    compare_holdings_detail_csv,
+    read_holdings_control_csv,
+    read_holdings_coverage_csv,
+)
 from implementation_costs import (
     ImplementationCostAssumptions,
     estimate_implementation_cost,
@@ -266,17 +270,35 @@ with st.sidebar:
         help="Documento y fecha de consulta, sin nombre ni cuenta del cliente; máximo 120 caracteres.",
     )
     holdings_control_upload = st.file_uploader(
-        "Total del estado de cuenta CSV (opcional; requiere cartera actual)",
+        "Subtotal de posiciones analizadas CSV (opcional; requiere cartera actual)",
         type=["csv"],
         help=(
-            "Una fila con fecha de corte, total MXN y fuente, copiada por separado del estado de "
-            "cuenta. Sin nombres, cuentas ni identificadores. Comprueba suma y fecha, no autenticidad."
+            "Una fila con fecha de corte, subtotal MXN y fuente. Debe excluir efectivo y partidas "
+            "que no estén en el universo importado. Comprueba suma y fecha, no autenticidad."
         ),
     )
     st.download_button(
-        "Descargar plantilla de control de total CSV",
+        "Descargar plantilla de subtotal analizado CSV",
         b"FechaCorte,TotalMXN,Fuente\n2026-01-15,100000.00,Estado de cuenta de ejemplo\n",
-        "plantilla_control_total_mxn.csv", "text/csv",
+        "plantilla_subtotal_posiciones_mxn.csv", "text/csv",
+    )
+    holdings_coverage_upload = st.file_uploader(
+        "Resumen de cobertura de la cuenta CSV (opcional; requiere cartera actual)",
+        type=["csv"],
+        help=(
+            "Concilia la cartera analizada con efectivo fuera del análisis, liquidaciones "
+            "pendientes, otras partidas y el total de la cuenta. No cambia el capital optimizado."
+        ),
+    )
+    st.download_button(
+        "Descargar plantilla de cobertura de cuenta CSV",
+        (
+            b"FechaCorte,ValorCarteraAnalizadaMXN,EfectivoFueraAnalisisMXN,"
+            b"PendienteLiquidacionMXN,OtrosFueraAnalisisMXN,TotalCuentaMXN,Fuente\n"
+            b"2026-01-15,100000.00,5000.00,0.00,0.00,105000.00,"
+            b"Estado de cuenta de ejemplo\n"
+        ),
+        "plantilla_cobertura_cuenta_mxn.csv", "text/csv",
     )
     st.download_button(
         "Descargar plantilla de cartera actual CSV",
@@ -628,6 +650,12 @@ holdings_control_contents = (
 holdings_control_fingerprint = (
     sha256(holdings_control_contents).hexdigest() if holdings_control_contents else None
 )
+holdings_coverage_contents = (
+    holdings_coverage_upload.getvalue() if holdings_coverage_upload is not None else b""
+)
+holdings_coverage_fingerprint = (
+    sha256(holdings_coverage_contents).hexdigest() if holdings_coverage_contents else None
+)
 tax_basis_contents = tax_basis_upload.getvalue() if tax_basis_upload is not None else b""
 tax_basis_fingerprint = sha256(tax_basis_contents).hexdigest() if tax_basis_contents else None
 tax_flows_contents = tax_flows_upload.getvalue() if tax_flows_upload is not None else b""
@@ -664,6 +692,7 @@ settings = (
     holdings_detail_fingerprint,
     holdings_detail_source_input,
     holdings_control_fingerprint,
+    holdings_coverage_fingerprint,
     holdings_source_input,
     tax_basis_fingerprint,
     tax_flows_fingerprint,
@@ -853,6 +882,7 @@ try:
         holdings_detail_result = None
         holdings_detail_source = None
         holdings_control_result = None
+        holdings_coverage_result = None
         tax_basis_profile = None
         tax_cash_flow_ledger = None
         current_weights = None
@@ -889,17 +919,21 @@ try:
                 holdings_control_result = read_holdings_control_csv(
                     holdings_control_contents, holdings_result
                 )
+            if holdings_coverage_contents:
+                holdings_coverage_result = read_holdings_coverage_csv(
+                    holdings_coverage_contents, holdings_result
+                )
             current_weights = holdings_result.weights.to_numpy(dtype=float)
             portfolio_value = holdings_result.total_value
         elif current_weights_input.strip():
-            if holdings_control_contents or holdings_detail_contents:
+            if holdings_control_contents or holdings_detail_contents or holdings_coverage_contents:
                 raise PortfolioError(
                     "Los controles de posiciones requieren la cartera actual valuada en CSV."
                 )
             current_weights = parse_current_weights(
                 current_weights_input, len(analysis_tickers)
             )
-        elif holdings_control_contents or holdings_detail_contents:
+        elif holdings_control_contents or holdings_detail_contents or holdings_coverage_contents:
             raise PortfolioError(
                 "Los controles de posiciones requieren la cartera actual valuada en CSV."
             )
@@ -996,10 +1030,19 @@ try:
                 )
             if holdings_control_result is not None:
                 data_source += (
-                    "; total del estado de cuenta conciliado "
+                    "; subtotal de posiciones analizadas conciliado "
                     f"{holdings_control_result.statement_total:.2f} MXN desde "
                     f"{holdings_control_result.source}; "
                     f"SHA-256 {holdings_control_result.fingerprint[:12]}"
+                )
+            if holdings_coverage_result is not None:
+                data_source += (
+                    f"; cobertura de cuenta: cartera analizada "
+                    f"{holdings_coverage_result.analyzed_value:.2f} MXN, componentes externos "
+                    f"{holdings_coverage_result.outside_analysis_total:.2f} MXN y total de cuenta "
+                    f"{holdings_coverage_result.account_total:.2f} MXN desde "
+                    f"{holdings_coverage_result.source}; "
+                    f"SHA-256 {holdings_coverage_result.fingerprint[:12]}"
                 )
         returns = calculate_returns(prices)
         mean_returns, covariance = annualized_moments(returns)
@@ -1302,12 +1345,26 @@ try:
             )
         if holdings_control_result is not None:
             st.success(
-                f"Total y fecha conciliados con el control declarado: "
+                f"Subtotal y fecha conciliados con el control declarado: "
                 f"{holdings_control_result.statement_total:,.2f} MXN al "
                 f"{holdings_control_result.as_of.isoformat()} · "
                 f"SHA-256 {holdings_control_result.fingerprint[:12]}. "
-                "Esto no verifica la autenticidad ni la cobertura del estado de cuenta."
+                "Esto no verifica la autenticidad ni la cobertura total de la cuenta."
             )
+        if holdings_coverage_result is not None:
+            st.success(
+                f"Cobertura aritmética conciliada: cartera analizada "
+                f"{holdings_coverage_result.analyzed_value:,.2f} MXN + componentes externos "
+                f"{holdings_coverage_result.outside_analysis_total:,.2f} MXN = total de cuenta "
+                f"{holdings_coverage_result.account_total:,.2f} MXN · "
+                f"SHA-256 {holdings_coverage_result.fingerprint[:12]}."
+            )
+            if holdings_coverage_result.outside_analysis_total != 0:
+                st.warning(
+                    "El efectivo y las demás partidas fuera del análisis no forman parte del capital "
+                    "optimizado. Para modelar efectivo invertible, incorpóralo como un vehículo de "
+                    "liquidez identificado y evita duplicarlo en este resumen."
+                )
         holdings_audit = pd.DataFrame({
             "Instrumento": holdings_result.values.index,
             "ValorMXN": holdings_result.values.to_numpy(),
