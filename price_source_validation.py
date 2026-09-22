@@ -38,6 +38,27 @@ class PriceSourceComparison:
     def status(self) -> str:
         return "REVISAR" if self.review_reasons else "SIN_ALERTAS_AUTOMATICAS"
 
+    @property
+    def audit_note(self) -> str:
+        """Compact PDF provenance; thresholds and files remain identifiable."""
+        note = (
+            f"contraste {self.primary_source} / {self.reference_source}: {self.status}; "
+            f"{self.common_sessions} fechas comunes, cobertura {self.coverage_ratio:.1%}, "
+            f"umbral {self.tolerance:.2%}; "
+            f"referencia datos SHA-256 {self.reference_fingerprint[:12]}, "
+            f"derechos SHA-256 {self.reference_rights_fingerprint[:12]}"
+        )
+        if self.identity_fingerprints is None:
+            note += "; identidad entre fuentes no contrastada"
+        else:
+            note += (
+                f"; identidad principal/referencia SHA-256 "
+                f"{self.identity_fingerprints[0][:12]}/{self.identity_fingerprints[1][:12]}"
+            )
+        if self.review_reasons:
+            note += "; alertas: " + " | ".join(self.review_reasons)
+        return note
+
 
 def compare_price_sources(
     primary_csv: bytes,

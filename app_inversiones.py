@@ -918,11 +918,8 @@ try:
                 f"; identidad de instrumentos CSV SHA-256 {identity_profile.fingerprint[:12]}; "
                 f"series proxy de origen {', '.join(identity_profile.proxy_assets) or 'ninguna'}"
             )
-        if price_source_comparison is not None and price_source_comparison.identity_fingerprints:
-            data_source += (
-                "; identidad de referencia CSV SHA-256 "
-                f"{price_source_comparison.identity_fingerprints[1][:12]}"
-            )
+        if price_source_comparison is not None:
+            data_source += "; " + price_source_comparison.audit_note
         if cetes_result is not None:
             data_source += (
                 f"; {cetes_name}: CSV aportado por el usuario y preparado desde precio/plazo, "
