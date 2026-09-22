@@ -354,6 +354,14 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
         "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
             prices.to_csv(index=False).encode("utf-8-sig")
         ),
+        "Identidad y mercado de instrumentos CSV (opcional)": BytesIO((
+            "Instrumento,ISIN,MercadoNegociacion,SimboloNegociacion,MercadoSerie,"
+            "MonedaSerie,TipoSerie,FechaVerificacion,Fuente\n"
+            f"AAPL,US0378331005,SIC,AAPL,SIC,MXN,CIERRE_LOCAL_AJUSTADO,{cutoff},"
+            "Ficha ficticia\n"
+            f"MSFT,US5949181045,SIC,MSFT,SIC,MXN,CIERRE_LOCAL_AJUSTADO,{cutoff},"
+            "Ficha ficticia\n"
+        ).encode("utf-8-sig")),
         "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)": rights_manifest(),
         "Precios ajustados de referencia CSV (opcional)": BytesIO(
             prices.to_csv(index=False).encode("utf-8-sig")
@@ -407,6 +415,7 @@ def test_current_holdings_csv_sets_weights_and_capital_without_persisting_client
     assert any("Reserva fiscal estimada" in frame.value.columns for frame in app.dataframe)
     assert any("Impuesto extranjero retenido" in frame.value.columns for frame in app.dataframe)
     assert any("SIN_ALERTAS_AUTOMATICAS" in item.value for item in app.info)
+    assert any("ISIN" in frame.value.columns for frame in app.dataframe)
 
 
 def test_current_holdings_csv_cannot_be_combined_with_manual_weights(monkeypatch):

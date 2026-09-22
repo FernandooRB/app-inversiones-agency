@@ -32,6 +32,7 @@ from implementation_costs import (
     ImplementationCostAssumptions,
     estimate_implementation_cost,
 )
+from instrument_identity import read_instrument_identity_csv
 from instruments import analysis_inputs, display_catalog, load_catalog
 from liquidity import merge_liquidity_index, read_liquidity_rate_csv
 from multi_cut import run_multi_cut_backtest
@@ -392,6 +393,26 @@ with st.sidebar:
             "de uso con la fuente antes de interpretar o distribuir resultados."
         ),
     )
+    identity_upload = st.file_uploader(
+        "Identidad y mercado de instrumentos CSV (opcional)", type=["csv"],
+        help=(
+            "Una fila por ticker del CSV de precios. Declara ISIN, mercado negociable, mercado "
+            "y moneda de la serie; identifica expresamente cualquier proxy de origen. "
+            "No incluyas datos personales."
+        ),
+    )
+    st.download_button(
+        "Descargar plantilla de identidad de instrumentos CSV",
+        (
+            b"Instrumento,ISIN,MercadoNegociacion,SimboloNegociacion,MercadoSerie,"
+            b"MonedaSerie,TipoSerie,FechaVerificacion,Fuente\n"
+            b"AAPL,US0378331005,SIC,AAPL,ORIGEN_EXTRANJERO,USD,"
+            b"PROXY_ORIGEN_AJUSTADO,2026-09-01,Ficha verificada de ejemplo\n"
+            b"MSFT,US5949181045,SIC,MSFT,ORIGEN_EXTRANJERO,USD,"
+            b"PROXY_ORIGEN_AJUSTADO,2026-09-01,Ficha verificada de ejemplo\n"
+        ),
+        "plantilla_identidad_instrumentos.csv", "text/csv",
+    )
     price_rights_upload = st.file_uploader(
         "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)",
         type=["csv"],
@@ -534,6 +555,8 @@ with st.sidebar:
 
 price_contents = price_upload.getvalue() if price_upload is not None else b""
 price_fingerprint = sha256(price_contents).hexdigest() if price_contents else None
+identity_contents = identity_upload.getvalue() if identity_upload is not None else b""
+identity_fingerprint = sha256(identity_contents).hexdigest() if identity_contents else None
 price_rights_contents = (
     price_rights_upload.getvalue() if price_rights_upload is not None else b""
 )
@@ -605,6 +628,7 @@ settings = (
     implementation_source_date,
     tariff_fingerprint,
     price_fingerprint,
+    identity_fingerprint,
     price_rights_fingerprint,
     reference_price_fingerprint,
     reference_rights_fingerprint,
@@ -657,8 +681,11 @@ try:
     liquidity_result = None
     fund_result = None
     price_rights = None
+    identity_profile = None
     price_source_comparison = None
     with st.spinner("Preparando y validando datos..."):
+        if identity_contents:
+            identity_profile = read_instrument_identity_csv(identity_contents, tickers, quotes)
         if price_contents:
             if not price_rights_contents:
                 raise PortfolioError(
@@ -840,6 +867,11 @@ try:
                 data_source += "; FX histórico Yahoo mediante yfinance"
         else:
             data_source = "Yahoo Finance mediante yfinance; precios ajustados y FX histórico"
+        if identity_profile is not None:
+            data_source += (
+                f"; identidad de instrumentos CSV SHA-256 {identity_profile.fingerprint[:12]}; "
+                f"series proxy de origen {', '.join(identity_profile.proxy_assets) or 'ninguna'}"
+            )
         if cetes_result is not None:
             data_source += (
                 f"; {cetes_name}: CSV aportado por el usuario y preparado desde precio/plazo, "
@@ -1129,6 +1161,20 @@ try:
             "Los precios descargados mediante Yahoo/yfinance se reservan para investigación "
             "interna y pruebas. No uses el PDF como entregable para clientes."
         )
+    if identity_profile is not None:
+        with st.expander("Identidad de instrumentos y series", expanded=True):
+            st.caption(
+                f"Manifiesto SHA-256 {identity_profile.fingerprint[:12]}. ISIN y estructura "
+                "verificados formalmente; la clave, cotización y disponibilidad deben confirmarse "
+                "contra una fuente autorizada. El archivo cubre sólo los tickers de precios, "
+                "no las series preparadas de deuda, liquidez o fondos."
+            )
+            st.dataframe(identity_profile.detail, hide_index=True, use_container_width=True)
+            if identity_profile.proxy_assets:
+                st.warning(
+                    "Series de origen usadas como proxy, no como cierre local ejecutable del SIC: "
+                    + ", ".join(identity_profile.proxy_assets) + "."
+                )
     if holdings_result is not None:
         st.info(
             f"Cartera actual conciliada al {holdings_result.as_of.date()} · "
