@@ -9,6 +9,7 @@ import pandas as pd
 
 from currencies import SUPPORTED
 from data_rights import read_data_rights_csv
+from instrument_identity import read_instrument_identity_csv
 from portfolio_core import PortfolioError
 from price_upload import read_adjusted_price_csv
 
@@ -21,6 +22,7 @@ class PriceSourceComparison:
     reference_fingerprint: str
     primary_rights_fingerprint: str
     reference_rights_fingerprint: str
+    identity_fingerprints: tuple[str, str] | None
     primary_sessions: int
     reference_sessions: int
     common_sessions: int
@@ -49,6 +51,8 @@ def compare_price_sources(
     *,
     tolerance_pct: float,
     minimum_coverage_pct: float,
+    primary_identity_csv: bytes | None = None,
+    reference_identity_csv: bytes | None = None,
 ) -> PriceSourceComparison:
     """Compare like-for-like quotes; never certify their economic correctness."""
     if (
@@ -68,6 +72,41 @@ def compare_price_sources(
         quote_currencies[asset] not in SUPPORTED for asset in primary.columns
     ):
         raise PortfolioError("Declara una moneda de cotización válida para cada instrumento.")
+
+    if bool(primary_identity_csv) != bool(reference_identity_csv):
+        raise PortfolioError(
+            "El contraste de identidad requiere manifiestos de ambas fuentes."
+        )
+    identity_fingerprints = None
+    if primary_identity_csv and reference_identity_csv:
+        primary_identity = read_instrument_identity_csv(
+            primary_identity_csv, tickers, quote_currencies
+        )
+        reference_identity = read_instrument_identity_csv(
+            reference_identity_csv, tickers, quote_currencies
+        )
+        identity_fields = (
+            "ISIN", "MercadoNegociacion", "SimboloNegociacion", "MercadoSerie",
+            "MonedaSerie", "TipoSerie",
+        )
+        primary_detail = primary_identity.detail.set_index("Instrumento")
+        reference_detail = reference_identity.detail.set_index("Instrumento")
+        differences = [
+            f"{asset}: {field}"
+            for asset in primary.columns
+            for field in identity_fields
+            if primary_detail.loc[asset, field] != reference_detail.loc[asset, field]
+        ]
+        if differences:
+            raise PortfolioError(
+                "Las fuentes no describen el mismo instrumento y serie: "
+                + ", ".join(differences[:8])
+                + ("…" if len(differences) > 8 else "")
+                + ". Corrige la identidad antes de comparar precios."
+            )
+        identity_fingerprints = (
+            primary_identity.fingerprint, reference_identity.fingerprint
+        )
 
     common = primary.index.intersection(reference.index)
     if len(common) < 60:
@@ -124,6 +163,7 @@ def compare_price_sources(
         reference_fingerprint=sha256(reference_csv).hexdigest(),
         primary_rights_fingerprint=primary_rights.fingerprint,
         reference_rights_fingerprint=reference_rights.fingerprint,
+        identity_fingerprints=identity_fingerprints,
         primary_sessions=len(primary),
         reference_sessions=len(reference),
         common_sessions=len(common),

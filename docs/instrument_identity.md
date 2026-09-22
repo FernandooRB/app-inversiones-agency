@@ -26,6 +26,12 @@ hay que confirmar en una fuente autorizada el ISIN, la clave/serie exacta, el se
 la moneda y subunidad, el horario, eventos corporativos, ajustes, disponibilidad en la casa de bolsa y
 derechos de uso. Dos archivos que repiten un ISIN incorrecto no se convierten en evidencia independiente.
 
+El contraste opcional de dos archivos de precios admite un manifiesto por fuente. Cuando se aportan,
+se exige el par completo y se rechaza cualquier diferencia de ISIN, mercado y símbolo negociable,
+mercado y moneda del precio o tipo de serie para el mismo ticker. La coincidencia de las declaraciones
+no valida el contenido contra registros externos. Si no se aportan, el resultado de precios muestra una
+advertencia específica de identidad no contrastada.
+
 La [BMV describe el SIC](https://www.bmv.com.mx/es/mercados/mercado-global) como una plataforma de
 valores extranjeros con operación en pesos y distingue los
 [cierres SIC como producto de datos](https://www.bmv.com.mx/es/productos-de-informacion/bases-de-datos).
