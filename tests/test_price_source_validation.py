@@ -61,6 +61,9 @@ def test_identical_licensed_sources_have_no_automatic_alerts_but_no_certificatio
     assert len(result.primary_fingerprint) == 64
     assert result.primary_source != result.reference_source
     assert result.identity_fingerprints is None
+    assert "identidad entre fuentes no contrastada" in result.audit_note
+    assert result.reference_fingerprint[:12] in result.audit_note
+    assert "cobertura 100.0%" in result.audit_note
 
 
 def test_compares_exact_security_and_series_identity_when_both_manifests_are_given():
@@ -71,6 +74,8 @@ def test_compares_exact_security_and_series_identity_when_both_manifests_are_giv
     assert result.status == "SIN_ALERTAS_AUTOMATICAS"
     assert result.identity_fingerprints is not None
     assert result.identity_fingerprints[0] != result.identity_fingerprints[1]
+    assert "identidad principal/referencia SHA-256" in result.audit_note
+    assert result.identity_fingerprints[1][:12] in result.audit_note
 
 
 @pytest.mark.parametrize(
@@ -103,6 +108,8 @@ def test_flags_one_material_difference_and_keeps_raw_prices_out_of_export():
     assert result.discrepancies.iloc[0]["Instrumento"] == "A"
     assert abs(result.discrepancies.iloc[0]["Diferencia relativa"]) > 0.01
     assert not any("precio" in column.lower() for column in result.discrepancies.columns)
+    assert "alertas:" in result.audit_note
+    assert "REVISAR" in result.audit_note
 
 
 def test_exposes_missing_sessions_and_market_convention_mismatch():

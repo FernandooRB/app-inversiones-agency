@@ -39,6 +39,10 @@ ticker. Detiene la comparación si alguno difiere: un cierre local del SIC y un 
 origen no son la misma serie, aunque compartan ticker. Las fuentes y fechas de verificación de los
 manifiestos pueden diferir. Sin ambos manifiestos, el contraste de precios sigue disponible, pero la
 app advierte expresamente que no ha contrastado la identidad del instrumento.
+Cuando se genera un PDF, la descripción de fuentes deja constancia del resultado del contraste,
+fechas comunes, cobertura, umbral, huellas de la referencia y alertas. Si no hubo manifiestos de
+identidad, también indica que ese control no se ejecutó. Es trazabilidad del análisis, no aprobación
+automática de datos ni autorización para entregar el documento.
 
 `SIN_ALERTAS_AUTOMATICAS` significa únicamente que esos controles no encontraron discrepancias con los
 umbrales escogidos. No certifica que ambos proveedores sean correctos, que las cotizaciones representen
