@@ -78,7 +78,8 @@
 4. Obtener cotizaciones y contratos para la ruta definida en la [matriz de fuentes](data_sources.md):
    Banxico como referencia mexicana y precios BMV/SIC aportados bajo un permiso confirmado. El
    manifiesto ya impide usar archivos con derechos pendientes, vencidos o no autorizados.
-5. La importación anónima y no persistente de la cartera actual ya está disponible. Antes de
+5. La importación anónima y no persistente de la cartera actual y un puente de cantidades de títulos
+   ya están disponibles. Falta contrastar operaciones y eventos con documentos originales. Antes de
    almacenar datos, definir los campos mínimos, finalidad, acceso, conservación y eliminación de expedientes.
 6. La reserva fiscal de ventas y el [registro de flujos fiscales](tax_cash_flows.md) cubren escenarios
    documentados y controles ilustrativos de dividendos e intereses. Falta contrastar constancias reales,

@@ -27,6 +27,9 @@ en MXN a pesos ordenados, capital y un archivo de auditoría; controles opcional
 valores por instrumento, subtotal analizado, efectivo y otras partidas del total de cuenta, sin
 persistir los CSV ni sumar componentes externos al capital optimizado. Un puente opcional coteja
 movimientos de efectivo liquidado con el efectivo declarado, sin validar operaciones de títulos.
+Un [puente de cantidades de títulos](docs/current_holdings_import.md) coteja saldos iniciales,
+movimientos y cantidades finales por instrumento, y compara el valor final con la cartera importada.
+No demuestra que las operaciones aportadas estén completas ni validadas contra comprobantes.
 Ambos PDF presentan estos controles en una sección de conciliación con fuentes, huellas y controles
 no aportados visibles para la revisión humana.
 La [revisión heurística de precios](docs/price_quality.md) identifica saltos de al menos
@@ -158,6 +161,7 @@ portfolio_core.py    Datos, métricas, optimización y riesgo
 price_upload.py       Importación estricta de precios ajustados CSV
 data_rights.py        Manifiesto estricto de fuente, vigencia, ajustes y alcance autorizado
 holdings.py           Conciliación estricta de la cartera actual valuada en MXN
+position_bridge.py    Puente de cantidades y valuaciones por instrumento
 price_quality.py      Alertas heurísticas sobre precios originales
 price_source_validation.py Contraste independiente de dos archivos de precios
 instrument_identity.py Validación formal de ISIN, mercado y moneda de series

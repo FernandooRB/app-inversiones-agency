@@ -37,6 +37,7 @@ from implementation_costs import (
     ImplementationCostEstimate,
 )
 from portfolio_core import PortfolioMetrics, RiskMetrics, validate_weights
+from position_bridge import PositionBridge
 from price_quality import PriceQualityIssue
 from risk_attribution import RiskAttribution
 from simulation import SimulationResult
@@ -85,6 +86,7 @@ class HoldingsAuditReport:
     subtotal: HoldingsTotalControl | None = None
     coverage: HoldingsCoverageControl | None = None
     cash_bridge: CashBridge | None = None
+    position_bridge: PositionBridge | None = None
 
 
 def _holdings_audit_story(
@@ -125,6 +127,21 @@ def _holdings_audit_story(
         or bridge.opening_cash + bridge.net_movements != bridge.closing_cash
     ):
         raise ValueError("El puente de efectivo no corresponde a la cobertura del reporte.")
+    position_bridge = audit.position_bridge
+    if position_bridge is not None:
+        lines = position_bridge.lines
+        if (position_bridge.end_date != as_of or not position_bridge.ledger_source
+                or not position_bridge.closing_source
+                or len(position_bridge.ledger_fingerprint) != 64
+                or len(position_bridge.closing_fingerprint) != 64
+                or tuple(line.asset for line in lines) != tuple(audit.holdings.values.index)
+                or any(
+                    line.opening + line.net_movements != line.closing
+                    or line.closing_value != Decimal(str(audit.holdings.values[line.asset])).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    ) for line in lines
+                )):
+            raise ValueError("El puente de títulos no corresponde a la cartera del reporte.")
 
     def cell(value: str) -> Paragraph:
         return Paragraph(escape(value), styles["Normal"])
@@ -166,6 +183,24 @@ def _holdings_audit_story(
             f"{bridge.other_movement_count} como otros" if bridge else "No aportado"
         ),
         source_cell(bridge.source, bridge.fingerprint) if bridge else cell("No aportado"),
+    ])
+    rows.append([
+        cell("Cantidades de títulos"),
+        cell(
+            f"{len(position_bridge.lines)} instrumentos; "
+            f"{position_bridge.movement_count} "
+            f"{'movimiento' if position_bridge.movement_count == 1 else 'movimientos'}; "
+            f"{position_bridge.adjustment_count} "
+            f"{'ajuste' if position_bridge.adjustment_count == 1 else 'ajustes'}"
+            if position_bridge else "No aportado"
+        ),
+        Paragraph(
+            f"Movimientos: {escape(position_bridge.ledger_source)} "
+            f"(SHA-256 {position_bridge.ledger_fingerprint[:12]})<br/>"
+            f"Cierre: {escape(position_bridge.closing_source)} "
+            f"(SHA-256 {position_bridge.closing_fingerprint[:12]})",
+            styles["Normal"],
+        ) if position_bridge else cell("No aportado"),
     ])
     table = Table(rows, colWidths=[38 * mm, 82 * mm, 65 * mm], repeatRows=1)
     table.setStyle(TableStyle([
@@ -214,6 +249,13 @@ def _holdings_audit_story(
             f"Puente de efectivo: {bridge.opening_cash:,.2f} MXN de saldo inicial + "
             f"{bridge.net_movements:,.2f} MXN de movimientos netos = "
             f"{bridge.closing_cash:,.2f} MXN de saldo final.",
+            styles["Normal"],
+        ))
+    if position_bridge is not None:
+        story.append(Paragraph(
+            "Puente de títulos: las cantidades finales declaradas coinciden por instrumento con "
+            "saldo inicial y movimientos; sus valores MXN coinciden con la cartera importada. "
+            "Los ajustes y la integridad de las operaciones requieren revisión del soporte original.",
             styles["Normal"],
         ))
     story.extend([

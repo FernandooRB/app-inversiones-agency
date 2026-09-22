@@ -87,6 +87,43 @@ de la cobertura. No prueba que se hayan incluido todas las operaciones ni reconc
 precios o valores de los instrumentos. El equipo debe cotejar el periodo y cada movimiento con el
 estado original; no incluir nombres, referencias de cuenta ni números de operación en el CSV.
 
+El **puente opcional de cantidades de títulos** utiliza dos archivos separados. El primero registra
+un saldo inicial para *cada* instrumento del universo (incluidos los de saldo cero), todos en la misma
+fecha, seguido de movimientos en orden cronológico:
+
+```csv
+Fecha,Instrumento,Unidad,Tipo,Cantidad
+2026-01-01,AAPL,TITULOS,SALDO_INICIAL,10
+2026-01-01,MSFT,TITULOS,SALDO_INICIAL,5
+2026-01-10,AAPL,TITULOS,COMPRA,2
+```
+
+Los tipos de movimiento son `COMPRA`, `VENTA`, `ENTRADA`, `SALIDA`, `AJUSTE_POSITIVO` y
+`AJUSTE_NEGATIVO`. `Unidad` es una clave declarada por instrumento (por ejemplo, `TITULOS`,
+`PARTICIPACIONES` o `NOMINAL_MXN`) y debe ser idéntica en todas sus filas; el sistema nunca suma
+cantidades de unidades o instrumentos distintos. Cada cantidad admite hasta 12 decimales, y ningún
+movimiento puede dejar una cantidad negativa. Los ajustes exigen revisar el evento que los originó.
+Las fechas de los movimientos no deben superar la fecha de corte.
+
+El segundo archivo se transcribe por separado del estado de cierre y contiene exactamente una fila
+por instrumento. Además de la cantidad final declarada, trae el valor MXN que se coteja al centavo
+con la cartera importada:
+
+```csv
+FechaCorte,Instrumento,Unidad,CantidadFinal,ValorMXN
+2026-01-15,AAPL,TITULOS,12,60000.00
+2026-01-15,MSFT,TITULOS,5,40000.00
+```
+
+Ambos archivos son obligatorios para ejecutar el control; cada uno debe ocupar menos de 100 KB y
+tener hasta 1000 filas. Se declaran por separado sus fuentes y se muestran sus huellas SHA-256 en
+ambos PDF. El control verifica `cantidad inicial + movimientos netos = cantidad final` por
+instrumento, y contrasta el valor final MXN con la cartera importada. **No prueba que el registro de
+operaciones esté completo**, que la transcripción corresponda al documento original, ni que precios,
+cupones, divisiones, liquidaciones o derechos sean correctos. El equipo debe conciliar cada operación
+y evento corporativo con sus comprobantes y distinguir fecha de operación de fecha de liquidación.
+No se deben incluir identificadores de cliente ni números de operación en estos CSV.
+
 También se puede cargar un **detalle de referencia** preparado por separado desde el estado de cuenta.
 Usa exactamente las mismas tres columnas que el primer CSV, con cada instrumento del análisis una vez.
 La app exige la misma fecha, el mismo universo y valores iguales por instrumento al centavo; rechaza

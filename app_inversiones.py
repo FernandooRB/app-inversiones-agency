@@ -57,6 +57,7 @@ from portfolio_core import (
     portfolio_statistics,
     random_portfolios,
 )
+from position_bridge import read_position_bridge_csv
 from price_quality import assess_price_quality
 from price_source_validation import compare_price_sources
 from price_upload import read_adjusted_price_csv
@@ -324,6 +325,44 @@ with st.sidebar:
             b"2026-01-15,SALDO_FINAL,5000.00\n"
         ),
         "plantilla_movimientos_efectivo_mxn.csv", "text/csv",
+    )
+    position_ledger_upload = st.file_uploader(
+        "Movimientos de títulos CSV (opcional; requiere cartera actual)", type=["csv"],
+        help=(
+            "Saldo inicial por instrumento y luego compras, ventas, entradas, salidas o ajustes "
+            "en orden cronológico. Usa la misma unidad por instrumento. Sin identificadores del cliente."
+        ),
+    )
+    position_ledger_source_input = st.text_input(
+        "Fuente de los movimientos de títulos",
+        help="Documento y periodo, sin nombre ni cuenta del cliente; máximo 120 caracteres.",
+    )
+    st.download_button(
+        "Descargar plantilla de movimientos de títulos CSV",
+        (b"Fecha,Instrumento,Unidad,Tipo,Cantidad\n"
+         b"2026-01-01,AAPL,TITULOS,SALDO_INICIAL,10\n"
+         b"2026-01-01,MSFT,TITULOS,SALDO_INICIAL,5\n"
+         b"2026-01-10,AAPL,TITULOS,COMPRA,2\n"),
+        "plantilla_movimientos_titulos.csv", "text/csv",
+    )
+    position_closing_upload = st.file_uploader(
+        "Posiciones finales con cantidades CSV (opcional; requiere movimientos de títulos)",
+        type=["csv"],
+        help=(
+            "Transcribe por separado las cantidades y los valores MXN al corte desde el estado. "
+            "Una fila por instrumento del análisis, incluidos los saldos cero."
+        ),
+    )
+    position_closing_source_input = st.text_input(
+        "Fuente de las posiciones finales con cantidades",
+        help="Documento de cierre, sin nombre ni cuenta del cliente; máximo 120 caracteres.",
+    )
+    st.download_button(
+        "Descargar plantilla de posiciones finales con cantidades CSV",
+        (b"FechaCorte,Instrumento,Unidad,CantidadFinal,ValorMXN\n"
+         b"2026-01-15,AAPL,TITULOS,12,60000.00\n"
+         b"2026-01-15,MSFT,TITULOS,5,40000.00\n"),
+        "plantilla_posiciones_finales.csv", "text/csv",
     )
     st.download_button(
         "Descargar plantilla de cartera actual CSV",
@@ -683,6 +722,18 @@ holdings_coverage_fingerprint = (
 )
 cash_bridge_contents = cash_bridge_upload.getvalue() if cash_bridge_upload is not None else b""
 cash_bridge_fingerprint = sha256(cash_bridge_contents).hexdigest() if cash_bridge_contents else None
+position_ledger_contents = (
+    position_ledger_upload.getvalue() if position_ledger_upload is not None else b""
+)
+position_closing_contents = (
+    position_closing_upload.getvalue() if position_closing_upload is not None else b""
+)
+position_ledger_fingerprint = (
+    sha256(position_ledger_contents).hexdigest() if position_ledger_contents else None
+)
+position_closing_fingerprint = (
+    sha256(position_closing_contents).hexdigest() if position_closing_contents else None
+)
 tax_basis_contents = tax_basis_upload.getvalue() if tax_basis_upload is not None else b""
 tax_basis_fingerprint = sha256(tax_basis_contents).hexdigest() if tax_basis_contents else None
 tax_flows_contents = tax_flows_upload.getvalue() if tax_flows_upload is not None else b""
@@ -722,6 +773,10 @@ settings = (
     holdings_coverage_fingerprint,
     cash_bridge_fingerprint,
     cash_bridge_source_input,
+    position_ledger_fingerprint,
+    position_ledger_source_input,
+    position_closing_fingerprint,
+    position_closing_source_input,
     holdings_source_input,
     tax_basis_fingerprint,
     tax_flows_fingerprint,
@@ -913,6 +968,7 @@ try:
         holdings_control_result = None
         holdings_coverage_result = None
         cash_bridge_result = None
+        position_bridge_result = None
         tax_basis_profile = None
         tax_cash_flow_ledger = None
         current_weights = None
@@ -961,11 +1017,21 @@ try:
                 cash_bridge_result = read_cash_bridge_csv(
                     cash_bridge_contents, holdings_coverage_result, cash_bridge_source_input
                 )
+            if position_ledger_contents or position_closing_contents:
+                if not position_ledger_contents or not position_closing_contents:
+                    raise PortfolioError(
+                        "El puente de títulos requiere ambos archivos: movimientos y posiciones finales."
+                    )
+                position_bridge_result = read_position_bridge_csv(
+                    position_ledger_contents, position_closing_contents, holdings_result,
+                    position_ledger_source_input, position_closing_source_input,
+                )
             current_weights = holdings_result.weights.to_numpy(dtype=float)
             portfolio_value = holdings_result.total_value
         elif current_weights_input.strip():
             if (holdings_control_contents or holdings_detail_contents
-                    or holdings_coverage_contents or cash_bridge_contents):
+                    or holdings_coverage_contents or cash_bridge_contents
+                    or position_ledger_contents or position_closing_contents):
                 raise PortfolioError(
                     "Los controles de cartera y efectivo requieren la cartera actual valuada en CSV."
                 )
@@ -973,7 +1039,8 @@ try:
                 current_weights_input, len(analysis_tickers)
             )
         elif (holdings_control_contents or holdings_detail_contents
-              or holdings_coverage_contents or cash_bridge_contents):
+              or holdings_coverage_contents or cash_bridge_contents
+              or position_ledger_contents or position_closing_contents):
             raise PortfolioError(
                 "Los controles de cartera y efectivo requieren la cartera actual valuada en CSV."
             )
@@ -1068,6 +1135,7 @@ try:
                 subtotal=holdings_control_result,
                 coverage=holdings_coverage_result,
                 cash_bridge=cash_bridge_result,
+                position_bridge=position_bridge_result,
             ) if holdings_result is not None else None
         )
         returns = calculate_returns(prices)
@@ -1404,6 +1472,28 @@ try:
                     f"Hay {cash_bridge_result.other_movement_count} movimiento(s) en OTRA_ENTRADA "
                     "u OTRA_SALIDA; revisa su clasificación contra el estado original."
                 )
+        if position_bridge_result is not None:
+            st.success(
+                f"Cantidades conciliadas del {position_bridge_result.start_date} al "
+                f"{position_bridge_result.end_date}: {len(position_bridge_result.lines)} instrumentos, "
+                f"{position_bridge_result.movement_count} "
+                f"{'movimiento' if position_bridge_result.movement_count == 1 else 'movimientos'} · "
+                f"SHA-256 movimientos {position_bridge_result.ledger_fingerprint[:12]} y "
+                f"cierre {position_bridge_result.closing_fingerprint[:12]}."
+            )
+            if position_bridge_result.adjustment_count:
+                st.warning(
+                    f"Hay {position_bridge_result.adjustment_count} ajuste(s) de cantidad; "
+                    "revisa su causa y el soporte original."
+                )
+            st.dataframe(pd.DataFrame([
+                {"Instrumento": line.asset, "Unidad": line.unit,
+                 "Cantidad inicial": str(line.opening),
+                 "Movimientos netos": str(line.net_movements),
+                 "Cantidad final": str(line.closing),
+                 "Valor final MXN": str(line.closing_value)}
+                for line in position_bridge_result.lines
+            ]), hide_index=True, use_container_width=True)
         holdings_audit = pd.DataFrame({
             "Instrumento": holdings_result.values.index,
             "ValorMXN": holdings_result.values.to_numpy(),
