@@ -150,6 +150,24 @@ interés o impuesto se hayan calculado correctamente, ni que estén completos to
 No debe transformarse en una confirmación fiscal o de rendimiento sin una fuente independiente.
 La opción incluye el control de netos de reporto y los controles de portada, detalle y efectivo.
 
+Para comprobar la aritmética visible de los XML CFDI en MXN:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/inspect_gbm_intake.py Estados_de_Cuenta/GBM --check-cfdi-arithmetic > data/private/gbm_cfdi_arithmetic_validation.json
+```
+
+Este control es independiente de las opciones PDF. En CFDI de ingreso o egreso 3.3/4.0 compara
+la suma de conceptos con el subtotal, los descuentos de concepto con el descuento global, los
+impuestos trasladados y retenidos de conceptos y del nodo global con sus totales, y la ecuación
+subtotal menos descuento más traslados menos retenciones igual al total. Sólo informa conteos de
+ecuaciones exactas, con diferencia de hasta un centavo o mayores; una diferencia, un archivo
+ilegible, duplicado o fuera del alcance exige revisión y devuelve código distinto de cero. Los 11
+XML del piloto propio cuadraron exactamente en estas ecuaciones. Esto **no comprueba timbrado,
+autenticidad, tratamiento fiscal, vínculo con un contrato ni correspondencia con cargos del PDF**.
+Diez de los once XML contienen una referencia explícita a un contrato presente en los estados;
+el restante carece de esa referencia en el contenido y su ubicación en una carpeta no la sustituye.
+No se asignará ese comprobante a una cuenta por inferencia.
+
 La dependencia `pypdf` está en `requirements-dev.txt`; esta herramienta es una revisión local,
 no un importador listo para recibir documentos de clientes. Un XML CFDI de ingreso puede servir
 para contrastar cargos facturados, pero no es por sí mismo una exportación de posiciones. Si un
@@ -162,7 +180,8 @@ no se debe ejecutar con documentos reales en CI ni adjuntar la salida a issues o
 ## Conciliación pendiente
 
 1. Confirmar la relación de cada serie PDF con su contrato o subcuenta, y la relación de los XML
-   con esas series. Esta clave se conservará sólo en un manifiesto privado. Nunca se deben sumar
+   con esas series; queda un CFDI sin referencia explícita en su contenido. Esta clave se conservará
+   sólo en un manifiesto privado. Nunca se deben sumar
    estados del mismo periodo por proximidad de carpeta.
 2. Seleccionar una serie y un corte, extraer efectivo, reportos y renta variable con cantidad,
    instrumento, moneda, valor al corte y ubicación de página. Ya existe una comparación automática

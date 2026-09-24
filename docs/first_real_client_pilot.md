@@ -76,6 +76,10 @@ Los XML recibidos son CFDI y no contienen posiciones estructuradas al corte. Los
 fuente de las posiciones y movimientos del piloto; una extracción específica debe contrastarse
 visualmente y con subtotales del estado. No se deducirán operaciones ausentes. Los campos exactos
 de cada sección se documentarán con ejemplos sintéticos antes de activar un importador.
+La aritmética interna de los 11 CFDI del piloto propio cuadra, pero esto no concilia sus cargos con
+los estados: uno carece de referencia explícita al contrato en su contenido. La ubicación del
+archivo no basta para asignarlo a una cuenta; el vínculo y la naturaleza de cada cargo requieren
+una fuente o revisión adicional antes de usarlos en el perfil de costos.
 
 | Documento o dato GBM | Control que lo utilizará | Comprobación independiente |
 | --- | --- | --- |

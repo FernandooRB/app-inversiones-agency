@@ -1080,6 +1080,8 @@ def inspect_xml(raw: bytes) -> dict[str, object]:
     """Classify CFDI XML without returning taxpayer or transaction content."""
     if not 0 < len(raw) <= MAX_FILE_BYTES:
         raise IntakeError("El XML está vacío o excede el tamaño permitido.")
+    if b"\x00" in raw:
+        raise IntakeError("El XML usa una codificación no admitida.")
     upper = raw.upper()
     if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
         raise IntakeError("El XML contiene entidades o DTD no permitidos.")
@@ -1110,6 +1112,117 @@ def inspect_xml(raw: bytes) -> dict[str, object]:
         "cfdi_version": version if version in {"3.3", "4.0"} else "otra",
         "currency": currency if currency in {"MXN", "USD", "XXX"} else "otra",
         "movement_addenda": bool(addenda),
+    }
+
+
+_CFDI_NUMBER = re.compile(r"\d{1,18}(?:\.\d{1,6})?")
+
+
+def _cfdi_amount(node: ElementTree.Element, name: str, *, optional: bool = False) -> Decimal:
+    value = node.get(name)
+    if value is None and optional:
+        return Decimal(0)
+    if value is None or not _CFDI_NUMBER.fullmatch(value):
+        raise IntakeError("El CFDI tiene un importe ausente o no reconocible.")
+    return Decimal(value)
+
+
+def _cfdi_amount_sum(nodes: list[ElementTree.Element], name: str) -> Decimal:
+    return sum((_cfdi_amount(node, name) for node in nodes), Decimal(0))
+
+
+def _cfdi_arithmetic(raw: bytes) -> Counter:
+    """Check visible CFDI equations, keeping every monetary value private."""
+    metadata = inspect_xml(raw)
+    if (metadata["cfdi_type"] not in {"I", "E"} or metadata["currency"] != "MXN"
+            or metadata["cfdi_version"] not in {"3.3", "4.0"}):
+        raise IntakeError("El CFDI tiene un tipo, moneda o versión fuera del control aritmético.")
+    root = ElementTree.fromstring(raw)
+    namespace = root.tag.split("}", 1)[0] + "}"
+    concepts_node = root.find(f"{namespace}Conceptos")
+    concepts = [] if concepts_node is None else concepts_node.findall(f"{namespace}Concepto")
+    if not concepts:
+        raise IntakeError("El CFDI no tiene conceptos reconocibles.")
+    taxes = root.find(f"{namespace}Impuestos")
+    transfers = [] if taxes is None else [item for item in taxes.findall(
+        f"{namespace}Traslados/{namespace}Traslado") if item.get("TipoFactor") != "Exento"]
+    withholdings = [] if taxes is None else taxes.findall(
+        f"{namespace}Retenciones/{namespace}Retencion")
+    concept_transfers = [item for concept in concepts for item in concept.findall(
+        f"{namespace}Impuestos/{namespace}Traslados/{namespace}Traslado")
+        if item.get("TipoFactor") != "Exento"]
+    concept_withholdings = [item for concept in concepts for item in concept.findall(
+        f"{namespace}Impuestos/{namespace}Retenciones/{namespace}Retencion")]
+    subtotal = _cfdi_amount(root, "SubTotal")
+    discount = _cfdi_amount(root, "Descuento", optional=True)
+    total = _cfdi_amount(root, "Total")
+    transferred = (
+        _cfdi_amount(taxes, "TotalImpuestosTrasladados", optional=True)
+        if taxes is not None else Decimal(0)
+    )
+    withheld = (
+        _cfdi_amount(taxes, "TotalImpuestosRetenidos", optional=True)
+        if taxes is not None else Decimal(0)
+    )
+    concept_discount = sum(
+        (_cfdi_amount(concept, "Descuento", optional=True) for concept in concepts), Decimal(0),
+    )
+    equations = {
+        "subtotal": _cfdi_amount_sum(concepts, "Importe") - subtotal,
+        "discount": concept_discount - discount,
+        "transfers_global": _cfdi_amount_sum(transfers, "Importe") - transferred,
+        "transfers_concepts": _cfdi_amount_sum(concept_transfers, "Importe") - transferred,
+        "withholdings_global": _cfdi_amount_sum(withholdings, "Importe") - withheld,
+        "withholdings_concepts": _cfdi_amount_sum(concept_withholdings, "Importe") - withheld,
+        "total": subtotal - discount + transferred - withheld - total,
+    }
+    return Counter(f"{name}_{_difference_kind(value)}" for name, value in equations.items())
+
+
+def check_cfdi_arithmetic(root: Path) -> dict[str, object]:
+    """Summarize CFDI arithmetic without exposing amounts or identifiers."""
+    if not root.is_dir() or root.is_symlink():
+        raise IntakeError("Selecciona una carpeta local válida, sin enlaces simbólicos.")
+    try:
+        files = sorted(root.rglob("*"))
+    except OSError as exc:
+        raise IntakeError("No se pudo enumerar la carpeta local.") from exc
+    counts = Counter()
+    fingerprints: set[str] = set()
+    for path in files:
+        try:
+            if path.is_symlink():
+                counts["symlink_rejected"] += 1
+                continue
+            if not path.is_file() or path.suffix.lower() != ".xml":
+                continue
+            if path.stat().st_size > MAX_FILE_BYTES:
+                raise IntakeError("El XML excede el tamaño permitido.")
+            raw = path.read_bytes()
+            digest = sha256(raw).hexdigest()
+            if digest in fingerprints:
+                counts["exact_duplicates"] += 1
+                continue
+            fingerprints.add(digest)
+            checks = _cfdi_arithmetic(raw)
+        except (OSError, IntakeError):
+            counts["parse_failures"] += 1
+            continue
+        counts["documents_checked"] += 1
+        counts.update(checks)
+    if not counts["documents_checked"] or any(counts[key] for key in (
+        "symlink_rejected", "exact_duplicates", "parse_failures",
+    )) or any(key.endswith("_over_cent") and value for key, value in counts.items()):
+        status = "REVIEW_REQUIRED"
+    elif any(key.endswith("_one_cent") and value for key, value in counts.items()):
+        status = "CENT_DIFFERENCES_NEED_REVIEW"
+    else:
+        status = "EXACT"
+    return {
+        "cfdi_arithmetic_status": status,
+        "cfdi_checks": dict(sorted(counts.items())),
+        "caution": "Sólo comprueba ecuaciones impresas en CFDI MXN de ingreso o egreso. "
+                   "No verifica timbrado, tratamiento fiscal, vínculo con contrato ni cargos del PDF.",
     }
 
 
@@ -1222,6 +1335,10 @@ def main() -> None:
         "--check-reporto-pairs", action="store_true",
         help="Empareja compras y vencimientos de reporto por contrato, clave y plazo impresos.",
     )
+    parser.add_argument(
+        "--check-cfdi-arithmetic", action="store_true",
+        help="Comprueba subtotales, descuentos, impuestos y total impresos en CFDI MXN.",
+    )
     arguments = parser.parse_args()
     check_reporto = arguments.check_reporto_net or arguments.check_reporto_pairs
     check_cash = (arguments.check_cash_ledger or arguments.check_equity_quantities
@@ -1247,10 +1364,14 @@ def main() -> None:
             result["reporto_net"] = check_statement_reporto_net(arguments.folder)
         if arguments.check_reporto_pairs:
             result["reporto_pairs"] = check_statement_reporto_pairs(arguments.folder)
+        if arguments.check_cfdi_arithmetic:
+            result["cfdi_arithmetic"] = check_cfdi_arithmetic(arguments.folder)
     except IntakeError as exc:
         parser.exit(2, f"Error: {exc}\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    if check_cover and (
+    cfdi_needs_review = (arguments.check_cfdi_arithmetic
+                         and result["cfdi_arithmetic"]["cfdi_arithmetic_status"] != "EXACT")
+    pdf_needs_review = check_cover and (
         result["cover_summary"]["cover_status"] != "EXACT" or result["failures"]
         or (check_detail and result["detail_summary"]["detail_status"] != "EXACT")
         or (check_cash and result["cash_ledger"]["cash_status"] != "EXACT")
@@ -1266,7 +1387,8 @@ def main() -> None:
         or (arguments.check_reporto_pairs
             and result["reporto_pairs"]["pair_status"] not in
             {"STRUCTURALLY_PLAUSIBLE", "NO_REPORTO_ROWS"})
-    ):
+    )
+    if cfdi_needs_review or pdf_needs_review:
         parser.exit(3)
 
 

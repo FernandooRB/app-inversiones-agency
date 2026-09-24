@@ -13,6 +13,7 @@ from scripts.inspect_gbm_intake import (
     _cash_direction,
     _money_values,
     _statement_summary,
+    check_cfdi_arithmetic,
     check_statement_cash_ledgers,
     check_statement_detail_totals,
     check_statement_equity_quantities,
@@ -283,6 +284,65 @@ def test_rejects_xml_entities_and_does_not_return_taxpayer_fields():
     assert result["movement_addenda"] is True
     assert "CLIENTE" not in json.dumps(result)
     assert "ABC010101AAA" not in json.dumps(result)
+
+
+def _synthetic_cfdi(*, total="110.00", discount="10.00", transfer="20.00",
+                    concept_transfer="20.00", concept_discount="10.00"):
+    return (
+        f'<Comprobante xmlns="http://www.sat.gob.mx/cfd/4" Version="4.0" '
+        f'TipoDeComprobante="I" Moneda="MXN" Fecha="2026-04-03T10:20:30" '
+        f'SubTotal="100.00" Descuento="{discount}" Total="{total}">'
+        f'<Conceptos><Concepto Importe="100.00" Descuento="{concept_discount}">'
+        f'<Impuestos><Traslados><Traslado Importe="{concept_transfer}"/>'
+        f'</Traslados></Impuestos></Concepto></Conceptos>'
+        f'<Impuestos TotalImpuestosTrasladados="{transfer}">'
+        f'<Traslados><Traslado Importe="{transfer}"/></Traslados></Impuestos>'
+        f'<Receptor Nombre="CLIENTE RESERVADO" Rfc="ABC010101AAA"/>'
+        f'</Comprobante>'
+    ).encode()
+
+
+def _xml_folder(*documents):
+    files = []
+    for index, document in enumerate(documents):
+        file = _MemoryFile(index, document)
+        file.suffix = ".xml"
+        files.append(file)
+    return _MemoryFolder(files)
+
+
+def test_cfdi_arithmetic_checks_equations_without_exporting_values():
+    result = check_cfdi_arithmetic(_xml_folder(_synthetic_cfdi()))
+    assert result["cfdi_arithmetic_status"] == "EXACT"
+    assert result["cfdi_checks"]["documents_checked"] == 1
+    assert result["cfdi_checks"]["total_exact"] == 1
+    serialized = json.dumps(result)
+    assert "CLIENTE RESERVADO" not in serialized
+    assert "ABC010101AAA" not in serialized
+    assert "110.00" not in serialized
+
+
+@pytest.mark.parametrize("changes,expected", [
+    ({"total": "110.01"}, "CENT_DIFFERENCES_NEED_REVIEW"),
+    ({"total": "112.00"}, "REVIEW_REQUIRED"),
+    ({"concept_transfer": "19.00"}, "REVIEW_REQUIRED"),
+    ({"concept_discount": "9.00"}, "REVIEW_REQUIRED"),
+])
+def test_cfdi_arithmetic_requires_review_for_mismatches(changes, expected):
+    result = check_cfdi_arithmetic(_xml_folder(_synthetic_cfdi(**changes)))
+    assert result["cfdi_arithmetic_status"] == expected
+
+
+def test_cfdi_arithmetic_rejects_duplicate_and_unsafe_xml():
+    document = _synthetic_cfdi()
+    duplicated = check_cfdi_arithmetic(_xml_folder(document, document))
+    assert duplicated["cfdi_arithmetic_status"] == "REVIEW_REQUIRED"
+    assert duplicated["cfdi_checks"]["exact_duplicates"] == 1
+    unsafe = check_cfdi_arithmetic(_xml_folder(b'<!DOCTYPE c [<!ENTITY x "private">]><Comprobante/>'))
+    assert unsafe["cfdi_arithmetic_status"] == "REVIEW_REQUIRED"
+    assert unsafe["cfdi_checks"]["parse_failures"] == 1
+    with pytest.raises(IntakeError, match="codificación"):
+        inspect_xml('<?xml version="1.0"?><!DOCTYPE c><Comprobante/>'.encode("utf-16"))
 
 
 def test_scan_deduplicates_and_never_prints_private_text():
