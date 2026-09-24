@@ -161,11 +161,12 @@ la suma de conceptos con el subtotal, los descuentos de concepto con el descuent
 impuestos trasladados y retenidos de conceptos y del nodo global con sus totales, y la ecuación
 subtotal menos descuento más traslados menos retenciones igual al total. Sólo informa conteos de
 ecuaciones exactas, con diferencia de hasta un centavo o mayores, y distingue comprobantes con
-total cero de comprobantes con importe positivo. Una diferencia, un archivo ilegible, duplicado o
-fuera del alcance exige revisión y devuelve código distinto de cero. Los 11 XML del piloto propio
-cuadraron exactamente en estas ecuaciones: siete tienen total cero por descuento completo y cuatro
-tienen importe positivo. Esto **no comprueba timbrado, autenticidad, tratamiento fiscal, vínculo
-con un contrato ni correspondencia con cargos del PDF**.
+total cero de comprobantes con importe positivo. También rechaza fechas u horas imposibles y una
+versión declarada que no corresponda al espacio de nombres del XML. Una diferencia, un archivo
+ilegible, duplicado o fuera del alcance exige revisión y devuelve código distinto de cero. Los 11
+XML del piloto propio cuadraron exactamente en estas ecuaciones: siete tienen total cero por
+descuento completo y cuatro tienen importe positivo. Esto **no comprueba timbrado, autenticidad,
+tratamiento fiscal, vínculo con un contrato ni correspondencia con cargos del PDF**.
 Diez de los once XML contienen una referencia explícita a un contrato presente en los estados;
 el restante, que tiene importe positivo, carece de esa referencia en el contenido y su ubicación
 en una carpeta no la sustituye. No se asignará ese comprobante a una cuenta por inferencia. En la

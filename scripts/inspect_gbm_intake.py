@@ -13,7 +13,7 @@ import re
 import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from hashlib import sha256
 from io import BytesIO
@@ -1089,21 +1089,24 @@ def inspect_xml(raw: bytes) -> dict[str, object]:
         root = ElementTree.fromstring(raw)
     except ElementTree.ParseError as exc:
         raise IntakeError("No se pudo leer la estructura del XML.") from exc
-    if root.tag not in {
-        "{http://www.sat.gob.mx/cfd/4}Comprobante",
-        "{http://www.sat.gob.mx/cfd/3}Comprobante",
-    }:
+    cfdi_namespace_versions = {
+        "{http://www.sat.gob.mx/cfd/4}Comprobante": "4.0",
+        "{http://www.sat.gob.mx/cfd/3}Comprobante": "3.3",
+    }
+    if root.tag not in cfdi_namespace_versions:
         raise IntakeError("El XML no es un comprobante CFDI reconocible.")
     kind = root.attrib.get("TipoDeComprobante", "")
     currency = root.attrib.get("Moneda", "")
     version = root.attrib.get("Version", "")
+    if version in {"3.3", "4.0"} and version != cfdi_namespace_versions[root.tag]:
+        raise IntakeError("La versión y el espacio de nombres del CFDI no coinciden.")
     issue_date = root.attrib.get("Fecha", "")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", issue_date):
         raise IntakeError("El CFDI no tiene una fecha de emisión reconocible.")
     try:
-        date.fromisoformat(issue_date[:10])
+        datetime.strptime(issue_date, "%Y-%m-%dT%H:%M:%S")
     except ValueError as exc:
-        raise IntakeError("El CFDI tiene una fecha de emisión inválida.") from exc
+        raise IntakeError("El CFDI tiene una fecha u hora de emisión inválida.") from exc
     addenda = sum(node.tag.rsplit("}", 1)[-1] == "Movimientos" for node in root.iter())
     return {
         "type": "cfdi_xml",

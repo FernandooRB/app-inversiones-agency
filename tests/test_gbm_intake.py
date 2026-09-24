@@ -311,6 +311,26 @@ def _xml_folder(*documents):
     return _MemoryFolder(files)
 
 
+@pytest.mark.parametrize("original,replacement,error", [
+    (b'Fecha="2026-04-03T10:20:30"', b'Fecha="2026-04-03T25:20:30"', "fecha u hora"),
+    (b'Version="4.0"', b'Version="3.3"', "versión y el espacio"),
+])
+def test_cfdi_rejects_invalid_time_or_namespace_version(original, replacement, error):
+    document = _synthetic_cfdi().replace(original, replacement)
+    with pytest.raises(IntakeError, match=error):
+        inspect_xml(document)
+    result = check_cfdi_arithmetic(_xml_folder(document))
+    assert result["cfdi_arithmetic_status"] == "REVIEW_REQUIRED"
+    assert result["cfdi_checks"]["parse_failures"] == 1
+
+
+def test_cfdi_accepts_matching_version_33_namespace():
+    document = (_synthetic_cfdi().replace(b"/cfd/4", b"/cfd/3")
+                .replace(b'Version="4.0"', b'Version="3.3"'))
+    result = check_cfdi_arithmetic(_xml_folder(document))
+    assert result["cfdi_arithmetic_status"] == "EXACT"
+
+
 def test_cfdi_arithmetic_checks_equations_without_exporting_values():
     result = check_cfdi_arithmetic(_xml_folder(_synthetic_cfdi()))
     assert result["cfdi_arithmetic_status"] == "EXACT"
