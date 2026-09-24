@@ -13,7 +13,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -248,6 +248,23 @@ DETAIL_TOTALS = {
     "cash": re.compile(r"^.*TOTAL.*EFECTIVO", re.I),
 }
 DETAIL_VALUE_COUNTS = {"debt": 3, "equity": 3, "cash": 2}
+POSITION_NUMBER = re.compile(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
+
+
+def _position_columns(line: str) -> list[Decimal]:
+    """Read the ten numeric columns of the observed equity position layout."""
+    tokens = line.split()[-10:]
+    if len(tokens) != 10:
+        raise IntakeError("La posición no tiene diez columnas numéricas.")
+    values = []
+    for token in tokens:
+        negative = token.startswith("(") and token.endswith(")")
+        number = token[1:-1] if negative else token
+        if not POSITION_NUMBER.fullmatch(number):
+            raise IntakeError("La posición tiene una columna numérica no reconocible.")
+        value = Decimal(number.replace(",", ""))
+        values.append(-value if negative else value)
+    return values
 
 
 def _detail_differences(raw: bytes, summary: _StatementSummary) -> tuple[dict[str, Decimal], Counter]:
@@ -306,6 +323,14 @@ def _detail_differences(raw: bytes, summary: _StatementSummary) -> tuple[dict[st
                 subtotals.append(subtotal)
                 positions = []
             elif len(amounts) == 4:
+                columns = _position_columns(line)
+                if columns[7] != amounts[1]:
+                    raise IntakeError("El valor de mercado no coincide con la columna esperada.")
+                calculated = columns[1] * columns[5]
+                if calculated.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) != columns[7]:
+                    raise IntakeError("Cantidad y precio no reproducen el valor de mercado.")
+                if calculated != columns[7]:
+                    counts["equity_quantity_price_rounded"] += 1
                 positions.append(amounts)
             elif amounts:
                 raise IntakeError("Hay una fila monetaria de posiciones con columnas inesperadas.")

@@ -62,7 +62,8 @@ def _gbm_summary_pdf(
     return stream.getvalue()
 
 
-def _gbm_detail_pdf(*, equity_cover=Decimal("100.00"), second_position=Decimal("60.00"),
+def _gbm_detail_pdf(*, equity_cover=Decimal("100.00"), detail_total=Decimal("100.00"),
+                    second_position=Decimal("60.00"), second_price=Decimal("20.0000"),
                     include_cash=True, incomplete_row=False):
     stream = BytesIO()
     page = canvas.Canvas(stream)
@@ -82,10 +83,10 @@ def _gbm_detail_pdf(*, equity_cover=Decimal("100.00"), second_position=Decimal("
     page.drawString(30, 540, "Titular: PERSONA FICTICIA Contrato: SYNTH12345 RFC: ABC010101AAA")
     page.showPage()
     detail = [
-        "RENTA VARIABLE", "SIMBOLO_A 1.00 40.00 40.00 0.00",
-        f"SIMBOLO_B 1.00 {second_position:.2f} 60.00 0.00",
-        "TOTAL: ACCIONES 100.00 0.00 100.00",
-        "TOTAL: RENTA VARIABLE 100.00 0.00 100.00",
+        "RENTA VARIABLE", "SIMBOLO_A 0 2 0 0 40.00 20.0000 19.0000 40.00 0.00 0.00",
+        f"SIMBOLO_B 0 3 0 0 60.00 {second_price:.4f} 19.0000 {second_position:.2f} 0.00 0.00",
+        f"TOTAL: ACCIONES {detail_total:.2f} 0.00 {detail_total:.2f}",
+        f"TOTAL: RENTA VARIABLE {detail_total:.2f} 0.00 {detail_total:.2f}",
     ]
     if incomplete_row:
         detail.insert(2, "SIMBOLO_INCOMPLETO 1.00 0.00 0.00")
@@ -273,6 +274,25 @@ def test_detail_totals_require_cash_total_even_when_positions_exist():
     ]))
     assert result["detail_status"] == "REVIEW_REQUIRED"
     assert result["detail_checks"]["detail_review_required"] == 1
+
+
+def test_detail_totals_reject_price_quantity_mismatch_even_when_subtotals_match():
+    result = check_statement_detail_totals(_MemoryFolder([
+        _MemoryFile(1, _gbm_detail_pdf(second_price=Decimal("20.1000"))),
+    ]))
+    assert result["detail_status"] == "REVIEW_REQUIRED"
+    assert result["detail_checks"]["detail_review_required"] == 1
+
+
+def test_detail_totals_accept_cent_rounding_of_quantity_times_price():
+    result = check_statement_detail_totals(_MemoryFolder([
+        _MemoryFile(1, _gbm_detail_pdf(
+            equity_cover=Decimal("100.01"), detail_total=Decimal("100.01"),
+            second_position=Decimal("60.01"), second_price=Decimal("20.0033"),
+        )),
+    ]))
+    assert result["detail_status"] == "EXACT"
+    assert result["detail_checks"]["equity_quantity_price_rounded"] == 1
 
 
 def test_detail_totals_reject_unrecognized_monetary_position_line():

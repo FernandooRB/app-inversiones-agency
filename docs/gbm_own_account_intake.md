@@ -31,7 +31,7 @@ clasificar o discrepancias mayores. Los dos últimos estados hacen que el comand
 código distinto de cero para impedir que se interpreten como una aprobación automática.
 
 Para comparar los totales de cierre del detalle con la portada y, cuando hay renta variable,
-sumar sus posiciones y subtotales visibles:
+sumar sus posiciones y subtotales visibles y comprobar cantidad por precio contra valor de mercado:
 
 ```powershell
 .\.venv\Scripts\python.exe -X utf8 scripts/inspect_gbm_intake.py Estados_de_Cuenta/GBM --check-detail-totals > data/private/gbm_detail_validation.json
@@ -40,6 +40,8 @@ sumar sus posiciones y subtotales visibles:
 Esta opción también ejecuta el control de portada. Devuelve sólo conteos: documentos revisados,
 categorías con detalle, posiciones y grupos de renta variable comprobados, así como diferencias
 exactas, de un centavo o mayores. Un total faltante, ambiguo o que no coincide obliga a revisión.
+La comprobación cantidad por precio redondea a centavos con la precisión impresa en el estado;
+si no reproduce el valor de mercado de la fila, el documento requiere revisión.
 `-X utf8` conserva los acentos válidos en el archivo JSON de salida en Windows.
 Si el estado marca `CENT_DIFFERENCES_NEED_REVIEW`, el centavo debe localizarse en el documento
 privado y resolverse antes de tratar el corte como conciliado. El control no identifica por sí
