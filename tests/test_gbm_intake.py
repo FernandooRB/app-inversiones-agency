@@ -16,6 +16,7 @@ from scripts.inspect_gbm_intake import (
     check_statement_cash_ledgers,
     check_statement_detail_totals,
     check_statement_equity_quantities,
+    check_statement_equity_trade_costs,
     check_statement_movement_dates,
     check_statement_summaries,
     inspect_pdf,
@@ -151,6 +152,9 @@ def _gbm_quantity_pdf(
     opening_equity=Decimal("0.00"), closing_cash=Decimal("60.00"),
     closing_equity=Decimal("40.00"), opening_qty=Decimal("0"), closing_qty=Decimal("2"),
     trade_qty=Decimal("2"), symbol="SYMA", trade_symbol="SYMA",
+    trade_action="COMPRA", trade_price=Decimal("20.0000"),
+    trade_commission=Decimal("0.00"), trade_interest=Decimal("0.00"),
+    trade_tax=Decimal("0.00"), trade_net_adjustment=Decimal("0.00"),
 ):
     stream = BytesIO()
     page = canvas.Canvas(stream)
@@ -190,10 +194,13 @@ def _gbm_quantity_pdf(
         f"01/01 0 EFECTIVO INICIAL 0.00 0.00 0.00 {opening_cash:.2f} {opening_cash:.2f}",
     ]
     if trade_qty:
-        net = trade_qty * Decimal("20.00")
+        gross = trade_qty * trade_price
+        sign = 1 if trade_action == "COMPRA" else -1
+        net = gross + sign * (trade_commission + trade_tax) + trade_net_adjustment
         lines.append(
-            f"10/10 1 COMPRA {trade_symbol} {trade_qty} 20.0000 {net:.2f} "
-            f"0.00 0.00 {net:.2f} {closing_cash:.2f}"
+            f"10/10 1 {trade_action} {trade_symbol} {trade_qty} {trade_price:.4f} "
+            f"{trade_commission:.2f} {trade_interest:.2f} {trade_tax:.2f} "
+            f"{net:.2f} {closing_cash:.2f}"
         )
     lines.append("MOVIMIENTOS DOCUMENTALES")
     for index, line in enumerate(lines):
@@ -567,3 +574,57 @@ def test_equity_quantities_reject_unmatched_trade_and_inconsistent_cut():
     ]))
     assert result["quantity_status"] == "REVIEW_REQUIRED"
     assert result["quantity_checks"]["equity_quantity_continuity_different"] == 1
+
+
+def test_equity_trade_costs_reconcile_buy_and_sale_without_private_output():
+    buy = _gbm_quantity_pdf(
+        trade_commission=Decimal("1.00"), trade_tax=Decimal("0.16"),
+        closing_cash=Decimal("58.84"),
+    )
+    sale = _gbm_quantity_pdf(
+        trade_action="VENTA", trade_qty=Decimal("1"), opening_qty=Decimal("2"),
+        closing_qty=Decimal("1"), opening_equity=Decimal("40.00"),
+        closing_equity=Decimal("20.00"), closing_cash=Decimal("118.84"),
+        trade_commission=Decimal("1.00"), trade_tax=Decimal("0.16"),
+    )
+    result = check_statement_equity_trade_costs(_MemoryFolder([
+        _MemoryFile(1, buy), _MemoryFile(2, sale),
+    ]))
+    assert result["trade_cost_status"] == "EXACT"
+    checks = result["trade_cost_checks"]
+    assert checks["trade_cost_documents_checked"] == 2
+    assert checks["equity_buy_rows"] == checks["equity_sale_rows"] == 1
+    assert checks["equity_trades_with_charge"] == 2
+    assert checks["trade_cost_exact"] == 2
+    serialized = json.dumps(result)
+    for secret in ("SYNTH12345", "PERSONA FICTICIA", "ABC010101AAA", "SYMA", "118.84"):
+        assert secret not in serialized
+
+
+def test_equity_trade_costs_separate_cent_rounding_and_unknown_interest():
+    cent = check_statement_equity_trade_costs(_MemoryFolder([
+        _MemoryFile(1, _gbm_quantity_pdf(trade_net_adjustment=Decimal("0.01"))),
+    ]))
+    assert cent["trade_cost_status"] == "CENT_DIFFERENCES_NEED_REVIEW"
+    assert cent["trade_cost_checks"]["trade_cost_one_cent"] == 1
+    material = check_statement_equity_trade_costs(_MemoryFolder([
+        _MemoryFile(1, _gbm_quantity_pdf(trade_net_adjustment=Decimal("0.02"))),
+    ]))
+    assert material["trade_cost_status"] == "REVIEW_REQUIRED"
+    assert material["trade_cost_checks"]["trade_cost_over_cent"] == 1
+    interest = check_statement_equity_trade_costs(_MemoryFolder([
+        _MemoryFile(1, _gbm_quantity_pdf(trade_interest=Decimal("1.00"))),
+    ]))
+    assert interest["trade_cost_status"] == "REVIEW_REQUIRED"
+    assert interest["trade_cost_checks"]["trade_cost_review_required"] == 1
+
+
+def test_equity_trade_costs_report_no_visible_trades_separately():
+    result = check_statement_equity_trade_costs(_MemoryFolder([
+        _MemoryFile(1, _gbm_quantity_pdf(
+            closing_cash=Decimal("100.00"), closing_equity=Decimal("0.00"),
+            trade_qty=Decimal("0"),
+        )),
+    ]))
+    assert result["trade_cost_status"] == "NO_EQUITY_TRADES"
+    assert result["trade_cost_checks"]["trade_cost_documents_checked"] == 1

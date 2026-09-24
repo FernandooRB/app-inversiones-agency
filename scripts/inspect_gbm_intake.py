@@ -615,6 +615,102 @@ def _trade_quantity(line: str) -> Decimal:
     return quantity
 
 
+def _is_equity_trade_row(line: str) -> bool:
+    upper = line.upper()
+    return (bool(CASH_MOVEMENT_DAY_PAIR.match(line))
+            and ("COMPRA" in upper or "VENTA" in upper) and "REPORTO" not in upper)
+
+
+def _equity_trade_cost_difference(line: str) -> tuple[Decimal, bool, bool]:
+    """Compare the printed net with quantity, price, commission and tax."""
+    upper = line.upper()
+    if "COMPRA" in upper and "VENTA" in upper:
+        raise IntakeError("Una compraventa tiene dirección ambigua.")
+    is_buy = "COMPRA" in upper
+    tokens = line.split()
+    quantity = _trade_quantity(line)
+    price_token = tokens[-6]
+    if not POSITION_NUMBER.fullmatch(price_token):
+        raise IntakeError("El precio de una compraventa no es reconocible.")
+    price = Decimal(price_token.replace(",", ""))
+    if price <= 0:
+        raise IntakeError("El precio de una compraventa debe ser positivo.")
+    amounts = _money_values(line)
+    if len(amounts) != 5:
+        raise IntakeError("Una compraventa tiene columnas monetarias inesperadas.")
+    commission, interest, tax, net, _balance = amounts
+    if interest != 0 or min(commission, tax, net) < 0:
+        raise IntakeError("Una compraventa tiene cargos que requieren revisión manual.")
+    gross = (quantity * price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    expected = gross + commission + tax if is_buy else gross - commission - tax
+    return expected - net, is_buy, commission > 0 or tax > 0
+
+
+def _equity_trade_cost_counts(raw: bytes) -> Counter:
+    offset = raw.find(b"%PDF-")
+    try:
+        reader = PdfReader(BytesIO(raw[offset:]), strict=True)
+        lines = [line for page in reader.pages[1:]
+                 for line in (page.extract_text() or "").splitlines()]
+    except Exception as exc:
+        raise IntakeError("No se pudo leer la tabla de compraventas del PDF.") from exc
+    headings = [index for index, line in enumerate(lines) if "MOVIMIENTOS" in line.upper()]
+    if len(headings) != 2:
+        raise IntakeError("La tabla de compraventas no tiene límites reconocibles.")
+    counts = Counter({"trade_cost_documents_checked": 1})
+    for line in lines[headings[0] + 1:headings[1]]:
+        if not _is_equity_trade_row(line):
+            continue
+        difference, is_buy, has_charge = _equity_trade_cost_difference(line)
+        counts["equity_buy_rows" if is_buy else "equity_sale_rows"] += 1
+        counts[f"trade_cost_{_difference_kind(difference)}"] += 1
+        if has_charge:
+            counts["equity_trades_with_charge"] += 1
+    return counts
+
+
+def check_statement_equity_trade_costs(root: Path) -> dict[str, object]:
+    """Reconcile visible equity trade net values without exporting any values."""
+    if not root.is_dir() or root.is_symlink():
+        raise IntakeError("Selecciona una carpeta local válida, sin enlaces simbólicos.")
+    counts = Counter()
+    try:
+        files = sorted(root.rglob("*"))
+    except OSError as exc:
+        raise IntakeError("No se pudo enumerar la carpeta local.") from exc
+    for path in files:
+        try:
+            if path.is_symlink():
+                counts["symlink_rejected"] += 1
+                continue
+            if not path.is_file() or path.suffix.lower() != ".pdf":
+                continue
+            if path.stat().st_size > MAX_FILE_BYTES:
+                raise IntakeError("El PDF excede el tamaño permitido.")
+            raw = path.read_bytes()
+            _statement_summary(raw)
+            counts.update(_equity_trade_cost_counts(raw))
+        except (OSError, IntakeError):
+            counts["trade_cost_review_required"] += 1
+    trades = counts["equity_buy_rows"] + counts["equity_sale_rows"]
+    if (not counts["trade_cost_documents_checked"] or counts["trade_cost_review_required"]
+            or counts["symlink_rejected"] or counts["trade_cost_over_cent"]):
+        status = "REVIEW_REQUIRED"
+    elif not trades:
+        status = "NO_EQUITY_TRADES"
+    elif counts["trade_cost_one_cent"]:
+        status = "CENT_DIFFERENCES_NEED_REVIEW"
+    else:
+        status = "EXACT"
+    return {
+        "trade_cost_status": status,
+        "trade_cost_checks": dict(sorted(counts.items())),
+        "caution": "Sólo compara compraventas visibles de renta variable con cantidad, precio, "
+                   "comisión, impuesto y neto impresos. Un interés no nulo exige revisión. "
+                   "No determina el tratamiento fiscal ni el costo total de la cartera.",
+    }
+
+
 def _equity_quantity_bridge(
     raw: bytes, summary: _StatementSummary,
 ) -> tuple[dict[str, tuple[Decimal, Decimal]], Counter]:
@@ -659,9 +755,7 @@ def _equity_quantity_bridge(
         raise IntakeError("El libro de movimientos no tiene límites reconocibles.")
     trades = [
         line for line in lines[headings[0] + 1:headings[1]]
-        if CASH_MOVEMENT_DAY_PAIR.match(line)
-        and ("COMPRA" in line.upper() or "VENTA" in line.upper())
-        and "REPORTO" not in line.upper()
+        if _is_equity_trade_row(line)
     ]
     counts = Counter({"quantity_documents_checked": 1, "equity_position_rows": len(positions),
                       "equity_trade_rows": len(trades)})
@@ -886,9 +980,13 @@ def main() -> None:
         "--check-movement-days", action="store_true",
         help="Revisa la plausibilidad de los dos días impresos en cada movimiento.",
     )
+    parser.add_argument(
+        "--check-equity-trade-costs", action="store_true",
+        help="Concilia cantidad, precio, comisión, impuesto y neto de compraventas visibles.",
+    )
     arguments = parser.parse_args()
     check_cash = (arguments.check_cash_ledger or arguments.check_equity_quantities
-                  or arguments.check_movement_days)
+                  or arguments.check_movement_days or arguments.check_equity_trade_costs)
     check_detail = arguments.check_detail_totals or check_cash
     check_cover = arguments.check_summaries or check_detail
     try:
@@ -903,6 +1001,8 @@ def main() -> None:
             result["equity_quantities"] = check_statement_equity_quantities(arguments.folder)
         if arguments.check_movement_days:
             result["movement_days"] = check_statement_movement_dates(arguments.folder)
+        if arguments.check_equity_trade_costs:
+            result["equity_trade_costs"] = check_statement_equity_trade_costs(arguments.folder)
     except IntakeError as exc:
         parser.exit(2, f"Error: {exc}\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -914,6 +1014,9 @@ def main() -> None:
             and result["equity_quantities"]["quantity_status"] != "EXACT")
         or (arguments.check_movement_days
             and result["movement_days"]["date_status"] != "STRUCTURALLY_PLAUSIBLE")
+        or (arguments.check_equity_trade_costs
+            and result["equity_trade_costs"]["trade_cost_status"] not in
+            {"EXACT", "NO_EQUITY_TRADES"})
     ):
         parser.exit(3)
 

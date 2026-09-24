@@ -96,6 +96,25 @@ La opción ejecuta también los controles de portada, detalle y efectivo, de mod
 pendientes de un centavo mantienen el código de salida distinto de cero aunque los días sean
 estructuralmente plausibles.
 
+Para comprobar el neto de las compraventas visibles de renta variable contra cantidad, precio,
+comisión e impuesto impresos:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/inspect_gbm_intake.py Estados_de_Cuenta/GBM --check-equity-trade-costs > data/private/gbm_trade_cost_validation.json
+```
+
+El control reconoce las columnas de comisión, interés, impuesto, neto y saldo. Para compras,
+compara el neto con cantidad por precio más comisión e impuesto; para ventas, resta ambos cargos.
+Redondea el nominal calculado a centavos con el precio impreso. Un interés no nulo, un precio no
+reconocible o un formato distinto exige revisión manual; no se inventa una regla para esos casos.
+La regla de venta está cubierta por documentos sintéticos, pero aún debe contrastarse con una
+venta real del mismo formato antes de usarla en un expediente de cliente.
+`EXACT` sólo significa que la aritmética visible cuadra. `CENT_DIFFERENCES_NEED_REVIEW` conserva
+las diferencias de un centavo como pendientes, y `NO_EQUITY_TRADES` indica que no hubo filas
+aplicables. El control no deduce si el impuesto corresponde a IVA, retención u otro concepto,
+ni determina costo fiscal, comisiones de otros productos, liquidación o integridad de operaciones.
+La opción también ejecuta los controles de portada, detalle y efectivo.
+
 La dependencia `pypdf` está en `requirements-dev.txt`; esta herramienta es una revisión local,
 no un importador listo para recibir documentos de clientes. Un XML CFDI de ingreso puede servir
 para contrastar cargos facturados, pero no es por sí mismo una exportación de posiciones. Si un
