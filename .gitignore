@@ -9,3 +9,7 @@ venv/
 .env
 .streamlit/secrets.toml
 *.pdf
+data/private/
+output/private/
+tmp/private/
+Estados_de_Cuenta/
