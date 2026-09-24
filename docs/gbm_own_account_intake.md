@@ -131,6 +131,25 @@ con su vencimiento; tampoco valida tasa, plazo, retención ni tratamiento fiscal
 rendimiento debe conservarse el neto del documento y resolverse cualquier discrepancia, sin
 sustituirlo por el producto recalculado. La opción también ejecuta portada, detalle y efectivo.
 
+Para comprobar la correspondencia entre compras y vencimientos de reporto de cortes contiguos:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/inspect_gbm_intake.py Estados_de_Cuenta/GBM --check-reporto-pairs > data/private/gbm_reporto_pairs_validation.json
+```
+
+El emparejamiento se limita a un mismo contrato verificado en la portada y exige una clave
+impresa única (emisora, serie, identificador, títulos, tasa y plazo) entre compras aún abiertas.
+También comprueba que el intervalo entre los primeros días plausibles sea igual al plazo impreso
+y sólo interpreta plazos positivos de hasta 366 días; otros casos exigen revisión. Comprueba además
+que el neto de compra más interés menos impuesto coincida con el neto de vencimiento. Un corte
+faltante, una compra ambigua, una compra abierta al último corte o una diferencia mayor de un
+centavo exige revisión. `STRUCTURALLY_PLAUSIBLE` sólo se usa cuando las relaciones impresas
+cuadran; `CENT_DIFFERENCES_NEED_REVIEW` conserva los centavos tanto de filas como de pares.
+Esta comprobación no confirma por sí sola que el primer día sea la fecha de operación, que el
+interés o impuesto se hayan calculado correctamente, ni que estén completos todos los reportos.
+No debe transformarse en una confirmación fiscal o de rendimiento sin una fuente independiente.
+La opción incluye el control de netos de reporto y los controles de portada, detalle y efectivo.
+
 La dependencia `pypdf` está en `requirements-dev.txt`; esta herramienta es una revisión local,
 no un importador listo para recibir documentos de clientes. Un XML CFDI de ingreso puede servir
 para contrastar cargos facturados, pero no es por sí mismo una exportación de posiciones. Si un

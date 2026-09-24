@@ -25,6 +25,7 @@ from pypdf import PdfReader
 MAX_FILE_BYTES = 20_000_000
 MAX_PDF_PAGES = 100
 MAX_WRAPPER_BYTES = 512
+MAX_REPORTO_TERM_DAYS = 366
 PERIOD = re.compile(rb"\b(\d{2})-(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)-(\d{2})\b")
 MONTHS = {month: index for index, month in enumerate(
     (b"ENE", b"FEB", b"MAR", b"ABR", b"MAY", b"JUN", b"JUL", b"AGO", b"SEP", b"OCT", b"NOV", b"DIC"),
@@ -493,8 +494,10 @@ def check_statement_cash_ledgers(root: Path) -> dict[str, object]:
     }
 
 
-def _movement_date_counts(raw: bytes, summary: _StatementSummary) -> Counter:
-    """Check the two printed day fragments without asserting their business meaning."""
+def _movement_date_details(
+    raw: bytes, summary: _StatementSummary,
+) -> tuple[list[str], list[date], Counter]:
+    """Resolve printed day fragments for internal checks without asserting their meaning."""
     offset = raw.find(b"%PDF-")
     try:
         reader = PdfReader(BytesIO(raw[offset:]), strict=True)
@@ -541,11 +544,13 @@ def _movement_date_counts(raw: bytes, summary: _StatementSummary) -> Counter:
                            if index == len(candidate_days) - 1 or
                            any(item <= following for following in backward[index + 1])}
     counts = Counter({"date_documents_checked": 1, "movement_rows_checked": len(candidate_days)})
+    resolved_dates = []
     for index, second in enumerate(second_fragments):
         possibilities = forward[index] & backward[index]
         if len(possibilities) != 1:
             raise IntakeError("Un día de movimiento tiene más de una fecha posible.")
         first_date = next(iter(possibilities))
+        resolved_dates.append(first_date)
         if len(candidate_days[index]) > 1:
             counts["first_days_resolved_by_order"] += 1
         plausible = [lag for lag in range(MAX_PLAUSIBLE_DAY_LAG + 1)
@@ -553,7 +558,12 @@ def _movement_date_counts(raw: bytes, summary: _StatementSummary) -> Counter:
         if len(plausible) != 1:
             raise IntakeError("El segundo día no sigue al primero en el plazo de revisión.")
         counts[f"observed_day_lag_{plausible[0]}"] += 1
-    return counts
+    return rows[1:], resolved_dates, counts
+
+
+def _movement_date_counts(raw: bytes, summary: _StatementSummary) -> Counter:
+    """Check the two printed day fragments without asserting their business meaning."""
+    return _movement_date_details(raw, summary)[2]
 
 
 def check_statement_movement_dates(root: Path) -> dict[str, object]:
@@ -805,6 +815,129 @@ def check_statement_reporto_net(root: Path) -> dict[str, object]:
         "caution": "Sólo compara netos de compras y vencimientos de reporto visibles con títulos "
                    "por precio y el impuesto impreso. No concilia por separado intereses, tasas, "
                    "plazos, emparejamiento compra-vencimiento ni tratamiento fiscal.",
+    }
+
+
+@dataclass(frozen=True, repr=False)
+class _ReportoEntry:
+    """Private working values for one visible reporto row; never serialized."""
+
+    first_day: date
+    key: tuple[str, ...]
+    term_days: int
+    net: Decimal
+    interest: Decimal
+    tax: Decimal
+    is_buy: bool
+
+
+def _reporto_pair_entries(
+    raw: bytes, summary: _StatementSummary,
+) -> tuple[list[_ReportoEntry], Counter]:
+    rows, first_dates, _date_counts = _movement_date_details(raw, summary)
+    counts = Counter({"pair_documents_checked": 1})
+    entries = []
+    for line, first_day in zip(rows, first_dates, strict=True):
+        if not re.search(r"\bREPORTO\b", line.upper()):
+            continue
+        difference, is_buy, _has_interest, _has_tax = _reporto_net_difference(line)
+        tokens = line.split()
+        term_token = tokens[-6]
+        if len(term_token) > 3 or not re.fullmatch(r"[1-9]\d*", term_token):
+            raise IntakeError("El plazo de un reporto no es reconocible.")
+        term_days = int(term_token)
+        if term_days > MAX_REPORTO_TERM_DAYS:
+            raise IntakeError("El plazo de un reporto excede el límite de revisión.")
+        amounts = _money_values(line)
+        key = tuple(tokens[index].upper() for index in (4, 5, 6, 7, 9, 10))
+        entries.append(_ReportoEntry(
+            first_day=first_day, key=key, term_days=term_days,
+            net=amounts[-2], interest=amounts[-4], tax=amounts[-3], is_buy=is_buy,
+        ))
+        counts["pair_buy_rows" if is_buy else "pair_maturity_rows"] += 1
+        counts[f"pair_row_net_{_difference_kind(difference)}"] += 1
+    return entries, counts
+
+
+def check_statement_reporto_pairs(root: Path) -> dict[str, object]:
+    """Match visible reporto buys and maturities by private printed keys and order."""
+    if not root.is_dir() or root.is_symlink():
+        raise IntakeError("Selecciona una carpeta local válida, sin enlaces simbólicos.")
+    counts = Counter()
+    by_contract: dict[str, list[tuple[_StatementSummary, list[_ReportoEntry]]]] = defaultdict(list)
+    try:
+        files = sorted(root.rglob("*"))
+    except OSError as exc:
+        raise IntakeError("No se pudo enumerar la carpeta local.") from exc
+    for path in files:
+        try:
+            if path.is_symlink():
+                counts["symlink_rejected"] += 1
+                continue
+            if not path.is_file() or path.suffix.lower() != ".pdf":
+                continue
+            if path.stat().st_size > MAX_FILE_BYTES:
+                raise IntakeError("El PDF excede el tamaño permitido.")
+            raw = path.read_bytes()
+            summary = _statement_summary(raw)
+            entries, document_counts = _reporto_pair_entries(raw, summary)
+        except (OSError, IntakeError):
+            counts["pair_review_required"] += 1
+            continue
+        counts.update(document_counts)
+        by_contract[summary.contract].append((summary, entries))
+    for statements in by_contract.values():
+        ordered = sorted(statements, key=lambda item: item[0].end)
+        if len({summary.end for summary, _ in ordered}) != len(ordered):
+            counts["duplicate_contract_cuts"] += 1
+            continue
+        if any(previous.end != current.start for (previous, _), (current, _) in
+               zip(ordered, ordered[1:], strict=False)):
+            counts["nonadjacent_periods"] += 1
+            continue
+        open_buys: dict[tuple[str, ...], list[_ReportoEntry]] = defaultdict(list)
+        for _summary, entries in ordered:
+            for entry in entries:
+                if entry.is_buy:
+                    open_buys[entry.key].append(entry)
+                    continue
+                candidates = open_buys[entry.key]
+                if not candidates:
+                    counts["pair_missing_buy"] += 1
+                    continue
+                if len(candidates) != 1:
+                    counts["pair_ambiguous_buy"] += 1
+                    continue
+                buy = candidates.pop()
+                if buy.first_day + timedelta(days=buy.term_days) != entry.first_day:
+                    counts["pair_term_day_mismatch"] += 1
+                else:
+                    counts["pair_term_day_plausible"] += 1
+                difference = buy.net + entry.interest - entry.tax - entry.net
+                counts[f"pair_interest_bridge_{_difference_kind(difference)}"] += 1
+                counts["pairs_matched"] += 1
+        counts["pair_open_buy_at_last_cut"] += sum(len(items) for items in open_buys.values())
+    blockers = (
+        "pair_review_required", "symlink_rejected", "duplicate_contract_cuts",
+        "nonadjacent_periods", "pair_missing_buy", "pair_ambiguous_buy",
+        "pair_term_day_mismatch", "pair_open_buy_at_last_cut",
+        "pair_interest_bridge_over_cent", "pair_row_net_over_cent",
+    )
+    if not counts["pair_documents_checked"] or any(counts[name] for name in blockers):
+        status = "REVIEW_REQUIRED"
+    elif not counts["pair_buy_rows"] and not counts["pair_maturity_rows"]:
+        status = "NO_REPORTO_ROWS"
+    elif counts["pair_interest_bridge_one_cent"] or counts["pair_row_net_one_cent"]:
+        status = "CENT_DIFFERENCES_NEED_REVIEW"
+    else:
+        status = "STRUCTURALLY_PLAUSIBLE"
+    return {
+        "pair_status": status,
+        "pair_checks": dict(sorted(counts.items())),
+        "caution": "Empareja reportos por contrato, clave impresa y orden; compara el plazo con "
+                   "el primer día plausible de cada fila y el neto de compra más interés menos "
+                   "impuesto con el neto del vencimiento. No confirma el significado de "
+                   "las fechas ni el cálculo de interés o impuesto.",
     }
 
 
@@ -1085,10 +1218,15 @@ def main() -> None:
         "--check-reporto-net", action="store_true",
         help="Concilia netos impresos de compras y vencimientos de reporto visibles.",
     )
+    parser.add_argument(
+        "--check-reporto-pairs", action="store_true",
+        help="Empareja compras y vencimientos de reporto por contrato, clave y plazo impresos.",
+    )
     arguments = parser.parse_args()
+    check_reporto = arguments.check_reporto_net or arguments.check_reporto_pairs
     check_cash = (arguments.check_cash_ledger or arguments.check_equity_quantities
                   or arguments.check_movement_days or arguments.check_equity_trade_costs
-                  or arguments.check_reporto_net)
+                  or check_reporto)
     check_detail = arguments.check_detail_totals or check_cash
     check_cover = arguments.check_summaries or check_detail
     try:
@@ -1105,8 +1243,10 @@ def main() -> None:
             result["movement_days"] = check_statement_movement_dates(arguments.folder)
         if arguments.check_equity_trade_costs:
             result["equity_trade_costs"] = check_statement_equity_trade_costs(arguments.folder)
-        if arguments.check_reporto_net:
+        if check_reporto:
             result["reporto_net"] = check_statement_reporto_net(arguments.folder)
+        if arguments.check_reporto_pairs:
+            result["reporto_pairs"] = check_statement_reporto_pairs(arguments.folder)
     except IntakeError as exc:
         parser.exit(2, f"Error: {exc}\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -1121,8 +1261,11 @@ def main() -> None:
         or (arguments.check_equity_trade_costs
             and result["equity_trade_costs"]["trade_cost_status"] not in
             {"EXACT", "NO_EQUITY_TRADES"})
-        or (arguments.check_reporto_net
+        or (check_reporto
             and result["reporto_net"]["reporto_status"] not in {"EXACT", "NO_REPORTO_ROWS"})
+        or (arguments.check_reporto_pairs
+            and result["reporto_pairs"]["pair_status"] not in
+            {"STRUCTURALLY_PLAUSIBLE", "NO_REPORTO_ROWS"})
     ):
         parser.exit(3)
 

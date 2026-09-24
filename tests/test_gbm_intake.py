@@ -19,6 +19,7 @@ from scripts.inspect_gbm_intake import (
     check_statement_equity_trade_costs,
     check_statement_movement_dates,
     check_statement_reporto_net,
+    check_statement_reporto_pairs,
     check_statement_summaries,
     inspect_pdf,
     inspect_xml,
@@ -110,7 +111,8 @@ def _gbm_detail_pdf(*, equity_cover=Decimal("100.00"), detail_total=Decimal("100
     return stream.getvalue()
 
 
-def _gbm_cash_pdf(*, closing=Decimal("110.00"), last_operation="COMPRA REPORTO",
+def _gbm_cash_pdf(*, opening=Decimal("100.00"), closing=Decimal("110.00"),
+                  last_operation="COMPRA REPORTO",
                   include_opening=True, split_pages=False, start="31-DIC-25",
                   end="30-ENE-26", first_day="15/15", second_day="20/20",
                   movement_rows=None):
@@ -123,15 +125,15 @@ def _gbm_cash_pdf(*, closing=Decimal("110.00"), last_operation="COMPRA REPORTO",
         "GARANTIAS", "OTRAS INVERSIONES", "CREDITOS DE MARGEN", "EFECTIVO", "DERIVADOS",
     ]
     for index, label in enumerate(labels):
-        opening = Decimal("100.00") if label == "EFECTIVO" else Decimal("0.00")
+        row_opening = opening if label == "EFECTIVO" else Decimal("0.00")
         final = closing if label == "EFECTIVO" else Decimal("0.00")
-        page.drawString(30, 760 - 20 * index, f"{label} {opening:.2f} {final:.2f} 0.00")
-    page.drawString(30, 580, f"VALOR DEL PORTAFOLIO 100.00 {closing:.2f} 100.00")
+        page.drawString(30, 760 - 20 * index, f"{label} {row_opening:.2f} {final:.2f} 0.00")
+    page.drawString(30, 580, f"VALOR DEL PORTAFOLIO {opening:.2f} {closing:.2f} 100.00")
     page.drawString(30, 540, "Titular: PERSONA FICTICIA Contrato: SYNTH12345 RFC: ABC010101AAA")
     page.showPage()
     lines = ["MOVIMIENTOS DE OPERACIONES", "FECHA DESCRIPCION IMPORTE NETO SALDO"]
     if include_opening:
-        lines.append("31/12 0 EFECTIVO INICIAL 0.00 0.00 0.00 100.00 100.00")
+        lines.append(f"31/12 0 EFECTIVO INICIAL 0.00 0.00 0.00 {opening:.2f} {opening:.2f}")
     if movement_rows is None:
         movement_rows = [
             f"{first_day} 1 DEPOSITO EFECTIVO 0.00 0.00 0.00 20.00 120.00",
@@ -633,15 +635,23 @@ def test_equity_trade_costs_report_no_visible_trades_separately():
     assert result["trade_cost_checks"]["trade_cost_documents_checked"] == 1
 
 
+def _gbm_reporto_line(day, folio, label, term, net, balance, *,
+                     commission=Decimal("0.00"), interest=Decimal("0.00"),
+                     tax=Decimal("0.00"), unit_price="1.234567"):
+    return (f"{day} {folio} {label} EMISORA SERIE 0 20 {unit_price} 8.50 {term} "
+            f"{commission:.2f} {interest:.2f} {tax:.2f} {net:.2f} {balance:.2f}")
+
+
 def _gbm_reporto_pdf(*, maturity_net=Decimal("24.68"),
                      maturity_commission=Decimal("0.00"), maturity_label="VENCIMIENTO REPORTO",
-                     unit_price="1.234567"):
+                     maturity_interest=Decimal("0.20"), unit_price="1.234567"):
     closing = Decimal("75.31") + maturity_net
     return _gbm_cash_pdf(closing=closing, movement_rows=[
-        f"10/10 1 COMPRA REPORTO EMISORA SERIE 0 20 {unit_price} 8.50 1 "
-        "0.00 0.00 0.00 24.69 75.31",
-        f"11/11 2 {maturity_label} EMISORA SERIE 0 20 {unit_price} 8.50 1 "
-        f"{maturity_commission:.2f} 0.20 0.01 {maturity_net:.2f} {closing:.2f}",
+        _gbm_reporto_line("10/10", 1, "COMPRA REPORTO", 1, Decimal("24.69"),
+                          Decimal("75.31"), unit_price=unit_price),
+        _gbm_reporto_line("11/11", 2, maturity_label, 1, maturity_net, closing,
+                          commission=maturity_commission, interest=maturity_interest,
+                          tax=Decimal("0.01"), unit_price=unit_price),
     ])
 
 
@@ -695,3 +705,92 @@ def test_reporto_net_reports_no_rows_and_unknown_operation_separately():
     ]))
     assert unknown["reporto_status"] == "REVIEW_REQUIRED"
     assert unknown["reporto_checks"]["reporto_review_required"] == 1
+
+
+def test_reporto_pairs_match_across_adjacent_cuts_without_private_output():
+    january = _gbm_cash_pdf(closing=Decimal("75.31"), movement_rows=[
+        _gbm_reporto_line("30/30", 1, "COMPRA REPORTO", 3,
+                          Decimal("24.69"), Decimal("75.31")),
+    ])
+    february = _gbm_cash_pdf(
+        start="30-ENE-26", end="27-FEB-26", opening=Decimal("75.31"),
+        closing=Decimal("100.19"), movement_rows=[
+            _gbm_reporto_line("02/02", 2, "VENCIMIENTO REPORTO", 3,
+                              Decimal("24.88"), Decimal("100.19"),
+                              interest=Decimal("0.20"), tax=Decimal("0.01"),
+                              unit_price="1.244500"),
+        ],
+    )
+    result = check_statement_reporto_pairs(_MemoryFolder([
+        _MemoryFile(1, january), _MemoryFile(2, february),
+    ]))
+    assert result["pair_status"] == "STRUCTURALLY_PLAUSIBLE"
+    checks = result["pair_checks"]
+    assert checks["pair_documents_checked"] == 2
+    assert checks["pairs_matched"] == checks["pair_term_day_plausible"] == 1
+    assert checks["pair_interest_bridge_exact"] == 1
+    assert checks["pair_open_buy_at_last_cut"] == 0
+    serialized = json.dumps(result)
+    for secret in ("SYNTH12345", "PERSONA FICTICIA", "ABC010101AAA", "EMISORA", "100.19"):
+        assert secret not in serialized
+
+
+def test_reporto_pairs_keep_cent_interest_bridge_for_review():
+    result = check_statement_reporto_pairs(_MemoryFolder([
+        _MemoryFile(1, _gbm_reporto_pdf(maturity_interest=Decimal("0.01"))),
+    ]))
+    assert result["pair_status"] == "CENT_DIFFERENCES_NEED_REVIEW"
+    assert result["pair_checks"]["pair_interest_bridge_one_cent"] == 1
+
+
+def test_reporto_pairs_reject_ambiguous_buy_and_wrong_term_day():
+    ambiguous = _gbm_cash_pdf(closing=Decimal("75.30"), movement_rows=[
+        _gbm_reporto_line("10/10", 1, "COMPRA REPORTO", 1,
+                          Decimal("24.69"), Decimal("75.31")),
+        _gbm_reporto_line("10/10", 2, "COMPRA REPORTO", 1,
+                          Decimal("24.69"), Decimal("50.62")),
+        _gbm_reporto_line("11/11", 3, "VENCIMIENTO REPORTO", 1,
+                          Decimal("24.68"), Decimal("75.30"),
+                          interest=Decimal("0.20"), tax=Decimal("0.01")),
+    ])
+    result = check_statement_reporto_pairs(_MemoryFolder([_MemoryFile(1, ambiguous)]))
+    assert result["pair_status"] == "REVIEW_REQUIRED"
+    assert result["pair_checks"]["pair_ambiguous_buy"] == 1
+
+    wrong_day = _gbm_cash_pdf(closing=Decimal("99.99"), movement_rows=[
+        _gbm_reporto_line("10/10", 1, "COMPRA REPORTO", 1,
+                          Decimal("24.69"), Decimal("75.31")),
+        _gbm_reporto_line("12/12", 2, "VENCIMIENTO REPORTO", 1,
+                          Decimal("24.68"), Decimal("99.99"),
+                          interest=Decimal("0.20"), tax=Decimal("0.01")),
+    ])
+    result = check_statement_reporto_pairs(_MemoryFolder([_MemoryFile(1, wrong_day)]))
+    assert result["pair_status"] == "REVIEW_REQUIRED"
+    assert result["pair_checks"]["pair_term_day_mismatch"] == 1
+
+
+def test_reporto_pairs_require_complete_buy_and_maturity_history():
+    maturity_only = _gbm_cash_pdf(closing=Decimal("124.68"), movement_rows=[
+        _gbm_reporto_line("11/11", 2, "VENCIMIENTO REPORTO", 1,
+                          Decimal("24.68"), Decimal("124.68"),
+                          interest=Decimal("0.20"), tax=Decimal("0.01")),
+    ])
+    result = check_statement_reporto_pairs(_MemoryFolder([_MemoryFile(1, maturity_only)]))
+    assert result["pair_status"] == "REVIEW_REQUIRED"
+    assert result["pair_checks"]["pair_missing_buy"] == 1
+
+    buy_only = _gbm_cash_pdf(closing=Decimal("75.31"), movement_rows=[
+        _gbm_reporto_line("10/10", 1, "COMPRA REPORTO", 1,
+                          Decimal("24.69"), Decimal("75.31")),
+    ])
+    result = check_statement_reporto_pairs(_MemoryFolder([_MemoryFile(1, buy_only)]))
+    assert result["pair_status"] == "REVIEW_REQUIRED"
+    assert result["pair_checks"]["pair_open_buy_at_last_cut"] == 1
+
+    excessive_term = _gbm_cash_pdf(closing=Decimal("75.31"), movement_rows=[
+        _gbm_reporto_line("10/10", 1, "COMPRA REPORTO", 367,
+                          Decimal("24.69"), Decimal("75.31")),
+    ])
+    result = check_statement_reporto_pairs(_MemoryFolder([_MemoryFile(1, excessive_term)]))
+    assert result["pair_status"] == "REVIEW_REQUIRED"
+    assert result["pair_checks"]["pair_review_required"] == 1
