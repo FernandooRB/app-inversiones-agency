@@ -1,5 +1,8 @@
 # Ruta de validación para un piloto con datos reales
 
+La [secuencia operativa del primer piloto](first_real_client_pilot.md) fija las decisiones previas,
+evidencias y criterios de entrega. Esta matriz detalla los controles técnicos por validar.
+
 **Destino del producto:** análisis de carteras y documentos basados en datos reales de clientes, no en
 casos inventados. Los casos ficticios del repositorio sirven sólo para pruebas y revisión visual.
 La aplicación actual importa datos de posiciones sin identificadores y no conserva expedientes. Esta

@@ -4,7 +4,11 @@ Aplicación educativa de uso interno en Streamlit para analizar asignaciones de 
 portafolios de máximo Sharpe y mínima volatilidad, una frontera eficiente, VaR, CVaR y un reporte PDF.
 Los ejemplos ficticios verifican el software; el producto previsto para clientes utilizará datos
 reales sólo después de completar la [matriz de validación del piloto](docs/real_data_pilot.md).
-Incluye [escenarios Monte Carlo](docs/monte_carlo.md) para investigación interna,
+El [plan del primer caso real](docs/first_real_client_pilot.md) ordena las decisiones jurídicas,
+laborales, de privacidad y de datos que faltan antes de recibir o entregar expedientes.
+El [procedimiento local de revisión de estados GBM](docs/gbm_own_account_intake.md) separa la
+clasificación técnica de los resultados privados del caso.
+La aplicación incluye [escenarios Monte Carlo](docs/monte_carlo.md) para investigación interna,
 con métodos histórico por bloques y lognormal correlacionado, y
 [pruebas de estrés](docs/stress_testing.md) históricas e hipotéticas con shocks documentados
 por activo o por clase declarada y contribuciones por instrumento. El
