@@ -160,13 +160,20 @@ Este control es independiente de las opciones PDF. En CFDI de ingreso o egreso 3
 la suma de conceptos con el subtotal, los descuentos de concepto con el descuento global, los
 impuestos trasladados y retenidos de conceptos y del nodo global con sus totales, y la ecuación
 subtotal menos descuento más traslados menos retenciones igual al total. Sólo informa conteos de
-ecuaciones exactas, con diferencia de hasta un centavo o mayores; una diferencia, un archivo
-ilegible, duplicado o fuera del alcance exige revisión y devuelve código distinto de cero. Los 11
-XML del piloto propio cuadraron exactamente en estas ecuaciones. Esto **no comprueba timbrado,
-autenticidad, tratamiento fiscal, vínculo con un contrato ni correspondencia con cargos del PDF**.
+ecuaciones exactas, con diferencia de hasta un centavo o mayores, y distingue comprobantes con
+total cero de comprobantes con importe positivo. Una diferencia, un archivo ilegible, duplicado o
+fuera del alcance exige revisión y devuelve código distinto de cero. Los 11 XML del piloto propio
+cuadraron exactamente en estas ecuaciones: siete tienen total cero por descuento completo y cuatro
+tienen importe positivo. Esto **no comprueba timbrado, autenticidad, tratamiento fiscal, vínculo
+con un contrato ni correspondencia con cargos del PDF**.
 Diez de los once XML contienen una referencia explícita a un contrato presente en los estados;
-el restante carece de esa referencia en el contenido y su ubicación en una carpeta no la sustituye.
-No se asignará ese comprobante a una cuenta por inferencia.
+el restante, que tiene importe positivo, carece de esa referencia en el contenido y su ubicación
+en una carpeta no la sustituye. No se asignará ese comprobante a una cuenta por inferencia. En la
+comparación exploratoria, ninguno de los cuatro comprobantes con importe positivo coincidió, por
+importe de comisión más impuesto, con una fila individual de cargos del libro de movimientos PDF.
+Una igualdad de ceros entre un CFDI descontado y un periodo sin cargos no demuestra conciliación.
+Se requiere identificar el alcance de cada CFDI y su periodo de facturación antes de comparar
+cargos agregados.
 
 La dependencia `pypdf` está en `requirements-dev.txt`; esta herramienta es una revisión local,
 no un importador listo para recibir documentos de clientes. Un XML CFDI de ingreso puede servir
@@ -180,9 +187,9 @@ no se debe ejecutar con documentos reales en CI ni adjuntar la salida a issues o
 ## Conciliación pendiente
 
 1. Confirmar la relación de cada serie PDF con su contrato o subcuenta, y la relación de los XML
-   con esas series; queda un CFDI sin referencia explícita en su contenido. Esta clave se conservará
-   sólo en un manifiesto privado. Nunca se deben sumar
-   estados del mismo periodo por proximidad de carpeta.
+   con esas series; queda un CFDI con importe positivo sin referencia explícita en su contenido.
+   Esta clave se conservará sólo en un manifiesto privado. Nunca se deben sumar estados del mismo
+   periodo por proximidad de carpeta.
 2. Seleccionar una serie y un corte, extraer efectivo, reportos y renta variable con cantidad,
    instrumento, moneda, valor al corte y ubicación de página. Ya existe una comparación automática
    de totales de cierre y de los valores visibles de renta variable; falta verificar visualmente

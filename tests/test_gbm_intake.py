@@ -316,6 +316,7 @@ def test_cfdi_arithmetic_checks_equations_without_exporting_values():
     assert result["cfdi_arithmetic_status"] == "EXACT"
     assert result["cfdi_checks"]["documents_checked"] == 1
     assert result["cfdi_checks"]["total_exact"] == 1
+    assert result["cfdi_checks"]["positive_total_documents"] == 1
     serialized = json.dumps(result)
     assert "CLIENTE RESERVADO" not in serialized
     assert "ABC010101AAA" not in serialized
@@ -331,6 +332,15 @@ def test_cfdi_arithmetic_checks_equations_without_exporting_values():
 def test_cfdi_arithmetic_requires_review_for_mismatches(changes, expected):
     result = check_cfdi_arithmetic(_xml_folder(_synthetic_cfdi(**changes)))
     assert result["cfdi_arithmetic_status"] == expected
+
+
+def test_cfdi_arithmetic_distinguishes_zero_total_from_charged_cfdi():
+    zero = _synthetic_cfdi(total="0.00", discount="100.00", transfer="0.00",
+                           concept_transfer="0.00", concept_discount="100.00")
+    result = check_cfdi_arithmetic(_xml_folder(zero, _synthetic_cfdi()))
+    assert result["cfdi_arithmetic_status"] == "EXACT"
+    assert result["cfdi_checks"]["zero_total_documents"] == 1
+    assert result["cfdi_checks"]["positive_total_documents"] == 1
 
 
 def test_cfdi_arithmetic_rejects_duplicate_and_unsafe_xml():

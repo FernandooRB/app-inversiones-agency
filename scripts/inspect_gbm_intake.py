@@ -1176,7 +1176,9 @@ def _cfdi_arithmetic(raw: bytes) -> Counter:
         "withholdings_concepts": _cfdi_amount_sum(concept_withholdings, "Importe") - withheld,
         "total": subtotal - discount + transferred - withheld - total,
     }
-    return Counter(f"{name}_{_difference_kind(value)}" for name, value in equations.items())
+    counts = Counter(f"{name}_{_difference_kind(value)}" for name, value in equations.items())
+    counts["zero_total_documents" if total == 0 else "positive_total_documents"] += 1
+    return counts
 
 
 def check_cfdi_arithmetic(root: Path) -> dict[str, object]:
@@ -1222,7 +1224,8 @@ def check_cfdi_arithmetic(root: Path) -> dict[str, object]:
         "cfdi_arithmetic_status": status,
         "cfdi_checks": dict(sorted(counts.items())),
         "caution": "Sólo comprueba ecuaciones impresas en CFDI MXN de ingreso o egreso. "
-                   "No verifica timbrado, tratamiento fiscal, vínculo con contrato ni cargos del PDF.",
+                   "Un total cero no acredita un cargo en ese CFDI. No verifica timbrado, tratamiento "
+                   "fiscal, vínculo con contrato ni cargos del PDF.",
     }
 
 
