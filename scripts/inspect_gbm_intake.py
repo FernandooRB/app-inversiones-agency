@@ -711,6 +711,103 @@ def check_statement_equity_trade_costs(root: Path) -> dict[str, object]:
     }
 
 
+def _reporto_net_difference(line: str) -> tuple[Decimal, bool, bool, bool]:
+    """Check only the observed reporto row arithmetic, not accrued-interest economics."""
+    upper = line.upper()
+    is_buy = bool(re.search(r"\bCOMPRA\b", upper))
+    is_maturity = bool(re.search(r"\bVENCIMIENTO\b", upper))
+    if is_buy == is_maturity:
+        raise IntakeError("Un reporto no identifica una compra o vencimiento únicos.")
+    tokens = line.split()
+    amounts = _money_values(line)
+    if len(tokens) != 16 or len(amounts) != 6:
+        raise IntakeError("Un reporto tiene columnas inesperadas.")
+    quantity_token, price_token = tokens[-9], tokens[-8]
+    if not POSITION_NUMBER.fullmatch(quantity_token) or not POSITION_NUMBER.fullmatch(price_token):
+        raise IntakeError("La cantidad o precio de un reporto no es reconocible.")
+    quantity = Decimal(quantity_token.replace(",", ""))
+    price = Decimal(price_token.replace(",", ""))
+    if quantity <= 0 or price <= 0 or price.as_tuple().exponent != -6:
+        raise IntakeError("La cantidad o precisión del precio de un reporto requiere revisión.")
+    _rate, commission, interest, tax, net, _balance = amounts
+    if min(commission, interest, tax, net) < 0 or commission != 0:
+        raise IntakeError("Un reporto tiene cargos que requieren revisión manual.")
+    if is_buy and (interest != 0 or tax != 0):
+        raise IntakeError("Una compra de reporto tiene cargos inesperados.")
+    principal_from_printed_price = (quantity * price).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP,
+    )
+    expected = principal_from_printed_price if is_buy else principal_from_printed_price - tax
+    return expected - net, is_buy, interest > 0, tax > 0
+
+
+def _reporto_net_counts(raw: bytes) -> Counter:
+    offset = raw.find(b"%PDF-")
+    try:
+        reader = PdfReader(BytesIO(raw[offset:]), strict=True)
+        lines = [line for page in reader.pages[1:]
+                 for line in (page.extract_text() or "").splitlines()]
+    except Exception as exc:
+        raise IntakeError("No se pudo leer la tabla de reportos del PDF.") from exc
+    headings = [index for index, line in enumerate(lines) if "MOVIMIENTOS" in line.upper()]
+    if len(headings) != 2:
+        raise IntakeError("La tabla de reportos no tiene límites reconocibles.")
+    counts = Counter({"reporto_documents_checked": 1})
+    for line in lines[headings[0] + 1:headings[1]]:
+        if not CASH_MOVEMENT_DAY_PAIR.match(line) or not re.search(r"\bREPORTO\b", line.upper()):
+            continue
+        difference, is_buy, has_interest, has_tax = _reporto_net_difference(line)
+        counts["reporto_buy_rows" if is_buy else "reporto_maturity_rows"] += 1
+        counts[f"reporto_net_{_difference_kind(difference)}"] += 1
+        if has_interest:
+            counts["reporto_rows_with_interest"] += 1
+        if has_tax:
+            counts["reporto_rows_with_tax"] += 1
+    return counts
+
+
+def check_statement_reporto_net(root: Path) -> dict[str, object]:
+    """Reconcile observed reporto net rows without exposing their values."""
+    if not root.is_dir() or root.is_symlink():
+        raise IntakeError("Selecciona una carpeta local válida, sin enlaces simbólicos.")
+    counts = Counter()
+    try:
+        files = sorted(root.rglob("*"))
+    except OSError as exc:
+        raise IntakeError("No se pudo enumerar la carpeta local.") from exc
+    for path in files:
+        try:
+            if path.is_symlink():
+                counts["symlink_rejected"] += 1
+                continue
+            if not path.is_file() or path.suffix.lower() != ".pdf":
+                continue
+            if path.stat().st_size > MAX_FILE_BYTES:
+                raise IntakeError("El PDF excede el tamaño permitido.")
+            raw = path.read_bytes()
+            _statement_summary(raw)
+            counts.update(_reporto_net_counts(raw))
+        except (OSError, IntakeError):
+            counts["reporto_review_required"] += 1
+    reportos = counts["reporto_buy_rows"] + counts["reporto_maturity_rows"]
+    if (not counts["reporto_documents_checked"] or counts["reporto_review_required"]
+            or counts["symlink_rejected"] or counts["reporto_net_over_cent"]):
+        status = "REVIEW_REQUIRED"
+    elif not reportos:
+        status = "NO_REPORTO_ROWS"
+    elif counts["reporto_net_one_cent"]:
+        status = "CENT_DIFFERENCES_NEED_REVIEW"
+    else:
+        status = "EXACT"
+    return {
+        "reporto_status": status,
+        "reporto_checks": dict(sorted(counts.items())),
+        "caution": "Sólo compara netos de compras y vencimientos de reporto visibles con títulos "
+                   "por precio y el impuesto impreso. No concilia por separado intereses, tasas, "
+                   "plazos, emparejamiento compra-vencimiento ni tratamiento fiscal.",
+    }
+
+
 def _equity_quantity_bridge(
     raw: bytes, summary: _StatementSummary,
 ) -> tuple[dict[str, tuple[Decimal, Decimal]], Counter]:
@@ -984,9 +1081,14 @@ def main() -> None:
         "--check-equity-trade-costs", action="store_true",
         help="Concilia cantidad, precio, comisión, impuesto y neto de compraventas visibles.",
     )
+    parser.add_argument(
+        "--check-reporto-net", action="store_true",
+        help="Concilia netos impresos de compras y vencimientos de reporto visibles.",
+    )
     arguments = parser.parse_args()
     check_cash = (arguments.check_cash_ledger or arguments.check_equity_quantities
-                  or arguments.check_movement_days or arguments.check_equity_trade_costs)
+                  or arguments.check_movement_days or arguments.check_equity_trade_costs
+                  or arguments.check_reporto_net)
     check_detail = arguments.check_detail_totals or check_cash
     check_cover = arguments.check_summaries or check_detail
     try:
@@ -1003,6 +1105,8 @@ def main() -> None:
             result["movement_days"] = check_statement_movement_dates(arguments.folder)
         if arguments.check_equity_trade_costs:
             result["equity_trade_costs"] = check_statement_equity_trade_costs(arguments.folder)
+        if arguments.check_reporto_net:
+            result["reporto_net"] = check_statement_reporto_net(arguments.folder)
     except IntakeError as exc:
         parser.exit(2, f"Error: {exc}\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -1017,6 +1121,8 @@ def main() -> None:
         or (arguments.check_equity_trade_costs
             and result["equity_trade_costs"]["trade_cost_status"] not in
             {"EXACT", "NO_EQUITY_TRADES"})
+        or (arguments.check_reporto_net
+            and result["reporto_net"]["reporto_status"] not in {"EXACT", "NO_REPORTO_ROWS"})
     ):
         parser.exit(3)
 

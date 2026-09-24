@@ -18,6 +18,7 @@ from scripts.inspect_gbm_intake import (
     check_statement_equity_quantities,
     check_statement_equity_trade_costs,
     check_statement_movement_dates,
+    check_statement_reporto_net,
     check_statement_summaries,
     inspect_pdf,
     inspect_xml,
@@ -111,7 +112,8 @@ def _gbm_detail_pdf(*, equity_cover=Decimal("100.00"), detail_total=Decimal("100
 
 def _gbm_cash_pdf(*, closing=Decimal("110.00"), last_operation="COMPRA REPORTO",
                   include_opening=True, split_pages=False, start="31-DIC-25",
-                  end="30-ENE-26", first_day="15/15", second_day="20/20"):
+                  end="30-ENE-26", first_day="15/15", second_day="20/20",
+                  movement_rows=None):
     stream = BytesIO()
     page = canvas.Canvas(stream)
     page.drawString(30, 800, "ESTADO DE CUENTA DE PERSONA FICTICIA")
@@ -130,11 +132,12 @@ def _gbm_cash_pdf(*, closing=Decimal("110.00"), last_operation="COMPRA REPORTO",
     lines = ["MOVIMIENTOS DE OPERACIONES", "FECHA DESCRIPCION IMPORTE NETO SALDO"]
     if include_opening:
         lines.append("31/12 0 EFECTIVO INICIAL 0.00 0.00 0.00 100.00 100.00")
-    lines += [
-        f"{first_day} 1 DEPOSITO EFECTIVO 0.00 0.00 0.00 20.00 120.00",
-        f"{second_day} 2 {last_operation} 0.00 0.00 0.00 10.00 {closing:.2f}",
-        "MOVIMIENTOS DOCUMENTALES",
-    ]
+    if movement_rows is None:
+        movement_rows = [
+            f"{first_day} 1 DEPOSITO EFECTIVO 0.00 0.00 0.00 20.00 120.00",
+            f"{second_day} 2 {last_operation} 0.00 0.00 0.00 10.00 {closing:.2f}",
+        ]
+    lines += [*movement_rows, "MOVIMIENTOS DOCUMENTALES"]
     for index, line in enumerate(lines):
         y_index = index
         if split_pages and index == len(lines) - 2:
@@ -628,3 +631,67 @@ def test_equity_trade_costs_report_no_visible_trades_separately():
     ]))
     assert result["trade_cost_status"] == "NO_EQUITY_TRADES"
     assert result["trade_cost_checks"]["trade_cost_documents_checked"] == 1
+
+
+def _gbm_reporto_pdf(*, maturity_net=Decimal("24.68"),
+                     maturity_commission=Decimal("0.00"), maturity_label="VENCIMIENTO REPORTO",
+                     unit_price="1.234567"):
+    closing = Decimal("75.31") + maturity_net
+    return _gbm_cash_pdf(closing=closing, movement_rows=[
+        f"10/10 1 COMPRA REPORTO EMISORA SERIE 0 20 {unit_price} 8.50 1 "
+        "0.00 0.00 0.00 24.69 75.31",
+        f"11/11 2 {maturity_label} EMISORA SERIE 0 20 {unit_price} 8.50 1 "
+        f"{maturity_commission:.2f} 0.20 0.01 {maturity_net:.2f} {closing:.2f}",
+    ])
+
+
+def test_reporto_net_reconciles_purchase_and_maturity_without_private_output():
+    result = check_statement_reporto_net(_MemoryFolder([
+        _MemoryFile(1, _gbm_reporto_pdf()),
+    ]))
+    assert result["reporto_status"] == "EXACT"
+    checks = result["reporto_checks"]
+    assert checks["reporto_documents_checked"] == 1
+    assert checks["reporto_buy_rows"] == checks["reporto_maturity_rows"] == 1
+    assert checks["reporto_net_exact"] == 2
+    assert checks["reporto_rows_with_interest"] == checks["reporto_rows_with_tax"] == 1
+    serialized = json.dumps(result)
+    for secret in ("SYNTH12345", "PERSONA FICTICIA", "ABC010101AAA", "EMISORA", "99.99"):
+        assert secret not in serialized
+
+
+def test_reporto_net_flags_cent_material_and_unknown_charge():
+    cent = check_statement_reporto_net(_MemoryFolder([
+        _MemoryFile(1, _gbm_reporto_pdf(maturity_net=Decimal("24.69"))),
+    ]))
+    assert cent["reporto_status"] == "CENT_DIFFERENCES_NEED_REVIEW"
+    assert cent["reporto_checks"]["reporto_net_one_cent"] == 1
+    material = check_statement_reporto_net(_MemoryFolder([
+        _MemoryFile(1, _gbm_reporto_pdf(maturity_net=Decimal("24.70"))),
+    ]))
+    assert material["reporto_status"] == "REVIEW_REQUIRED"
+    assert material["reporto_checks"]["reporto_net_over_cent"] == 1
+    commission = check_statement_reporto_net(_MemoryFolder([
+        _MemoryFile(1, _gbm_reporto_pdf(maturity_commission=Decimal("1.00"))),
+    ]))
+    assert commission["reporto_status"] == "REVIEW_REQUIRED"
+    assert commission["reporto_checks"]["reporto_review_required"] == 1
+    changed_precision = check_statement_reporto_net(_MemoryFolder([
+        _MemoryFile(1, _gbm_reporto_pdf(unit_price="1.23456")),
+    ]))
+    assert changed_precision["reporto_status"] == "REVIEW_REQUIRED"
+    assert changed_precision["reporto_checks"]["reporto_review_required"] == 1
+
+
+def test_reporto_net_reports_no_rows_and_unknown_operation_separately():
+    no_reporto = check_statement_reporto_net(_MemoryFolder([
+        _MemoryFile(1, _gbm_cash_pdf(movement_rows=[
+            "15/15 1 DEPOSITO EFECTIVO 0.00 0.00 0.00 10.00 110.00",
+        ])),
+    ]))
+    assert no_reporto["reporto_status"] == "NO_REPORTO_ROWS"
+    unknown = check_statement_reporto_net(_MemoryFolder([
+        _MemoryFile(1, _gbm_reporto_pdf(maturity_label="MOVIMIENTO REPORTO")),
+    ]))
+    assert unknown["reporto_status"] == "REVIEW_REQUIRED"
+    assert unknown["reporto_checks"]["reporto_review_required"] == 1

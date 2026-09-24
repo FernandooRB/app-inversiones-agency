@@ -115,6 +115,22 @@ aplicables. El control no deduce si el impuesto corresponde a IVA, retención u 
 ni determina costo fiscal, comisiones de otros productos, liquidación o integridad de operaciones.
 La opción también ejecuta los controles de portada, detalle y efectivo.
 
+Para revisar netos de las compras y vencimientos de reporto del diseño observado:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/inspect_gbm_intake.py Estados_de_Cuenta/GBM --check-reporto-net > data/private/gbm_reporto_net_validation.json
+```
+
+En las compras, contrasta el neto con títulos por el precio unitario impreso. En los vencimientos,
+resta el impuesto impreso de ese producto. Sólo admite el precio de seis decimales y las columnas
+observadas; comisión en cualquier reporto, o interés o impuesto en una compra, exigen revisión
+manual. Las diferencias de un centavo quedan en `CENT_DIFFERENCES_NEED_REVIEW`; una diferencia
+mayor o un formato desconocido queda en `REVIEW_REQUIRED`. `NO_REPORTO_ROWS` indica que no hubo
+filas aplicables. Este control **no demuestra** cómo se devengó el interés ni vincula cada compra
+con su vencimiento; tampoco valida tasa, plazo, retención ni tratamiento fiscal. Para cálculos de
+rendimiento debe conservarse el neto del documento y resolverse cualquier discrepancia, sin
+sustituirlo por el producto recalculado. La opción también ejecuta portada, detalle y efectivo.
+
 La dependencia `pypdf` está en `requirements-dev.txt`; esta herramienta es una revisión local,
 no un importador listo para recibir documentos de clientes. Un XML CFDI de ingreso puede servir
 para contrastar cargos facturados, pero no es por sí mismo una exportación de posiciones. Si un
