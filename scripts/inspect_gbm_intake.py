@@ -1,6 +1,6 @@
 """Local, privacy-preserving preflight for GBM statement PDFs and CFDI XML files.
 
-This checks visible totals but does not import positions or transactions. It never prints file
+This checks visible totals and quantities but does not export positions or transactions. It never prints file
 names, account identifiers, names, tax IDs, monetary amounts, or security symbols.
 The folder labels identify directories only; they are not verified account IDs.
 """
@@ -491,6 +491,167 @@ def check_statement_cash_ledgers(root: Path) -> dict[str, object]:
     }
 
 
+def _equity_key(line: str) -> str:
+    prefix = " ".join(line.split()[:-10]).replace("*", " ").upper()
+    key = " ".join(prefix.split())
+    if not key:
+        raise IntakeError("Una posición no tiene identificador reconocible.")
+    return key
+
+
+def _trade_quantity(line: str) -> Decimal:
+    tokens = line.split()
+    if len(tokens) < 7:
+        raise IntakeError("Una operación de títulos tiene columnas incompletas.")
+    token = tokens[-7]
+    negative = token.startswith("(") and token.endswith(")")
+    number = token[1:-1] if negative else token
+    if not POSITION_NUMBER.fullmatch(number):
+        raise IntakeError("La cantidad de títulos no es reconocible.")
+    quantity = Decimal(number.replace(",", ""))
+    quantity = -quantity if negative else quantity
+    if quantity <= 0:
+        raise IntakeError("La cantidad de títulos debe ser positiva.")
+    return quantity
+
+
+def _equity_quantity_bridge(
+    raw: bytes, summary: _StatementSummary,
+) -> tuple[dict[str, tuple[Decimal, Decimal]], Counter]:
+    """Read private position quantities and reconcile visible equity buys/sales."""
+    offset = raw.find(b"%PDF-")
+    try:
+        reader = PdfReader(BytesIO(raw[offset:]), strict=True)
+        lines = [
+            line.lstrip() for page in reader.pages[1:]
+            for line in (page.extract_text() or "").splitlines()
+        ]
+    except Exception as exc:
+        raise IntakeError("No se pudo leer la sección de títulos del PDF.") from exc
+    positions: dict[str, tuple[Decimal, Decimal]] = {}
+    equity_totals = [index for index, line in enumerate(lines) if DETAIL_TOTALS["equity"].search(line)]
+    if equity_totals:
+        if len(equity_totals) != 1:
+            raise IntakeError("El total de renta variable es ambiguo.")
+        starts = [
+            index for index, line in enumerate(lines[:equity_totals[0]])
+            if line.upper().strip() == "RENTA VARIABLE"
+        ]
+        if len(starts) != 1:
+            raise IntakeError("La sección de posiciones es ambigua.")
+        for line in lines[starts[0] + 1:equity_totals[0]]:
+            if line.upper().startswith("TOTAL:"):
+                continue
+            amounts = _money_values(line)
+            if not amounts:
+                continue
+            if len(amounts) != 4:
+                raise IntakeError("Una posición tiene columnas monetarias inesperadas.")
+            key = _equity_key(line)
+            if key in positions:
+                raise IntakeError("Una posición aparece duplicada en el corte.")
+            columns = _position_columns(line)
+            positions[key] = (columns[0], columns[1])
+    elif summary.closing_categories[1] != 0:
+        raise IntakeError("Falta el detalle de renta variable del corte.")
+    headings = [index for index, line in enumerate(lines) if "MOVIMIENTOS" in line.upper()]
+    if len(headings) != 2:
+        raise IntakeError("El libro de movimientos no tiene límites reconocibles.")
+    trades = [
+        line for line in lines[headings[0] + 1:headings[1]]
+        if CASH_MOVEMENT_DAY_PAIR.match(line)
+        and ("COMPRA" in line.upper() or "VENTA" in line.upper())
+        and "REPORTO" not in line.upper()
+    ]
+    counts = Counter({"quantity_documents_checked": 1, "equity_position_rows": len(positions),
+                      "equity_trade_rows": len(trades)})
+    trade_changes: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    for line in trades:
+        if len(_money_values(line)) not in {5, 6}:
+            raise IntakeError("Una compraventa tiene columnas monetarias inesperadas.")
+        upper = " ".join(line.upper().replace("*", " ").split())
+        if "COMPRA" in upper and "VENTA" in upper:
+            raise IntakeError("Una operación de títulos tiene dirección ambigua.")
+        matches = [
+            key for key in positions
+            if re.search(rf"(?<![A-Z0-9]){re.escape(key)}(?![A-Z0-9])", upper)
+        ]
+        if len(matches) != 1:
+            raise IntakeError("Una operación no identifica una posición única al cierre.")
+        direction = 1 if "COMPRA" in upper else -1
+        trade_changes[matches[0]] += direction * _trade_quantity(line)
+    for key, (opening, closing) in positions.items():
+        if closing - opening != trade_changes[key]:
+            raise IntakeError("Las operaciones no explican el cambio de títulos.")
+        counts["equity_position_trade_exact"] += 1
+    return positions, counts
+
+
+def check_statement_equity_quantities(root: Path) -> dict[str, object]:
+    """Check visible equity trades and quantities between adjacent cuts, without outputting keys."""
+    if not root.is_dir() or root.is_symlink():
+        raise IntakeError("Selecciona una carpeta local válida, sin enlaces simbólicos.")
+    counts = Counter()
+    by_contract: dict[
+        str, list[tuple[_StatementSummary, dict[str, tuple[Decimal, Decimal]]]]
+    ] = defaultdict(list)
+    try:
+        files = sorted(root.rglob("*"))
+    except OSError as exc:
+        raise IntakeError("No se pudo enumerar la carpeta local.") from exc
+    for path in files:
+        try:
+            if path.is_symlink():
+                counts["symlink_rejected"] += 1
+                continue
+            if not path.is_file() or path.suffix.lower() != ".pdf":
+                continue
+            if path.stat().st_size > MAX_FILE_BYTES:
+                raise IntakeError("El PDF excede el tamaño permitido.")
+            raw = path.read_bytes()
+            summary = _statement_summary(raw)
+            positions, document_counts = _equity_quantity_bridge(raw, summary)
+        except (OSError, IntakeError):
+            counts["quantity_review_required"] += 1
+            continue
+        counts.update(document_counts)
+        by_contract[summary.contract].append((summary, positions))
+    for statements in by_contract.values():
+        ordered = sorted(statements, key=lambda item: item[0].end)
+        if len({summary.end for summary, _ in ordered}) != len(ordered):
+            counts["duplicate_contract_cuts"] += 1
+            continue
+        for (previous, prior_positions), (current, current_positions) in zip(
+            ordered, ordered[1:], strict=False,
+        ):
+            if previous.end != current.start:
+                counts["nonadjacent_periods"] += 1
+                continue
+            if prior_positions or current_positions:
+                counts["quantity_pairs_with_equity"] += 1
+            for key, (opening, _) in current_positions.items():
+                prior_closing = prior_positions.get(key, (Decimal("0"), Decimal("0")))[1]
+                counts["equity_quantity_continuity_exact" if opening == prior_closing
+                       else "equity_quantity_continuity_different"] += 1
+            for key, (_, prior_closing) in prior_positions.items():
+                if key not in current_positions and prior_closing != 0:
+                    counts["equity_position_missing_next_cut"] += 1
+    blockers = (
+        "quantity_review_required", "symlink_rejected", "duplicate_contract_cuts",
+        "nonadjacent_periods", "equity_quantity_continuity_different",
+        "equity_position_missing_next_cut",
+    )
+    status = "REVIEW_REQUIRED" if not counts["quantity_documents_checked"] or any(
+        counts[key] for key in blockers
+    ) else "EXACT"
+    return {
+        "quantity_status": status,
+        "quantity_checks": dict(sorted(counts.items())),
+        "caution": "Sólo compara títulos visibles y compraventas identificables. No prueba operaciones "
+                   "omitidas, eventos corporativos ni identidad definitiva de los instrumentos.",
+    }
+
+
 def inspect_xml(raw: bytes) -> dict[str, object]:
     """Classify CFDI XML without returning taxpayer or transaction content."""
     if not 0 < len(raw) <= MAX_FILE_BYTES:
@@ -617,23 +778,33 @@ def main() -> None:
         "--check-cash-ledger", action="store_true",
         help="Comprueba saldos corridos del libro de efectivo sin mostrar operaciones.",
     )
+    parser.add_argument(
+        "--check-equity-quantities", action="store_true",
+        help="Concilia cantidades visibles de renta variable entre posiciones, operaciones y cortes.",
+    )
     arguments = parser.parse_args()
+    check_cash = arguments.check_cash_ledger or arguments.check_equity_quantities
+    check_detail = arguments.check_detail_totals or check_cash
+    check_cover = arguments.check_summaries or check_detail
     try:
         result = scan_folder(arguments.folder)
-        if arguments.check_summaries or arguments.check_detail_totals or arguments.check_cash_ledger:
+        if check_cover:
             result["cover_summary"] = check_statement_summaries(arguments.folder)
-        if arguments.check_detail_totals or arguments.check_cash_ledger:
+        if check_detail:
             result["detail_summary"] = check_statement_detail_totals(arguments.folder)
-        if arguments.check_cash_ledger:
+        if check_cash:
             result["cash_ledger"] = check_statement_cash_ledgers(arguments.folder)
+        if arguments.check_equity_quantities:
+            result["equity_quantities"] = check_statement_equity_quantities(arguments.folder)
     except IntakeError as exc:
         parser.exit(2, f"Error: {exc}\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    if (arguments.check_summaries or arguments.check_detail_totals or arguments.check_cash_ledger) and (
+    if check_cover and (
         result["cover_summary"]["cover_status"] != "EXACT" or result["failures"]
-        or ((arguments.check_detail_totals or arguments.check_cash_ledger)
-            and result["detail_summary"]["detail_status"] != "EXACT")
-        or (arguments.check_cash_ledger and result["cash_ledger"]["cash_status"] != "EXACT")
+        or (check_detail and result["detail_summary"]["detail_status"] != "EXACT")
+        or (check_cash and result["cash_ledger"]["cash_status"] != "EXACT")
+        or (arguments.check_equity_quantities
+            and result["equity_quantities"]["quantity_status"] != "EXACT")
     ):
         parser.exit(3)
 

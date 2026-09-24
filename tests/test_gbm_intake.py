@@ -15,6 +15,7 @@ from scripts.inspect_gbm_intake import (
     _statement_summary,
     check_statement_cash_ledgers,
     check_statement_detail_totals,
+    check_statement_equity_quantities,
     check_statement_summaries,
     inspect_pdf,
     inspect_xml,
@@ -138,6 +139,63 @@ def _gbm_cash_pdf(*, closing=Decimal("110.00"), last_operation="COMPRA REPORTO",
         if split_pages and index >= len(lines) - 2:
             y_index = index - (len(lines) - 2)
         page.drawString(30, 750 - 20 * y_index, line)
+    page.showPage()
+    page.save()
+    return stream.getvalue()
+
+
+def _gbm_quantity_pdf(
+    *, start="31-DIC-25", end="30-ENE-26", opening_cash=Decimal("100.00"),
+    opening_equity=Decimal("0.00"), closing_cash=Decimal("60.00"),
+    closing_equity=Decimal("40.00"), opening_qty=Decimal("0"), closing_qty=Decimal("2"),
+    trade_qty=Decimal("2"), symbol="SYMA", trade_symbol="SYMA",
+):
+    stream = BytesIO()
+    page = canvas.Canvas(stream)
+    page.drawString(30, 800, "ESTADO DE CUENTA DE PERSONA FICTICIA")
+    page.drawString(30, 780, f"PORTAFOLIO AL {start} AL {end}")
+    labels = [
+        "DEUDA", "RENTA VARIABLE", "VALORES EN CORTO", "FONDO DE FONDOS",
+        "GARANTIAS", "OTRAS INVERSIONES", "CREDITOS DE MARGEN", "EFECTIVO", "DERIVADOS",
+    ]
+    for index, label in enumerate(labels):
+        opening = opening_equity if label == "RENTA VARIABLE" else (
+            opening_cash if label == "EFECTIVO" else Decimal("0.00")
+        )
+        closing = closing_equity if label == "RENTA VARIABLE" else (
+            closing_cash if label == "EFECTIVO" else Decimal("0.00")
+        )
+        page.drawString(30, 760 - 20 * index, f"{label} {opening:.2f} {closing:.2f} 0.00")
+    page.drawString(
+        30, 580,
+        f"VALOR DEL PORTAFOLIO {opening_cash + opening_equity:.2f} "
+        f"{closing_cash + closing_equity:.2f} 100.00",
+    )
+    page.drawString(30, 540, "Titular: PERSONA FICTICIA Contrato: SYNTH12345 RFC: ABC010101AAA")
+    page.showPage()
+    lines = []
+    if closing_equity:
+        lines += [
+            "RENTA VARIABLE",
+            f"{symbol} {opening_qty} {closing_qty} 0 0 {closing_equity:.2f} "
+            f"20.0000 19.0000 {closing_equity:.2f} 0.00 0.00",
+            f"TOTAL: ACCIONES {closing_equity:.2f} 0.00 {closing_equity:.2f}",
+            f"TOTAL: RENTA VARIABLE {closing_equity:.2f} 0.00 {closing_equity:.2f}",
+        ]
+    lines += [
+        f"TOTAL EFECTIVO {closing_cash:.2f} {closing_cash:.2f}",
+        "MOVIMIENTOS DE OPERACIONES",
+        f"01/01 0 EFECTIVO INICIAL 0.00 0.00 0.00 {opening_cash:.2f} {opening_cash:.2f}",
+    ]
+    if trade_qty:
+        net = trade_qty * Decimal("20.00")
+        lines.append(
+            f"10/10 1 COMPRA {trade_symbol} {trade_qty} 20.0000 {net:.2f} "
+            f"0.00 0.00 {net:.2f} {closing_cash:.2f}"
+        )
+    lines.append("MOVIMIENTOS DOCUMENTALES")
+    for index, line in enumerate(lines):
+        page.drawString(30, 750 - 20 * index, line)
     page.showPage()
     page.save()
     return stream.getvalue()
@@ -415,3 +473,48 @@ def test_cash_direction_distinguishes_dividend_credit_and_withholding():
     assert _cash_direction("15/01 5 RETENCIÓN DE DIVIDENDO") == -1
     with pytest.raises(IntakeError, match="no reconocible"):
         _cash_direction("15/01 6 OPERACION DESCONOCIDA")
+
+
+def test_equity_quantities_reconcile_trades_and_adjacent_cuts_without_private_output():
+    january = _gbm_quantity_pdf()
+    february = _gbm_quantity_pdf(
+        start="30-ENE-26", end="27-FEB-26", opening_cash=Decimal("60.00"),
+        opening_equity=Decimal("40.00"), opening_qty=Decimal("2"),
+        closing_qty=Decimal("2"), trade_qty=Decimal("0"),
+    )
+    result = check_statement_equity_quantities(_MemoryFolder([
+        _MemoryFile(1, january), _MemoryFile(2, february),
+    ]))
+    assert result["quantity_status"] == "EXACT"
+    checks = result["quantity_checks"]
+    assert checks["equity_position_rows"] == 2
+    assert checks["equity_trade_rows"] == 1
+    assert checks["equity_position_trade_exact"] == 2
+    assert checks["equity_quantity_continuity_exact"] == 1
+    serialized = json.dumps(result)
+    for secret in ("SYNTH12345", "PERSONA FICTICIA", "ABC010101AAA", "SYMA", "40.00"):
+        assert secret not in serialized
+
+
+def test_equity_quantities_reject_unmatched_trade_and_inconsistent_cut():
+    unmatched = check_statement_equity_quantities(_MemoryFolder([
+        _MemoryFile(1, _gbm_quantity_pdf(trade_symbol="SYMB")),
+    ]))
+    assert unmatched["quantity_status"] == "REVIEW_REQUIRED"
+    assert unmatched["quantity_checks"]["quantity_review_required"] == 1
+    wrong_quantity = check_statement_equity_quantities(_MemoryFolder([
+        _MemoryFile(1, _gbm_quantity_pdf(trade_qty=Decimal("1"))),
+    ]))
+    assert wrong_quantity["quantity_status"] == "REVIEW_REQUIRED"
+    assert wrong_quantity["quantity_checks"]["quantity_review_required"] == 1
+    january = _gbm_quantity_pdf()
+    inconsistent_february = _gbm_quantity_pdf(
+        start="30-ENE-26", end="27-FEB-26", opening_cash=Decimal("60.00"),
+        opening_equity=Decimal("40.00"), opening_qty=Decimal("1"),
+        closing_qty=Decimal("1"), trade_qty=Decimal("0"),
+    )
+    result = check_statement_equity_quantities(_MemoryFolder([
+        _MemoryFile(1, january), _MemoryFile(2, inconsistent_february),
+    ]))
+    assert result["quantity_status"] == "REVIEW_REQUIRED"
+    assert result["quantity_checks"]["equity_quantity_continuity_different"] == 1

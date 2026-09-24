@@ -62,6 +62,21 @@ detiene la aprobación de ese documento. El prefijo de dos números separados po
 como fecha completa: la fecha de operación y la de liquidación deberán resolverse y verificarse
 por separado durante la importación.
 
+Para conciliar las cantidades visibles de renta variable con sus compras y ventas y comprobar
+la continuidad entre cortes consecutivos del mismo contrato:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/inspect_gbm_intake.py Estados_de_Cuenta/GBM --check-equity-quantities > data/private/gbm_quantity_validation.json
+```
+
+Esta opción incluye los tres controles anteriores. Compara el cambio entre la cantidad inicial y
+final de cada posición con las compraventas identificables del periodo, y la cantidad final de un
+corte con la inicial del siguiente. Si una operación no se asocia de forma única con una posición,
+si desaparece una posición antes del siguiente corte o si aparece un formato desconocido, exige
+revisión. El control no acredita que el PDF incluya todas las operaciones ni resuelve ventas
+totales sin posición al cierre, traspasos, desdoblamientos u otros eventos corporativos. Tampoco
+clasifica por sí solo una serie como acción, ETF o FIBRA.
+
 La dependencia `pypdf` está en `requirements-dev.txt`; esta herramienta es una revisión local,
 no un importador listo para recibir documentos de clientes. Un XML CFDI de ingreso puede servir
 para contrastar cargos facturados, pero no es por sí mismo una exportación de posiciones. Si un

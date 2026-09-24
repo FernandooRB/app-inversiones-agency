@@ -30,10 +30,12 @@ comercial mientras este punto siga pendiente.
 El primer intermediario será **GBM**. Para el ensayo técnico se dispone de estados de cuenta de
 una **cuenta propia** en PDF y XML, con acciones BMV/SIC, FIBRAS y ETF declarados por el usuario.
 La [revisión local](gbm_own_account_intake.md) distingue los estados PDF de los XML CFDI y
-comprueba aritmética de portada, subtotales visibles y saldos corridos de efectivo. Los resultados
+comprueba aritmética de portada, subtotales visibles, saldos corridos de efectivo y cambios de
+cantidades de renta variable frente a las compraventas identificables. Los resultados
 específicos y la asociación verificada de las series PDF con sus contratos permanecen en un
 informe privado. Aún faltan registros normalizados de posiciones y movimientos, asociación de
-todos los CFDI, conciliación de cantidades y resolución de excepciones.
+todos los CFDI, conciliación completa de cantidades y eventos corporativos, y resolución de
+excepciones.
 El ensayo usará únicamente instrumentos cuya identidad, precios y uso de
 datos puedan comprobarse. Se ampliará a otros intermediarios y tipos de activo después de
 cerrar el primer caso sin excepciones materiales. Los documentos reales no se incluirán en commits,
