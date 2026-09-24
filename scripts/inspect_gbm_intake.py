@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
@@ -57,6 +58,7 @@ class _StatementSummary:
     opening_difference: Decimal
     closing_difference: Decimal
     category_count: int
+    opening_categories: tuple[Decimal, ...]
     closing_categories: tuple[Decimal, ...]
 
 
@@ -159,6 +161,7 @@ def _statement_summary(raw: bytes) -> _StatementSummary:
         opening_difference=opening - totals[0],
         closing_difference=closing - totals[1],
         category_count=len(category_lines),
+        opening_categories=tuple(values[0] for values in category_values),
         closing_categories=tuple(values[1] for values in category_values),
     )
 
@@ -223,21 +226,28 @@ def check_statement_summaries(root: Path) -> dict[str, object]:
                 continue
             counts["adjacent_pairs"] += 1
             counts[f"continuity_{_difference_kind(previous.closing_total - current.opening_total)}"] += 1
+            for closing, opening in zip(
+                previous.closing_categories[:8], current.opening_categories[:8], strict=True,
+            ):
+                counts[f"common_category_continuity_{_difference_kind(closing - opening)}"] += 1
     blockers = (
         "parse_failures", "symlink_rejected", "exact_duplicates", "folders_with_multiple_contracts",
         "duplicate_contract_cuts", "nonadjacent_periods", "opening_over_cent", "closing_over_cent",
         "continuity_one_cent", "continuity_over_cent",
+        "common_category_continuity_over_cent",
     )
     if not counts["documents_checked"] or any(counts[key] for key in blockers):
         status = "REVIEW_REQUIRED"
-    elif counts["opening_one_cent"] or counts["closing_one_cent"]:
+    elif (counts["opening_one_cent"] or counts["closing_one_cent"]
+          or counts["common_category_continuity_one_cent"]):
         status = "CENT_DIFFERENCES_NEED_REVIEW"
     else:
         status = "EXACT"
     return {
         "cover_status": status,
         "summary_checks": dict(sorted(counts.items())),
-        "caution": "Sólo comprueba la portada y continuidad de cortes. No concilia posiciones, "
+        "caution": "Sólo comprueba la portada y continuidad de ocho categorías comunes entre cortes. "
+                   "No concilia posiciones, "
                    "operaciones, efectivo desglosado ni CFDI.",
     }
 
@@ -386,6 +396,101 @@ def check_statement_detail_totals(root: Path) -> dict[str, object]:
     }
 
 
+CASH_MOVEMENT_DAY_PAIR = re.compile(r"^\s*\d{2}/\d{2}\s")
+
+
+def _cash_direction(line: str) -> int:
+    """Classify the sign of an observed GBM cash operation without exporting its text."""
+    upper = "".join(
+        character for character in unicodedata.normalize("NFD", line.upper())
+        if unicodedata.category(character) != "Mn"
+    )
+    if ("COMPRA" in upper and "VENTA" in upper) or ("DEPOSITO" in upper and "RETIRO" in upper):
+        raise IntakeError("La dirección de un movimiento es ambigua.")
+    if "DIVIDENDO" in upper:
+        return -1 if any(word in upper for word in ("RETENCI", "ISR", "IMPUESTO")) else 1
+    if "COMPRA" in upper or "RETIRO" in upper or "COMISION" in upper:
+        return -1
+    if any(word in upper for word in ("VENTA", "DEPOSITO", "ABONO", "REPORTO", "INTERES")):
+        return 1
+    raise IntakeError("Un movimiento de efectivo tiene una dirección no reconocible.")
+
+
+def _cash_ledger_counts(raw: bytes, summary: _StatementSummary) -> Counter:
+    """Check the printed net amount and running balance of the observed cash ledger."""
+    offset = raw.find(b"%PDF-")
+    try:
+        reader = PdfReader(BytesIO(raw[offset:]), strict=True)
+        lines = [
+            line for page in reader.pages[1:]
+            for line in (page.extract_text() or "").splitlines()
+        ]
+    except Exception as exc:
+        raise IntakeError("No se pudo leer el libro de movimientos del PDF.") from exc
+    headings = [index for index, line in enumerate(lines) if "MOVIMIENTOS" in line.upper()]
+    if len(headings) != 2:
+        raise IntakeError("El libro de movimientos no tiene límites reconocibles.")
+    rows = []
+    for line in lines[headings[0] + 1:headings[1]]:
+        if not CASH_MOVEMENT_DAY_PAIR.match(line):
+            continue
+        amounts = _money_values(line)
+        if len(amounts) not in {5, 6}:
+            raise IntakeError("Una fila de movimientos tiene columnas inesperadas.")
+        rows.append((line, amounts[-2], amounts[-1]))
+    if not rows or "INICIAL" not in rows[0][0].upper() or "EFECTIVO" not in rows[0][0].upper():
+        raise IntakeError("El libro de efectivo no tiene saldo inicial reconocible.")
+    if rows[0][2] != summary.opening_categories[7] or rows[-1][2] != summary.closing_categories[7]:
+        raise IntakeError("Los saldos del libro de efectivo no coinciden con la portada.")
+    counts = Counter({"cash_ledgers_checked": 1, "cash_rows_checked": len(rows)})
+    for (_, _, previous_balance), (line, net, current_balance) in zip(rows, rows[1:], strict=False):
+        direction = _cash_direction(line)
+        difference = previous_balance + direction * net - current_balance
+        counts[f"cash_transition_{_difference_kind(difference)}"] += 1
+        if direction == 1:
+            counts["cash_credit_rows"] += 1
+        else:
+            counts["cash_debit_rows"] += 1
+    return counts
+
+
+def check_statement_cash_ledgers(root: Path) -> dict[str, object]:
+    """Check movement running balances without returning operation or account values."""
+    if not root.is_dir() or root.is_symlink():
+        raise IntakeError("Selecciona una carpeta local válida, sin enlaces simbólicos.")
+    counts = Counter()
+    try:
+        files = sorted(root.rglob("*"))
+    except OSError as exc:
+        raise IntakeError("No se pudo enumerar la carpeta local.") from exc
+    for path in files:
+        try:
+            if path.is_symlink():
+                counts["symlink_rejected"] += 1
+                continue
+            if not path.is_file() or path.suffix.lower() != ".pdf":
+                continue
+            if path.stat().st_size > MAX_FILE_BYTES:
+                raise IntakeError("El PDF excede el tamaño permitido.")
+            raw = path.read_bytes()
+            counts.update(_cash_ledger_counts(raw, _statement_summary(raw)))
+        except (OSError, IntakeError):
+            counts["cash_review_required"] += 1
+    blockers = ("cash_review_required", "symlink_rejected", "cash_transition_over_cent")
+    if not counts["cash_ledgers_checked"] or any(counts[key] for key in blockers):
+        status = "REVIEW_REQUIRED"
+    elif counts["cash_transition_one_cent"]:
+        status = "CENT_DIFFERENCES_NEED_REVIEW"
+    else:
+        status = "EXACT"
+    return {
+        "cash_status": status,
+        "cash_checks": dict(sorted(counts.items())),
+        "caution": "Sólo comprueba importes netos y saldos corridos impresos. No prueba que el PDF "
+                   "incluya todos los movimientos, ni concilia títulos, reportos o CFDI.",
+    }
+
+
 def inspect_xml(raw: bytes) -> dict[str, object]:
     """Classify CFDI XML without returning taxpayer or transaction content."""
     if not 0 < len(raw) <= MAX_FILE_BYTES:
@@ -508,19 +613,27 @@ def main() -> None:
         "--check-detail-totals", action="store_true",
         help="Comprueba totales de detalle y grupos de renta variable sin mostrar importes.",
     )
+    parser.add_argument(
+        "--check-cash-ledger", action="store_true",
+        help="Comprueba saldos corridos del libro de efectivo sin mostrar operaciones.",
+    )
     arguments = parser.parse_args()
     try:
         result = scan_folder(arguments.folder)
-        if arguments.check_summaries or arguments.check_detail_totals:
+        if arguments.check_summaries or arguments.check_detail_totals or arguments.check_cash_ledger:
             result["cover_summary"] = check_statement_summaries(arguments.folder)
-        if arguments.check_detail_totals:
+        if arguments.check_detail_totals or arguments.check_cash_ledger:
             result["detail_summary"] = check_statement_detail_totals(arguments.folder)
+        if arguments.check_cash_ledger:
+            result["cash_ledger"] = check_statement_cash_ledgers(arguments.folder)
     except IntakeError as exc:
         parser.exit(2, f"Error: {exc}\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    if (arguments.check_summaries or arguments.check_detail_totals) and (
+    if (arguments.check_summaries or arguments.check_detail_totals or arguments.check_cash_ledger) and (
         result["cover_summary"]["cover_status"] != "EXACT" or result["failures"]
-        or (arguments.check_detail_totals and result["detail_summary"]["detail_status"] != "EXACT")
+        or ((arguments.check_detail_totals or arguments.check_cash_ledger)
+            and result["detail_summary"]["detail_status"] != "EXACT")
+        or (arguments.check_cash_ledger and result["cash_ledger"]["cash_status"] != "EXACT")
     ):
         parser.exit(3)
 

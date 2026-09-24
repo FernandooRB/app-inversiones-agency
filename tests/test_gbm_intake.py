@@ -10,8 +10,10 @@ from reportlab.pdfgen import canvas
 
 from scripts.inspect_gbm_intake import (
     IntakeError,
+    _cash_direction,
     _money_values,
     _statement_summary,
+    check_statement_cash_ledgers,
     check_statement_detail_totals,
     check_statement_summaries,
     inspect_pdf,
@@ -33,7 +35,8 @@ def _pdf(*, start="31-DIC-25", end="30-ENE-26", private_text="CLIENTE RESERVADO"
 def _gbm_summary_pdf(
     *, contract="SYNTH12345", start="31-DIC-25", end="30-ENE-26",
     opening=Decimal("100.00"), closing=Decimal("110.00"),
-    closing_categories=None, detailed=False, unknown_label=False, include_contract=True,
+    closing_categories=None, opening_equity=Decimal("0.00"),
+    closing_equity=Decimal("0.00"), detailed=False, unknown_label=False, include_contract=True,
 ):
     labels = [
         "DEUDA", "RENTA VARIABLE", "VALORES EN CORTO / PRESTAMO DE VALORES",
@@ -49,10 +52,14 @@ def _gbm_summary_pdf(
     page.drawString(30, 800, "ESTADO DE CUENTA DE PERSONA FICTICIA")
     page.drawString(30, 780, f"PORTAFOLIO AL {start} AL {end}")
     for index, label in enumerate(labels):
-        row_opening = opening if label == "EFECTIVO" else Decimal("0.00")
+        row_opening = (opening - opening_equity) if label == "EFECTIVO" else (
+            opening_equity if label == "RENTA VARIABLE" else Decimal("0.00")
+        )
         row_closing = (
-            closing if closing_categories is None else closing_categories
-        ) if label == "EFECTIVO" else Decimal("0.00")
+            (closing - closing_equity) if closing_categories is None else closing_categories
+        ) if label == "EFECTIVO" else (
+            closing_equity if label == "RENTA VARIABLE" else Decimal("0.00")
+        )
         page.drawString(30, 760 - 20 * index, f"{label}  {row_opening:.2f}  {row_closing:.2f}  0.00")
     page.drawString(30, 760 - 20 * len(labels), f"VALOR DEL PORTAFOLIO {opening:.2f} {closing:.2f} 100.00")
     if include_contract:
@@ -94,6 +101,43 @@ def _gbm_detail_pdf(*, equity_cover=Decimal("100.00"), detail_total=Decimal("100
         detail.append("TOTAL EFECTIVO 10.00 10.00")
     for index, line in enumerate(detail):
         page.drawString(30, 750 - 20 * index, line)
+    page.showPage()
+    page.save()
+    return stream.getvalue()
+
+
+def _gbm_cash_pdf(*, closing=Decimal("110.00"), last_operation="COMPRA REPORTO",
+                  include_opening=True, split_pages=False):
+    stream = BytesIO()
+    page = canvas.Canvas(stream)
+    page.drawString(30, 800, "ESTADO DE CUENTA DE PERSONA FICTICIA")
+    page.drawString(30, 780, "PORTAFOLIO AL 31-DIC-25 AL 30-ENE-26")
+    labels = [
+        "DEUDA", "RENTA VARIABLE", "VALORES EN CORTO", "FONDO DE FONDOS",
+        "GARANTIAS", "OTRAS INVERSIONES", "CREDITOS DE MARGEN", "EFECTIVO", "DERIVADOS",
+    ]
+    for index, label in enumerate(labels):
+        opening = Decimal("100.00") if label == "EFECTIVO" else Decimal("0.00")
+        final = closing if label == "EFECTIVO" else Decimal("0.00")
+        page.drawString(30, 760 - 20 * index, f"{label} {opening:.2f} {final:.2f} 0.00")
+    page.drawString(30, 580, f"VALOR DEL PORTAFOLIO 100.00 {closing:.2f} 100.00")
+    page.drawString(30, 540, "Titular: PERSONA FICTICIA Contrato: SYNTH12345 RFC: ABC010101AAA")
+    page.showPage()
+    lines = ["MOVIMIENTOS DE OPERACIONES", "FECHA DESCRIPCION IMPORTE NETO SALDO"]
+    if include_opening:
+        lines.append("31/12 0 EFECTIVO INICIAL 0.00 0.00 0.00 100.00 100.00")
+    lines += [
+        "15/01 1 DEPOSITO EFECTIVO 0.00 0.00 0.00 20.00 120.00",
+        f"20/01 2 {last_operation} 0.00 0.00 0.00 10.00 {closing:.2f}",
+        "MOVIMIENTOS DOCUMENTALES",
+    ]
+    for index, line in enumerate(lines):
+        y_index = index
+        if split_pages and index == len(lines) - 2:
+            page.showPage()
+        if split_pages and index >= len(lines) - 2:
+            y_index = index - (len(lines) - 2)
+        page.drawString(30, 750 - 20 * y_index, line)
     page.showPage()
     page.save()
     return stream.getvalue()
@@ -197,6 +241,8 @@ def test_summary_checks_contiguous_cuts_and_never_returns_identifiers_or_amounts
     assert checks["documents_checked"] == 2
     assert checks["closing_one_cent"] == 1
     assert checks["adjacent_pairs"] == checks["continuity_exact"] == 1
+    assert checks["common_category_continuity_exact"] == 7
+    assert checks["common_category_continuity_one_cent"] == 1
     serialized = json.dumps(result)
     for secret in ("SYNTH12345", "PERSONA FICTICIA", "ABC010101AAA", "109.99", "120.00"):
         assert secret not in serialized
@@ -221,6 +267,21 @@ def test_summary_flags_nonadjacent_periods_for_same_contract():
     ]))
     assert result["cover_status"] == "REVIEW_REQUIRED"
     assert result["summary_checks"]["nonadjacent_periods"] == 1
+
+
+def test_summary_flags_category_shift_even_when_portfolio_total_is_continuous():
+    january = _gbm_summary_pdf(closing=Decimal("110.00"), closing_equity=Decimal("10.00"))
+    february = _gbm_summary_pdf(
+        start="30-ENE-26", end="27-FEB-26", opening=Decimal("110.00"),
+        closing=Decimal("120.00"),
+    )
+    result = check_statement_summaries(_MemoryFolder([
+        _MemoryFile(1, january), _MemoryFile(2, february),
+    ]))
+    assert result["cover_status"] == "REVIEW_REQUIRED"
+    checks = result["summary_checks"]
+    assert checks["continuity_exact"] == 1
+    assert checks["common_category_continuity_over_cent"] == 2
 
 
 def test_summary_flags_duplicate_cut_and_mixed_contract_folder():
@@ -301,3 +362,56 @@ def test_detail_totals_reject_unrecognized_monetary_position_line():
     ]))
     assert result["detail_status"] == "REVIEW_REQUIRED"
     assert result["detail_checks"]["detail_review_required"] == 1
+
+
+def test_cash_ledger_reconciles_signed_movements_without_private_output():
+    result = check_statement_cash_ledgers(_MemoryFolder([
+        _MemoryFile(1, _gbm_cash_pdf()),
+    ]))
+    assert result["cash_status"] == "EXACT"
+    checks = result["cash_checks"]
+    assert checks["cash_ledgers_checked"] == 1
+    assert checks["cash_rows_checked"] == 3
+    assert checks["cash_transition_exact"] == 2
+    assert checks["cash_credit_rows"] == checks["cash_debit_rows"] == 1
+    serialized = json.dumps(result)
+    for secret in ("SYNTH12345", "PERSONA FICTICIA", "ABC010101AAA", "110.00"):
+        assert secret not in serialized
+
+
+def test_cash_ledger_tracks_running_balance_across_pdf_page_break():
+    result = check_statement_cash_ledgers(_MemoryFolder([
+        _MemoryFile(1, _gbm_cash_pdf(split_pages=True)),
+    ]))
+    assert result["cash_status"] == "EXACT"
+    assert result["cash_checks"]["cash_rows_checked"] == 3
+
+
+def test_cash_ledger_flags_cent_rounding_and_wrong_operation_direction():
+    cent = check_statement_cash_ledgers(_MemoryFolder([
+        _MemoryFile(1, _gbm_cash_pdf(closing=Decimal("110.01"))),
+    ]))
+    assert cent["cash_status"] == "CENT_DIFFERENCES_NEED_REVIEW"
+    assert cent["cash_checks"]["cash_transition_one_cent"] == 1
+    wrong_direction = check_statement_cash_ledgers(_MemoryFolder([
+        _MemoryFile(1, _gbm_cash_pdf(last_operation="VENTA")),
+    ]))
+    assert wrong_direction["cash_status"] == "REVIEW_REQUIRED"
+    assert wrong_direction["cash_checks"]["cash_transition_over_cent"] == 1
+
+
+def test_cash_ledger_requires_opening_row():
+    result = check_statement_cash_ledgers(_MemoryFolder([
+        _MemoryFile(1, _gbm_cash_pdf(include_opening=False)),
+    ]))
+    assert result["cash_status"] == "REVIEW_REQUIRED"
+    assert result["cash_checks"]["cash_review_required"] == 1
+
+
+def test_cash_direction_distinguishes_dividend_credit_and_withholding():
+    assert _cash_direction("15/01 2 PAGO DIVIDENDO") == 1
+    assert _cash_direction("15/01 3 RETENCION ISR DIVIDENDO") == -1
+    assert _cash_direction("15/01 4 DEPÓSITO EN EFECTIVO") == 1
+    assert _cash_direction("15/01 5 RETENCIÓN DE DIVIDENDO") == -1
+    with pytest.raises(IntakeError, match="no reconocible"):
+        _cash_direction("15/01 6 OPERACION DESCONOCIDA")

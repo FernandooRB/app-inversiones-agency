@@ -24,7 +24,8 @@ New-Item -ItemType Directory -Force data/private | Out-Null
 
 El control reconoce dos diseños observados de portada, comprueba que las categorías sumen los
 totales inicial y final, detecta contratos mezclados en una carpeta, cortes duplicados y periodos
-no contiguos, y compara el cierre de un corte con el inicio del siguiente. No muestra contratos
+no contiguos, y compara el cierre de un corte con el inicio del siguiente, tanto en el total como
+en las ocho categorías comunes a ambos diseños. No muestra contratos
 ni importes. `EXACT` significa que esas comprobaciones cuadraron; `CENT_DIFFERENCES_NEED_REVIEW`
 señala diferencias de un centavo en las categorías, y `REVIEW_REQUIRED` señala archivos sin
 clasificar o discrepancias mayores. Los dos últimos estados hacen que el comando termine con
@@ -47,12 +48,27 @@ Si el estado marca `CENT_DIFFERENCES_NEED_REVIEW`, el centavo debe localizarse e
 privado y resolverse antes de tratar el corte como conciliado. El control no identifica por sí
 solo títulos, ETF, FIBRAS ni moneda de cada posición, y no compara cantidades entre cortes.
 
+Para comprobar el saldo corrido del libro de efectivo del PDF:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/inspect_gbm_intake.py Estados_de_Cuenta/GBM --check-cash-ledger > data/private/gbm_cash_validation.json
+```
+
+Esta opción incluye los controles de portada y detalle. Compara el saldo inicial y final con la
+portada y, para cada movimiento visible, aplica al saldo anterior el importe neto con el signo
+correspondiente a la descripción de operación observada. Informa cuántas transiciones son exactas,
+difieren un centavo o requieren revisión. Un tipo de operación desconocido o una fila incompleta
+detiene la aprobación de ese documento. El prefijo de dos números separados por `/` no se trata
+como fecha completa: la fecha de operación y la de liquidación deberán resolverse y verificarse
+por separado durante la importación.
+
 La dependencia `pypdf` está en `requirements-dev.txt`; esta herramienta es una revisión local,
 no un importador listo para recibir documentos de clientes. Un XML CFDI de ingreso puede servir
 para contrastar cargos facturados, pero no es por sí mismo una exportación de posiciones. Si un
 archivo cambia de formato o falla la lectura, el inspector lo reporta como no clasificado sin
-revelar su contenido. El control de detalle tampoco valida operaciones ni que el PDF enumere
-todos los títulos. Si se conserva la salida del caso, debe guardarse sólo en `data/private/`;
+revelar su contenido. El control del saldo corrido no prueba que el PDF incluya todos los
+movimientos ni valida que enumere todos los títulos. Si se conserva la salida del caso, debe
+guardarse sólo en `data/private/`;
 no se debe ejecutar con documentos reales en CI ni adjuntar la salida a issues o PR.
 
 ## Conciliación pendiente
