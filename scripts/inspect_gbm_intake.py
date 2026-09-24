@@ -13,7 +13,7 @@ import re
 import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from hashlib import sha256
 from io import BytesIO
@@ -397,6 +397,8 @@ def check_statement_detail_totals(root: Path) -> dict[str, object]:
 
 
 CASH_MOVEMENT_DAY_PAIR = re.compile(r"^\s*\d{2}/\d{2}\s")
+MOVEMENT_DAY_GROUPS = re.compile(r"^\s*(\d{2})/(\d{2})\s")
+MAX_PLAUSIBLE_DAY_LAG = 10
 
 
 def _cash_direction(line: str) -> int:
@@ -488,6 +490,104 @@ def check_statement_cash_ledgers(root: Path) -> dict[str, object]:
         "cash_checks": dict(sorted(counts.items())),
         "caution": "Sólo comprueba importes netos y saldos corridos impresos. No prueba que el PDF "
                    "incluya todos los movimientos, ni concilia títulos, reportos o CFDI.",
+    }
+
+
+def _movement_date_counts(raw: bytes, summary: _StatementSummary) -> Counter:
+    """Check the two printed day fragments without asserting their business meaning."""
+    offset = raw.find(b"%PDF-")
+    try:
+        reader = PdfReader(BytesIO(raw[offset:]), strict=True)
+        lines = [line for page in reader.pages[1:]
+                 for line in (page.extract_text() or "").splitlines()]
+    except Exception as exc:
+        raise IntakeError("No se pudo leer la tabla de fechas del PDF.") from exc
+    headings = [index for index, line in enumerate(lines) if "MOVIMIENTOS" in line.upper()]
+    if len(headings) != 2:
+        raise IntakeError("La tabla de movimientos no tiene límites reconocibles.")
+    rows = [line for line in lines[headings[0] + 1:headings[1]]
+            if MOVEMENT_DAY_GROUPS.match(line)]
+    if not rows or "INICIAL" not in rows[0].upper() or "EFECTIVO" not in rows[0].upper():
+        raise IntakeError("La tabla de movimientos no tiene saldo inicial reconocible.")
+
+    period_days = []
+    day = summary.start + timedelta(days=1)
+    while day <= summary.end:
+        period_days.append(day)
+        day += timedelta(days=1)
+    candidate_days: list[list[date]] = []
+    second_fragments: list[int] = []
+    for row in rows[1:]:
+        match = MOVEMENT_DAY_GROUPS.match(row)
+        if match is None:
+            raise IntakeError("Una fila no tiene dos días reconocibles.")
+        first, second = int(match[1]), int(match[2])
+        candidates = [item for item in period_days if item.day == first]
+        if not candidates:
+            raise IntakeError("Un día de movimiento queda fuera del periodo.")
+        candidate_days.append(candidates)
+        second_fragments.append(second)
+
+    forward: list[set[date]] = []
+    for candidates in candidate_days:
+        viable = {item for item in candidates if not forward or
+                  any(previous <= item for previous in forward[-1])}
+        if not viable:
+            raise IntakeError("Los días de movimiento no siguen el orden de la tabla.")
+        forward.append(viable)
+    backward: list[set[date]] = [set() for _ in candidate_days]
+    for index in range(len(candidate_days) - 1, -1, -1):
+        backward[index] = {item for item in candidate_days[index]
+                           if index == len(candidate_days) - 1 or
+                           any(item <= following for following in backward[index + 1])}
+    counts = Counter({"date_documents_checked": 1, "movement_rows_checked": len(candidate_days)})
+    for index, second in enumerate(second_fragments):
+        possibilities = forward[index] & backward[index]
+        if len(possibilities) != 1:
+            raise IntakeError("Un día de movimiento tiene más de una fecha posible.")
+        first_date = next(iter(possibilities))
+        if len(candidate_days[index]) > 1:
+            counts["first_days_resolved_by_order"] += 1
+        plausible = [lag for lag in range(MAX_PLAUSIBLE_DAY_LAG + 1)
+                     if (first_date + timedelta(days=lag)).day == second]
+        if len(plausible) != 1:
+            raise IntakeError("El segundo día no sigue al primero en el plazo de revisión.")
+        counts[f"observed_day_lag_{plausible[0]}"] += 1
+    return counts
+
+
+def check_statement_movement_dates(root: Path) -> dict[str, object]:
+    """Report only aggregate plausibility of printed day pairs in statement movements."""
+    if not root.is_dir() or root.is_symlink():
+        raise IntakeError("Selecciona una carpeta local válida, sin enlaces simbólicos.")
+    counts = Counter()
+    try:
+        files = sorted(root.rglob("*"))
+    except OSError as exc:
+        raise IntakeError("No se pudo enumerar la carpeta local.") from exc
+    for path in files:
+        try:
+            if path.is_symlink():
+                counts["symlink_rejected"] += 1
+                continue
+            if not path.is_file() or path.suffix.lower() != ".pdf":
+                continue
+            if path.stat().st_size > MAX_FILE_BYTES:
+                raise IntakeError("El PDF excede el tamaño permitido.")
+            raw = path.read_bytes()
+            counts.update(_movement_date_counts(raw, _statement_summary(raw)))
+        except (OSError, IntakeError):
+            counts["date_review_required"] += 1
+    status = "REVIEW_REQUIRED" if (
+        not counts["date_documents_checked"] or counts["date_review_required"] or
+        counts["symlink_rejected"]
+    ) else "STRUCTURALLY_PLAUSIBLE"
+    return {
+        "date_status": status,
+        "date_checks": dict(sorted(counts.items())),
+        "caution": "Los dos números impresos se validan sólo como días ordenados y con un "
+                   "desfase máximo provisional de 10 días. No confirma cuál es la fecha de "
+                   "operación o liquidación ni acredita integridad de movimientos.",
     }
 
 
@@ -782,8 +882,13 @@ def main() -> None:
         "--check-equity-quantities", action="store_true",
         help="Concilia cantidades visibles de renta variable entre posiciones, operaciones y cortes.",
     )
+    parser.add_argument(
+        "--check-movement-days", action="store_true",
+        help="Revisa la plausibilidad de los dos días impresos en cada movimiento.",
+    )
     arguments = parser.parse_args()
-    check_cash = arguments.check_cash_ledger or arguments.check_equity_quantities
+    check_cash = (arguments.check_cash_ledger or arguments.check_equity_quantities
+                  or arguments.check_movement_days)
     check_detail = arguments.check_detail_totals or check_cash
     check_cover = arguments.check_summaries or check_detail
     try:
@@ -796,6 +901,8 @@ def main() -> None:
             result["cash_ledger"] = check_statement_cash_ledgers(arguments.folder)
         if arguments.check_equity_quantities:
             result["equity_quantities"] = check_statement_equity_quantities(arguments.folder)
+        if arguments.check_movement_days:
+            result["movement_days"] = check_statement_movement_dates(arguments.folder)
     except IntakeError as exc:
         parser.exit(2, f"Error: {exc}\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -805,6 +912,8 @@ def main() -> None:
         or (check_cash and result["cash_ledger"]["cash_status"] != "EXACT")
         or (arguments.check_equity_quantities
             and result["equity_quantities"]["quantity_status"] != "EXACT")
+        or (arguments.check_movement_days
+            and result["movement_days"]["date_status"] != "STRUCTURALLY_PLAUSIBLE")
     ):
         parser.exit(3)
 

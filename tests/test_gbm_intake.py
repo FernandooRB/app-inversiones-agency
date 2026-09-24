@@ -16,6 +16,7 @@ from scripts.inspect_gbm_intake import (
     check_statement_cash_ledgers,
     check_statement_detail_totals,
     check_statement_equity_quantities,
+    check_statement_movement_dates,
     check_statement_summaries,
     inspect_pdf,
     inspect_xml,
@@ -108,11 +109,12 @@ def _gbm_detail_pdf(*, equity_cover=Decimal("100.00"), detail_total=Decimal("100
 
 
 def _gbm_cash_pdf(*, closing=Decimal("110.00"), last_operation="COMPRA REPORTO",
-                  include_opening=True, split_pages=False):
+                  include_opening=True, split_pages=False, start="31-DIC-25",
+                  end="30-ENE-26", first_day="15/15", second_day="20/20"):
     stream = BytesIO()
     page = canvas.Canvas(stream)
     page.drawString(30, 800, "ESTADO DE CUENTA DE PERSONA FICTICIA")
-    page.drawString(30, 780, "PORTAFOLIO AL 31-DIC-25 AL 30-ENE-26")
+    page.drawString(30, 780, f"PORTAFOLIO AL {start} AL {end}")
     labels = [
         "DEUDA", "RENTA VARIABLE", "VALORES EN CORTO", "FONDO DE FONDOS",
         "GARANTIAS", "OTRAS INVERSIONES", "CREDITOS DE MARGEN", "EFECTIVO", "DERIVADOS",
@@ -128,8 +130,8 @@ def _gbm_cash_pdf(*, closing=Decimal("110.00"), last_operation="COMPRA REPORTO",
     if include_opening:
         lines.append("31/12 0 EFECTIVO INICIAL 0.00 0.00 0.00 100.00 100.00")
     lines += [
-        "15/01 1 DEPOSITO EFECTIVO 0.00 0.00 0.00 20.00 120.00",
-        f"20/01 2 {last_operation} 0.00 0.00 0.00 10.00 {closing:.2f}",
+        f"{first_day} 1 DEPOSITO EFECTIVO 0.00 0.00 0.00 20.00 120.00",
+        f"{second_day} 2 {last_operation} 0.00 0.00 0.00 10.00 {closing:.2f}",
         "MOVIMIENTOS DOCUMENTALES",
     ]
     for index, line in enumerate(lines):
@@ -473,6 +475,53 @@ def test_cash_direction_distinguishes_dividend_credit_and_withholding():
     assert _cash_direction("15/01 5 RETENCIÓN DE DIVIDENDO") == -1
     with pytest.raises(IntakeError, match="no reconocible"):
         _cash_direction("15/01 6 OPERACION DESCONOCIDA")
+
+
+def test_movement_days_resolve_repeated_day_by_order_without_private_output():
+    ordinary = _gbm_cash_pdf(first_day="15/16", second_day="20/20")
+    month_rollover = _gbm_cash_pdf(
+        start="30-ENE-26", end="27-FEB-26", first_day="31/01", second_day="03/03",
+    )
+    long_cut = _gbm_cash_pdf(
+        start="29-MAY-26", end="30-JUN-26", first_day="29/29", second_day="30/30",
+    )
+    result = check_statement_movement_dates(_MemoryFolder([
+        _MemoryFile(1, ordinary), _MemoryFile(2, month_rollover), _MemoryFile(3, long_cut),
+    ]))
+    assert result["date_status"] == "STRUCTURALLY_PLAUSIBLE"
+    checks = result["date_checks"]
+    assert checks["date_documents_checked"] == 3
+    assert checks["movement_rows_checked"] == 6
+    assert checks["first_days_resolved_by_order"] == 1
+    assert checks["observed_day_lag_1"] == 2
+    assert checks["observed_day_lag_0"] == 4
+    serialized = json.dumps(result)
+    for secret in ("SYNTH12345", "PERSONA FICTICIA", "ABC010101AAA", "110.00"):
+        assert secret not in serialized
+
+
+@pytest.mark.parametrize("first_day,second_day", [
+    ("31/31", "20/20"),  # No first-day match inside the statement period.
+    ("20/20", "15/15"),  # Printed rows go backwards.
+    ("15/14", "20/20"),  # The second fragment is before the first.
+    ("01/15", "20/20"),  # The second fragment exceeds the provisional lag.
+])
+def test_movement_days_require_plausible_order_and_second_fragment(first_day, second_day):
+    result = check_statement_movement_dates(_MemoryFolder([
+        _MemoryFile(1, _gbm_cash_pdf(first_day=first_day, second_day=second_day)),
+    ]))
+    assert result["date_status"] == "REVIEW_REQUIRED"
+    assert result["date_checks"]["date_review_required"] == 1
+
+
+def test_movement_days_leave_unresolved_repeated_days_for_review():
+    result = check_statement_movement_dates(_MemoryFolder([
+        _MemoryFile(1, _gbm_cash_pdf(
+            start="29-MAY-26", end="30-JUN-26", first_day="30/30", second_day="30/30",
+        )),
+    ]))
+    assert result["date_status"] == "REVIEW_REQUIRED"
+    assert result["date_checks"]["date_review_required"] == 1
 
 
 def test_equity_quantities_reconcile_trades_and_adjacent_cuts_without_private_output():

@@ -77,6 +77,25 @@ revisión. El control no acredita que el PDF incluya todas las operaciones ni re
 totales sin posición al cierre, traspasos, desdoblamientos u otros eventos corporativos. Tampoco
 clasifica por sí solo una serie como acción, ETF o FIBRA.
 
+Para revisar los dos números separados por `/` al inicio de cada movimiento:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/inspect_gbm_intake.py Estados_de_Cuenta/GBM --check-movement-days > data/private/gbm_movement_days_validation.json
+```
+
+El control busca una fecha para el primer número dentro del periodo, respetando el orden de las
+filas. Cuando un corte contiene el mismo día en dos meses, sólo acepta una fecha si el orden
+permite resolverla de forma única. Comprueba que el segundo número pueda corresponder al mismo
+día o a uno de los 10 días posteriores; este límite es provisional y cualquier caso fuera de él
+requiere revisión. El resultado `STRUCTURALLY_PLAUSIBLE` indica únicamente que la estructura
+observada es coherente. **No confirma que ambos números sean, respectivamente, fecha de operación
+y de liquidación**, ni demuestra que el PDF contenga todas las operaciones. No se deben usar como
+fechas definitivas en un cálculo de rendimiento, costo fiscal o recomendación hasta verificar el
+significado de los encabezados y contrastar las operaciones con un registro independiente.
+La opción ejecuta también los controles de portada, detalle y efectivo, de modo que diferencias
+pendientes de un centavo mantienen el código de salida distinto de cero aunque los días sean
+estructuralmente plausibles.
+
 La dependencia `pypdf` está en `requirements-dev.txt`; esta herramienta es una revisión local,
 no un importador listo para recibir documentos de clientes. Un XML CFDI de ingreso puede servir
 para contrastar cargos facturados, pero no es por sí mismo una exportación de posiciones. Si un
