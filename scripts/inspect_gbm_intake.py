@@ -1,6 +1,6 @@
-"""Local, metadata-only preflight for GBM statement PDFs and CFDI XML files.
+"""Local, privacy-preserving preflight for GBM statement PDFs and CFDI XML files.
 
-This deliberately does not import positions or transactions. It never prints file
+This checks visible totals but does not import positions or transactions. It never prints file
 names, account identifiers, names, tax IDs, monetary amounts, or security symbols.
 The folder labels identify directories only; they are not verified account IDs.
 """
@@ -57,6 +57,7 @@ class _StatementSummary:
     opening_difference: Decimal
     closing_difference: Decimal
     category_count: int
+    closing_categories: tuple[Decimal, ...]
 
 
 def _period_date(match: re.Match[bytes]) -> date:
@@ -158,6 +159,7 @@ def _statement_summary(raw: bytes) -> _StatementSummary:
         opening_difference=opening - totals[0],
         closing_difference=closing - totals[1],
         category_count=len(category_lines),
+        closing_categories=tuple(values[1] for values in category_values),
     )
 
 
@@ -237,6 +239,125 @@ def check_statement_summaries(root: Path) -> dict[str, object]:
         "summary_checks": dict(sorted(counts.items())),
         "caution": "Sólo comprueba la portada y continuidad de cortes. No concilia posiciones, "
                    "operaciones, efectivo desglosado ni CFDI.",
+    }
+
+
+DETAIL_TOTALS = {
+    "debt": re.compile(r"^TOTAL:\s*DEUDA(?!\s+EN\s+REPORTO)(?:\s|$)", re.I),
+    "equity": re.compile(r"^TOTAL:\s*RENTA VARIABLE(?:\s|$)", re.I),
+    "cash": re.compile(r"^.*TOTAL.*EFECTIVO", re.I),
+}
+DETAIL_VALUE_COUNTS = {"debt": 3, "equity": 3, "cash": 2}
+
+
+def _detail_differences(raw: bytes, summary: _StatementSummary) -> tuple[dict[str, Decimal], Counter]:
+    """Check visible category totals and equity position groups in one statement."""
+    offset = raw.find(b"%PDF-")
+    try:
+        reader = PdfReader(BytesIO(raw[offset:]), strict=True)
+        lines = [
+            line.lstrip() for page in reader.pages[1:]
+            for line in (page.extract_text() or "").splitlines()
+        ]
+    except Exception as exc:
+        raise IntakeError("No se pudo leer el detalle del PDF.") from exc
+    expected = {
+        "debt": summary.closing_categories[0],
+        "equity": summary.closing_categories[1],
+        "cash": summary.closing_categories[7],
+    }
+    differences: dict[str, Decimal] = {}
+    counts = Counter()
+    equity_end = None
+    for kind, rule in DETAIL_TOTALS.items():
+        candidates = [(index, line) for index, line in enumerate(lines) if rule.search(line)]
+        if not candidates and kind != "cash" and expected[kind] == 0:
+            counts[f"{kind}_zero_without_detail"] += 1
+            continue
+        if len(candidates) != 1:
+            raise IntakeError("El detalle no tiene un total de categoría único.")
+        index, line = candidates[0]
+        amounts = _money_values(line)
+        if len(amounts) != DETAIL_VALUE_COUNTS[kind]:
+            raise IntakeError("El total del detalle tiene columnas inesperadas.")
+        differences[kind] = amounts[0] - expected[kind]
+        counts[f"{kind}_detail_present"] += 1
+        if kind == "equity":
+            equity_end = index
+    if equity_end is not None:
+        section_starts = [
+            index for index, line in enumerate(lines[:equity_end])
+            if line.upper().strip() == "RENTA VARIABLE"
+        ]
+        if len(section_starts) != 1:
+            raise IntakeError("La sección de renta variable es ambigua.")
+        positions: list[list[Decimal]] = []
+        subtotals: list[Decimal] = []
+        for line in lines[section_starts[0] + 1:equity_end]:
+            amounts = _money_values(line)
+            if line.upper().startswith("TOTAL:"):
+                if len(amounts) != 3 or not positions:
+                    raise IntakeError("Un grupo de posiciones no tiene subtotal válido.")
+                subtotal = amounts[0]
+                if sum((row[1] for row in positions), Decimal("0.00")) != subtotal:
+                    raise IntakeError("Las posiciones no suman el subtotal del grupo.")
+                counts["equity_groups_exact"] += 1
+                counts["equity_positions_checked"] += len(positions)
+                subtotals.append(subtotal)
+                positions = []
+            elif len(amounts) == 4:
+                positions.append(amounts)
+            elif amounts:
+                raise IntakeError("Hay una fila monetaria de posiciones con columnas inesperadas.")
+        if not subtotals or positions:
+            raise IntakeError("Las posiciones no cierran con el total de renta variable.")
+        equity_total = _money_values(lines[equity_end])[0]
+        if sum(subtotals, Decimal("0.00")) != equity_total:
+            raise IntakeError("Los subtotales no suman la renta variable.")
+    return differences, counts
+
+
+def check_statement_detail_totals(root: Path) -> dict[str, object]:
+    """Check closing detail totals and visible equity positions, without exporting values."""
+    if not root.is_dir() or root.is_symlink():
+        raise IntakeError("Selecciona una carpeta local válida, sin enlaces simbólicos.")
+    counts = Counter()
+    try:
+        files = sorted(root.rglob("*"))
+    except OSError as exc:
+        raise IntakeError("No se pudo enumerar la carpeta local.") from exc
+    for path in files:
+        try:
+            if path.is_symlink():
+                counts["symlink_rejected"] += 1
+                continue
+            if not path.is_file() or path.suffix.lower() != ".pdf":
+                continue
+            if path.stat().st_size > MAX_FILE_BYTES:
+                raise IntakeError("El PDF excede el tamaño permitido.")
+            raw = path.read_bytes()
+            summary = _statement_summary(raw)
+            differences, document_counts = _detail_differences(raw, summary)
+        except (OSError, IntakeError):
+            counts["detail_review_required"] += 1
+            continue
+        counts["details_checked"] += 1
+        counts.update(document_counts)
+        for kind, difference in differences.items():
+            counts[f"{kind}_{_difference_kind(difference)}"] += 1
+    if not counts["details_checked"] or counts["detail_review_required"] or counts["symlink_rejected"] or any(
+        counts[f"{kind}_over_cent"] for kind in DETAIL_TOTALS
+    ):
+        status = "REVIEW_REQUIRED"
+    elif any(counts[f"{kind}_one_cent"] for kind in DETAIL_TOTALS):
+        status = "CENT_DIFFERENCES_NEED_REVIEW"
+    else:
+        status = "EXACT"
+    return {
+        "detail_status": status,
+        "detail_checks": dict(sorted(counts.items())),
+        "caution": "Comprueba totales de cierre, subtotales y posiciones visibles de renta variable. "
+                   "No concilia movimientos, cantidades/títulos, efectivo transaccional ni CFDI.",
     }
 
 
@@ -358,16 +479,23 @@ def main() -> None:
         "--check-summaries", action="store_true",
         help="Comprueba portada y continuidad de estados PDF sin mostrar importes ni contratos.",
     )
+    parser.add_argument(
+        "--check-detail-totals", action="store_true",
+        help="Comprueba totales de detalle y grupos de renta variable sin mostrar importes.",
+    )
     arguments = parser.parse_args()
     try:
         result = scan_folder(arguments.folder)
-        if arguments.check_summaries:
+        if arguments.check_summaries or arguments.check_detail_totals:
             result["cover_summary"] = check_statement_summaries(arguments.folder)
+        if arguments.check_detail_totals:
+            result["detail_summary"] = check_statement_detail_totals(arguments.folder)
     except IntakeError as exc:
         parser.exit(2, f"Error: {exc}\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    if arguments.check_summaries and (
+    if (arguments.check_summaries or arguments.check_detail_totals) and (
         result["cover_summary"]["cover_status"] != "EXACT" or result["failures"]
+        or (arguments.check_detail_totals and result["detail_summary"]["detail_status"] != "EXACT")
     ):
         parser.exit(3)
 

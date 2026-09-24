@@ -12,6 +12,7 @@ from scripts.inspect_gbm_intake import (
     IntakeError,
     _money_values,
     _statement_summary,
+    check_statement_detail_totals,
     check_statement_summaries,
     inspect_pdf,
     inspect_xml,
@@ -56,6 +57,42 @@ def _gbm_summary_pdf(
     page.drawString(30, 760 - 20 * len(labels), f"VALOR DEL PORTAFOLIO {opening:.2f} {closing:.2f} 100.00")
     if include_contract:
         page.drawString(30, 500, f"Titular: PERSONA FICTICIA Contrato: {contract} RFC: ABC010101AAA")
+    page.showPage()
+    page.save()
+    return stream.getvalue()
+
+
+def _gbm_detail_pdf(*, equity_cover=Decimal("100.00"), second_position=Decimal("60.00"),
+                    include_cash=True, incomplete_row=False):
+    stream = BytesIO()
+    page = canvas.Canvas(stream)
+    page.drawString(30, 800, "ESTADO DE CUENTA DE PERSONA FICTICIA")
+    page.drawString(30, 780, "PORTAFOLIO AL 31-DIC-25 AL 30-ENE-26")
+    labels = [
+        "DEUDA", "RENTA VARIABLE", "VALORES EN CORTO", "FONDO DE FONDOS",
+        "GARANTIAS", "OTRAS INVERSIONES", "CREDITOS DE MARGEN", "EFECTIVO", "DERIVADOS",
+    ]
+    for index, label in enumerate(labels):
+        opening = Decimal("110.00") if label == "EFECTIVO" else Decimal("0.00")
+        closing = equity_cover if label == "RENTA VARIABLE" else (
+            Decimal("10.00") if label == "EFECTIVO" else Decimal("0.00")
+        )
+        page.drawString(30, 760 - 20 * index, f"{label} {opening:.2f} {closing:.2f} 0.00")
+    page.drawString(30, 580, f"VALOR DEL PORTAFOLIO 110.00 {equity_cover + 10:.2f} 100.00")
+    page.drawString(30, 540, "Titular: PERSONA FICTICIA Contrato: SYNTH12345 RFC: ABC010101AAA")
+    page.showPage()
+    detail = [
+        "RENTA VARIABLE", "SIMBOLO_A 1.00 40.00 40.00 0.00",
+        f"SIMBOLO_B 1.00 {second_position:.2f} 60.00 0.00",
+        "TOTAL: ACCIONES 100.00 0.00 100.00",
+        "TOTAL: RENTA VARIABLE 100.00 0.00 100.00",
+    ]
+    if incomplete_row:
+        detail.insert(2, "SIMBOLO_INCOMPLETO 1.00 0.00 0.00")
+    if include_cash:
+        detail.append("TOTAL EFECTIVO 10.00 10.00")
+    for index, line in enumerate(detail):
+        page.drawString(30, 750 - 20 * index, line)
     page.showPage()
     page.save()
     return stream.getvalue()
@@ -200,3 +237,47 @@ def test_summary_money_parser_preserves_sign_and_thousands():
     assert _money_values("DEUDA 1,234.56 (4.00) -10.01") == [
         Decimal("1234.56"), Decimal("-4.00"), Decimal("-10.01"),
     ]
+
+
+def test_detail_totals_reconcile_equity_positions_and_cash_without_private_output():
+    result = check_statement_detail_totals(_MemoryFolder([
+        _MemoryFile(1, _gbm_detail_pdf()),
+    ]))
+    assert result["detail_status"] == "EXACT"
+    checks = result["detail_checks"]
+    assert checks["details_checked"] == 1
+    assert checks["equity_positions_checked"] == 2
+    assert checks["equity_groups_exact"] == 1
+    assert checks["cash_exact"] == checks["equity_exact"] == 1
+    serialized = json.dumps(result)
+    for secret in ("SYNTH12345", "PERSONA FICTICIA", "ABC010101AAA", "SIMBOLO_A", "100.00"):
+        assert secret not in serialized
+
+
+def test_detail_totals_separate_cent_difference_from_position_error():
+    cent = check_statement_detail_totals(_MemoryFolder([
+        _MemoryFile(1, _gbm_detail_pdf(equity_cover=Decimal("99.99"))),
+    ]))
+    assert cent["detail_status"] == "CENT_DIFFERENCES_NEED_REVIEW"
+    assert cent["detail_checks"]["equity_one_cent"] == 1
+    mismatch = check_statement_detail_totals(_MemoryFolder([
+        _MemoryFile(1, _gbm_detail_pdf(second_position=Decimal("59.90"))),
+    ]))
+    assert mismatch["detail_status"] == "REVIEW_REQUIRED"
+    assert mismatch["detail_checks"]["detail_review_required"] == 1
+
+
+def test_detail_totals_require_cash_total_even_when_positions_exist():
+    result = check_statement_detail_totals(_MemoryFolder([
+        _MemoryFile(1, _gbm_detail_pdf(include_cash=False)),
+    ]))
+    assert result["detail_status"] == "REVIEW_REQUIRED"
+    assert result["detail_checks"]["detail_review_required"] == 1
+
+
+def test_detail_totals_reject_unrecognized_monetary_position_line():
+    result = check_statement_detail_totals(_MemoryFolder([
+        _MemoryFile(1, _gbm_detail_pdf(incomplete_row=True)),
+    ]))
+    assert result["detail_status"] == "REVIEW_REQUIRED"
+    assert result["detail_checks"]["detail_review_required"] == 1
