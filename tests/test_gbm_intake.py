@@ -1,12 +1,22 @@
 """Structural tests use generated documents, never a real statement."""
 
 import json
+from decimal import Decimal
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 from reportlab.pdfgen import canvas
 
-from scripts.inspect_gbm_intake import IntakeError, inspect_pdf, inspect_xml, scan_folder
+from scripts.inspect_gbm_intake import (
+    IntakeError,
+    _money_values,
+    _statement_summary,
+    check_statement_summaries,
+    inspect_pdf,
+    inspect_xml,
+    scan_folder,
+)
 
 
 def _pdf(*, start="31-DIC-25", end="30-ENE-26", private_text="CLIENTE RESERVADO"):
@@ -17,6 +27,76 @@ def _pdf(*, start="31-DIC-25", end="30-ENE-26", private_text="CLIENTE RESERVADO"
     page.showPage()
     page.save()
     return stream.getvalue()
+
+
+def _gbm_summary_pdf(
+    *, contract="SYNTH12345", start="31-DIC-25", end="30-ENE-26",
+    opening=Decimal("100.00"), closing=Decimal("110.00"),
+    closing_categories=None, detailed=False, unknown_label=False, include_contract=True,
+):
+    labels = [
+        "DEUDA", "RENTA VARIABLE", "VALORES EN CORTO / PRESTAMO DE VALORES",
+        "FONDO DE FONDOS", "GARANTIAS", "OTRAS INVERSIONES",
+        "CREDITOS DE MARGEN", "EFECTIVO",
+    ]
+    labels += (["DERIVADOS MERCADOS RECONOCIDOS", "DERIVADOS MERCADOS EXTRABURSATILES",
+                "EFECTIVO MARGEN INICIAL Y VARIACION"] if detailed else ["DERIVADOS"])
+    if unknown_label:
+        labels[-1] = "CATEGORIA DESCONOCIDA"
+    stream = BytesIO()
+    page = canvas.Canvas(stream)
+    page.drawString(30, 800, "ESTADO DE CUENTA DE PERSONA FICTICIA")
+    page.drawString(30, 780, f"PORTAFOLIO AL {start} AL {end}")
+    for index, label in enumerate(labels):
+        row_opening = opening if label == "EFECTIVO" else Decimal("0.00")
+        row_closing = (
+            closing if closing_categories is None else closing_categories
+        ) if label == "EFECTIVO" else Decimal("0.00")
+        page.drawString(30, 760 - 20 * index, f"{label}  {row_opening:.2f}  {row_closing:.2f}  0.00")
+    page.drawString(30, 760 - 20 * len(labels), f"VALOR DEL PORTAFOLIO {opening:.2f} {closing:.2f} 100.00")
+    if include_contract:
+        page.drawString(30, 500, f"Titular: PERSONA FICTICIA Contrato: {contract} RFC: ABC010101AAA")
+    page.showPage()
+    page.save()
+    return stream.getvalue()
+
+
+class _MemoryFile:
+    suffix = ".pdf"
+
+    def __init__(self, order, contents, parent="carpeta confidencial"):
+        self.order = order
+        self.contents = contents
+        self.parent = parent
+
+    def __lt__(self, other):
+        return self.order < other.order
+
+    def is_file(self):
+        return True
+
+    def is_symlink(self):
+        return False
+
+    def read_bytes(self):
+        return self.contents
+
+    def stat(self):
+        return SimpleNamespace(st_size=len(self.contents))
+
+
+class _MemoryFolder:
+    def __init__(self, files):
+        self.files = files
+
+    def is_dir(self):
+        return True
+
+    def is_symlink(self):
+        return False
+
+    def rglob(self, _pattern):
+        return self.files
 
 
 def test_gbm_wrapper_is_stripped_and_period_detected():
@@ -52,41 +132,71 @@ def test_rejects_xml_entities_and_does_not_return_taxpayer_fields():
 
 
 def test_scan_deduplicates_and_never_prints_private_text():
-    class MemoryFile:
-        suffix = ".pdf"
-        parent = "cuenta confidencial"
-
-        def __init__(self, order, contents):
-            self.order = order
-            self.contents = contents
-
-        def __lt__(self, other):
-            return self.order < other.order
-
-        def is_file(self):
-            return True
-
-        def is_symlink(self):
-            return False
-
-        def read_bytes(self):
-            return self.contents
-
-    class MemoryFolder:
-        def is_dir(self):
-            return True
-
-        def is_symlink(self):
-            return False
-
-        def rglob(self, _pattern):
-            pdf = _pdf(private_text="NOMBRE CONFIDENCIAL 987654321")
-            return [MemoryFile(1, pdf), MemoryFile(2, pdf)]
-
-    result = scan_folder(MemoryFolder())
+    pdf = _pdf(private_text="NOMBRE CONFIDENCIAL 987654321")
+    result = scan_folder(_MemoryFolder([_MemoryFile(1, pdf), _MemoryFile(2, pdf)]))
     serialized = json.dumps(result, ensure_ascii=False)
     assert result["pdf_count"] == 1
     assert result["exact_duplicate_files"] == 1
     assert "NOMBRE" not in serialized
     assert "987654321" not in serialized
-    assert "cuenta confidencial" not in serialized
+    assert "carpeta confidencial" not in serialized
+
+
+def test_summary_checks_contiguous_cuts_and_never_returns_identifiers_or_amounts():
+    january = b"^{doc_title".ljust(105, b"X") + _gbm_summary_pdf(
+        closing_categories=Decimal("109.99"),
+    )
+    february = _gbm_summary_pdf(
+        start="30-ENE-26", end="27-FEB-26", opening=Decimal("110.00"),
+        closing=Decimal("120.00"), detailed=True,
+    )
+    result = check_statement_summaries(_MemoryFolder([
+        _MemoryFile(1, january), _MemoryFile(2, february),
+    ]))
+    checks = result["summary_checks"]
+    assert result["cover_status"] == "CENT_DIFFERENCES_NEED_REVIEW"
+    assert checks["contracts_detected"] == 1
+    assert checks["documents_checked"] == 2
+    assert checks["closing_one_cent"] == 1
+    assert checks["adjacent_pairs"] == checks["continuity_exact"] == 1
+    serialized = json.dumps(result)
+    for secret in ("SYNTH12345", "PERSONA FICTICIA", "ABC010101AAA", "109.99", "120.00"):
+        assert secret not in serialized
+
+
+def test_summary_rejects_unknown_layout_and_flags_material_discrepancy():
+    with pytest.raises(IntakeError, match="diseño conocido"):
+        _statement_summary(_gbm_summary_pdf(unknown_label=True))
+    with pytest.raises(IntakeError, match="contrato único"):
+        _statement_summary(_gbm_summary_pdf(include_contract=False))
+    bad_total = _gbm_summary_pdf(closing_categories=Decimal("109.90"))
+    result = check_statement_summaries(_MemoryFolder([_MemoryFile(1, bad_total)]))
+    assert result["cover_status"] == "REVIEW_REQUIRED"
+    assert result["summary_checks"]["closing_over_cent"] == 1
+
+
+def test_summary_flags_nonadjacent_periods_for_same_contract():
+    january = _gbm_summary_pdf()
+    march = _gbm_summary_pdf(start="27-FEB-26", end="31-MAR-26", opening=Decimal("110.00"))
+    result = check_statement_summaries(_MemoryFolder([
+        _MemoryFile(1, january), _MemoryFile(2, march),
+    ]))
+    assert result["cover_status"] == "REVIEW_REQUIRED"
+    assert result["summary_checks"]["nonadjacent_periods"] == 1
+
+
+def test_summary_flags_duplicate_cut_and_mixed_contract_folder():
+    result = check_statement_summaries(_MemoryFolder([
+        _MemoryFile(1, _gbm_summary_pdf(contract="SYNTH1")),
+        _MemoryFile(2, _gbm_summary_pdf(contract="SYNTH1", closing=Decimal("111.00"))),
+        _MemoryFile(3, _gbm_summary_pdf(contract="SYNTH2")),
+    ]))
+    assert result["cover_status"] == "REVIEW_REQUIRED"
+    assert result["summary_checks"]["duplicate_contract_cuts"] == 1
+    assert result["summary_checks"]["folders_with_multiple_contracts"] == 1
+
+
+def test_summary_money_parser_preserves_sign_and_thousands():
+    assert _money_values("DEUDA 1,234.56 (4.00) -10.01") == [
+        Decimal("1234.56"), Decimal("-4.00"), Decimal("-10.01"),
+    ]

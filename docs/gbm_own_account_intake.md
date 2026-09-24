@@ -15,11 +15,27 @@ archivos, RFC, cuentas, instrumentos ni montos.
 .\.venv\Scripts\python.exe scripts/inspect_gbm_intake.py Estados_de_Cuenta/GBM
 ```
 
+Para comprobar sólo la portada y la continuidad de cortes del mismo contrato:
+
+```powershell
+New-Item -ItemType Directory -Force data/private | Out-Null
+.\.venv\Scripts\python.exe scripts/inspect_gbm_intake.py Estados_de_Cuenta/GBM --check-summaries > data/private/gbm_cover_validation.json
+```
+
+El control reconoce dos diseños observados de portada, comprueba que las categorías sumen los
+totales inicial y final, detecta contratos mezclados en una carpeta, cortes duplicados y periodos
+no contiguos, y compara el cierre de un corte con el inicio del siguiente. No muestra contratos
+ni importes. `EXACT` significa que esas comprobaciones cuadraron; `CENT_DIFFERENCES_NEED_REVIEW`
+señala diferencias de un centavo en las categorías, y `REVIEW_REQUIRED` señala archivos sin
+clasificar o discrepancias mayores. Los dos últimos estados hacen que el comando termine con
+código distinto de cero para impedir que se interpreten como una aprobación automática.
+
 La dependencia `pypdf` está en `requirements-dev.txt`; esta herramienta es una revisión local,
 no un importador listo para recibir documentos de clientes. Un XML CFDI de ingreso puede servir
 para contrastar cargos facturados, pero no es por sí mismo una exportación de posiciones. Si un
 archivo cambia de formato o falla la lectura, el inspector lo reporta como no clasificado sin
-revelar su contenido. Si se conserva la salida del caso, debe guardarse sólo en `data/private/`;
+revelar su contenido. El control de portada tampoco valida posiciones ni operaciones. Si se
+conserva la salida del caso, debe guardarse sólo en `data/private/`;
 no se debe ejecutar con documentos reales en CI ni adjuntar la salida a issues o PR.
 
 ## Conciliación pendiente
