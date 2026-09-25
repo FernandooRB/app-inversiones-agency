@@ -594,6 +594,10 @@ def _implementation_cost_story(
         raise ValueError("Capital inválido para el costo de implementación.")
     if len({item.alternative_name for item in estimates}) != len(estimates):
         raise ValueError("Las alternativas de costos deben tener nombres únicos.")
+    if any("Comisión aplicada (pb)" in item.detail.columns for item in estimates):
+        raise ValueError(
+            "El PDF aún no admite el detalle y las fuentes de las reglas de costo por orden."
+        )
     for item in estimates:
         components = np.array([
             item.buy_notional, item.sell_notional, item.commission,

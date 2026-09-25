@@ -21,7 +21,8 @@ cuentas, importes, operaciones, identificadores, excepciones y actas de revisió
 
 El importador de perfiles de costos acepta una declaración de tarifa pública, contractual o
 negociada por cliente y verifica su ventana de vigencia. Esto registra el supuesto, pero no
-autentica el convenio ni calcula escalones de volumen o comisiones distintas por activo.
+autentica el convenio ni calcula escalones de volumen. El motor interno ya puede aplicar reglas
+distintas por activo y operación, pero todavía no están conectadas a la interfaz ni al PDF.
 
 ## Regla para cada cambio
 
@@ -62,7 +63,27 @@ Al cerrar este cambio, se anotarán aquí el resultado de CI y revisión.
   anterior se mantiene como `SIN_ALCANCE` para reproducir análisis viejos, con advertencia.
 - **Verificación:** pruebas sintéticas de tarifa pública frente a negociada sobre la misma orden,
   rechazo de vigencia y tipo inválidos, e integración en la interfaz. La suite local completa pasó:
-  **368 pruebas**; `ruff check .` pasó. No se usaron documentos reales de clientes.
+  **368 pruebas**; `ruff check .` pasó. El [PR #50](https://github.com/FernandooRB/app-inversiones-agency/pull/50)
+  pasó CI en Ubuntu y Windows y se fusionó por squash en `main` como `42706ce`. El árbol publicado
+  coincide con el del commit local aprobado; GitHub asignó otro SHA al reconstruir los metadatos.
+  No se usaron documentos reales de clientes. La rama remota de ese PR sigue pendiente de borrar:
+  la conexión de GitHub disponible permitió integrar el PR, pero no expone el borrado de ramas.
 - **Límite:** la clasificación y fecha son declaradas, no prueban la elegibilidad contractual.
-  Un perfil aún aplica una sola tasa a todos los activos; quedan pendientes reglas por orden,
-  mercado, producto y escalón de volumen, además de la verificación del acuerdo particular.
+  Un perfil de la interfaz aún aplica una sola tasa a todos los activos; quedan pendientes las
+  reglas por orden en interfaz y PDF, los escalones de volumen y la verificación del acuerdo.
+
+## Entrada de trabajo: motor interno de costos por orden
+
+- **Cambio técnico local:** `OrderCostRule` identifica activo, compra/venta, producto, mercado,
+  fuente, tipo y vigencia de tarifa. El estimador usa la tasa, IVA, mínimo y costo de mercado de
+  cada orden; rechaza operaciones sin regla, solapamientos, tarifas caducadas y una fuente consultada
+  después de la fecha del análisis. Los costos recurrentes sólo se declaran en los supuestos
+  generales. El PDF bloquea estas estimaciones hasta poder mostrar sus fuentes y tasas por orden.
+- **Verificación hasta ahora:** `ruff check .` pasó y la última ejecución enfocada de costos y
+  reporte aprobó **36 pruebas**. La ejecución completa bajo la sandbox anterior al último caso de
+  regresión registró **371 pruebas aprobadas y 3 errores de preparación** por acceso denegado a
+  directorios temporales de pytest, sin fallos de aserción.
+  La revisión automática de permisos agotó su tiempo dos veces al intentar repetirla fuera de la
+  sandbox; se requiere CI de Ubuntu y Windows antes de integrar esta fase.
+- **Límite:** es una API interna con pruebas sintéticas. Faltan importador, interfaz, detalle en PDF,
+  verificación contractual y elegibilidad por tramos de volumen. No habilita reportes para clientes.

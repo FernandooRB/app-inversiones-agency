@@ -35,6 +35,26 @@ después de los impuestos aplicables para evitar que la aplicación infiera trat
 
 Antes de entregar un reporte, conserva el tarifario o estado de cuenta usado, su fecha de consulta,
 el tipo de cliente y el producto. No extrapoles una tarifa de acciones a fondos, deuda o divisas.
-La versión actual aplica una tasa transaccional uniforme a todos los activos del análisis: una
-cartera con tarifas diferentes por producto o mercado requiere reglas por orden antes de presentar
-un costo agregado como específico para el cliente.
+La interfaz y el PDF aún aplican una tasa transaccional uniforme a todos los activos del análisis:
+una cartera con tarifas diferentes por producto o mercado no puede presentarse desde esta interfaz
+con un costo agregado específico para el cliente.
+
+## Motor de reglas por orden (fase técnica)
+
+`implementation_costs.OrderCostRule` permite definir términos distintos para cada activo y lado
+(`Compra`, `Venta` o `Ambas`). La regla registra producto, mercado, fuente, tipo de tarifa, fecha de
+consulta y ventana de vigencia. `estimate_implementation_cost(..., order_rules=...)` selecciona la
+regla exacta de cada operación y aplica su tasa, mínimo, IVA y costo de mercado. El detalle calculado
+conserva la regla utilizada para poder revisar cada importe.
+
+El motor **rechaza** operaciones sin regla, reglas duplicadas o superpuestas, tarifas fuera de
+vigencia y cargos anuales repetidos dentro de las reglas. Cuando se usan reglas, los supuestos
+transaccionales generales deben ser cero; sólo aportan los costos recurrentes, que se declaran una
+vez. La operación sin reglas conserva el comportamiento anterior.
+
+Esta fase es una API interna comprobada con datos sintéticos. Todavía faltan la importación segura
+de un archivo de reglas, la interfaz, el desglose por orden en el PDF y la comprobación del convenio
+real. El generador de PDF rechaza las estimaciones con reglas por orden mientras no pueda mostrar
+sus fuentes y tasas, evitando una descripción falsa de comisión uniforme. No calcula elegibilidad
+por volumen mensual ni verifica que un cliente tenga una tarifa negociada; esas condiciones deben
+estar documentadas por el equipo antes de habilitar la función en reportes de clientes.

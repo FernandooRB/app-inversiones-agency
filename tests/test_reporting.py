@@ -5,6 +5,7 @@ from io import BytesIO
 
 import numpy as np
 import pandas as pd
+import pytest
 from pypdf import PdfReader
 
 from benchmarking import analyze_benchmark
@@ -16,7 +17,11 @@ from holdings_control import (
     read_holdings_control_csv,
     read_holdings_coverage_csv,
 )
-from implementation_costs import ImplementationCostAssumptions, estimate_implementation_cost
+from implementation_costs import (
+    ImplementationCostAssumptions,
+    OrderCostRule,
+    estimate_implementation_cost,
+)
 from portfolio_core import PortfolioMetrics, RiskMetrics, optimize_portfolio
 from position_bridge import read_position_bridge_csv
 from price_quality import PriceQualityIssue
@@ -320,6 +325,30 @@ def test_both_pdfs_report_explicit_implementation_cost_assumptions():
         assert "Tarifario de prueba" in text
         assert "costo recurrente anual estimado" in text
         assert "2,032.00" in text
+
+
+def test_pdf_rejects_order_specific_rates_until_it_can_show_their_sources():
+    metrics = PortfolioMetrics(np.array([1.0]), 0.10, 0.15, 0.40)
+    risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
+    assumptions = ImplementationCostAssumptions()
+    rule = OrderCostRule(
+        asset="AAA", operation="Ambas", product="Capitales", market="BMV",
+        valid_from=date.today(), valid_until=None, consulted_on=date.today(),
+        tariff_kind="NEGOCIADA_CLIENTE", source="Acuerdo de prueba",
+        assumptions=ImplementationCostAssumptions(commission_bps=12, vat_rate=0.16),
+    )
+    estimate = estimate_implementation_cost(
+        ("AAA",), metrics.weights, 100_000, assumptions,
+        alternative_name="Objetivo", order_rules=(rule,),
+    )
+    with pytest.raises(ValueError, match="PDF aún no admite"):
+        create_pdf_report(
+            ("AAA",), date(2023, 1, 1), date(2024, 1, 1),
+            metrics, risk, 100_000, base_currency="MXN",
+            implementation_costs=(estimate,), implementation_cost_assumptions=assumptions,
+            implementation_cost_source="Acuerdo de prueba",
+            implementation_cost_source_date=date.today(),
+        )
 
 
 def test_both_pdfs_report_auditable_tax_reserve_without_calling_it_tax_due():
