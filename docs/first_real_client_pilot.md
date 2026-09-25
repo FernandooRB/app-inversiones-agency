@@ -68,9 +68,11 @@ de expedientes con retención, borrado, control de acceso y respuesta a incident
 
 ### Mapa de extracción del caso GBM
 
-El nombre exacto de cada campo del exportador se confirmará al revisar sus encabezados; no se
-presume que GBM entregue todos los campos ni que una exportación sea una fuente de precios con
-derechos comerciales. La primera revisión usará esta correspondencia:
+Ya se observó una exportación CSV mensual de movimientos con 13 campos; su
+[revisión estructural](gbm_own_account_intake.md#exportación-mensual-de-movimientos-csv) comprueba
+el formato y detecta copias idénticas, pero no la integridad ni el vínculo contractual. No se
+presume que todos los productos de GBM tengan el mismo diseño ni que una exportación sea una fuente
+de precios con derechos comerciales. La primera revisión usará esta correspondencia:
 
 Los XML recibidos son CFDI y no contienen posiciones estructuradas al corte. Los PDF serán la
 fuente de las posiciones y movimientos del piloto; una extracción específica debe contrastarse
