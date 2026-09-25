@@ -479,20 +479,21 @@ with st.sidebar:
             "Fecha de consulta del tarifario", value=date.today(), max_value=date.today(),
         )
         tariff_upload = st.file_uploader(
-            "Perfil contractual de costos CSV (opcional)", type=["csv"],
+            "Perfil de costos aplicable CSV (opcional)", type=["csv"],
             help=(
                 "Un perfil, máximo 100 KB. Sustituye todos los supuestos manuales de este bloque. "
-                "Usa los términos del contrato o tarifario aplicable al producto y mercado concretos."
+                "Declara si la tarifa es pública, contractual o negociada para este cliente; "
+                "usa sólo términos vigentes para el producto y mercado concretos, sin datos personales."
             ),
         )
         st.download_button(
             "Descargar plantilla de perfil de costos CSV",
             (
-                b"Intermediario,Producto,Mercado,FechaConsulta,ComisionOperacionPct,"
-                b"IVAPctComision,ComisionMinimaMXN,CostoMercadoPbSupuesto,"
-                b"CostoFijoAnualTotalMXN,AdministracionAnualTotalPct,Fuente\n"
-                b"Casa de Bolsa,Cuenta de ejemplo,Capitales MX y SIC,2026-01-15,0.25,16,0,"
-                b"8,0,0,Contrato o tarifario de ejemplo\n"
+                b"Intermediario,Producto,Mercado,TipoTarifa,VigenteDesde,VigenteHasta,"
+                b"FechaConsulta,ComisionOperacionPct,IVAPctComision,ComisionMinimaMXN,"
+                b"CostoMercadoPbSupuesto,CostoFijoAnualTotalMXN,AdministracionAnualTotalPct,Fuente\n"
+                b"Casa de Bolsa,EDITAR_PRODUCTO,EDITAR_MERCADO,PUBLICA,AAAA-MM-DD,,"
+                b"AAAA-MM-DD,EDITAR,EDITAR,EDITAR,EDITAR,EDITAR,EDITAR,EDITAR_FUENTE\n"
             ),
             "plantilla_perfil_costos.csv", "text/csv",
         )
@@ -1245,8 +1246,17 @@ try:
                 )
             tariff_profile = read_broker_tariff_csv(tariff_contents)
             implementation_assumptions = tariff_profile.assumptions
+            valid_until = (
+                tariff_profile.valid_until.isoformat()
+                if tariff_profile.valid_until else "sin fin declarado"
+            )
+            validity = (
+                f"{tariff_profile.valid_from.isoformat()} a {valid_until}"
+                if tariff_profile.valid_from else "no declarada"
+            )
             implementation_source = (
-                f"{tariff_profile.source}; CSV SHA-256 {tariff_fingerprint[:12]}"
+                f"{tariff_profile.source}; tipo {tariff_profile.tariff_kind}; "
+                f"vigencia {validity}; CSV SHA-256 {tariff_fingerprint[:12]}"
             )
             implementation_source_date = tariff_profile.consulted_on
         else:
@@ -1864,11 +1874,21 @@ try:
         if tariff_profile is not None:
             profile_recurring_cost = tariff_profile.assumptions.annual_recurring_cost(portfolio_value)
             st.info(
-                f"Perfil contractual: {tariff_profile.intermediary} · {tariff_profile.product} · "
-                f"{tariff_profile.market} · SHA-256 {tariff_fingerprint[:12]}. "
+                f"Perfil de costos: {tariff_profile.intermediary} · {tariff_profile.product} · "
+                f"{tariff_profile.market} · {tariff_profile.tariff_kind.replace('_', ' ').lower()} · "
+                f"vigencia {validity} · SHA-256 {tariff_fingerprint[:12]}. "
                 f"Costo recurrente anual estimado: {profile_recurring_cost:,.2f} MXN. "
                 "Los importes recurrentes se muestran por separado y no se descuentan de las métricas."
             )
+            st.caption(
+                "Tipo y vigencia declarados en el CSV; confirma el acuerdo y las condiciones "
+                "que hacen aplicable esta tarifa al cliente antes de usarla."
+            )
+            if tariff_profile.tariff_kind in {"PUBLICA", "SIN_ALCANCE"}:
+                st.warning(
+                    "Este perfil no acredita una tarifa particular del cliente. "
+                    "Confirma el contrato, producto, mercado y comisión efectiva antes de usar el costo."
+                )
         annual_recurring_cost = implementation_assumptions.annual_recurring_cost(portfolio_value)
         first_year_cost_by_alternative = {
             item.alternative_name: item.total_cost + annual_recurring_cost
