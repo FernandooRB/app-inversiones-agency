@@ -8,6 +8,8 @@ El [plan del primer caso real](docs/first_real_client_pilot.md) ordena las decis
 laborales, de privacidad y de datos que faltan antes de recibir o entregar expedientes.
 El [procedimiento local de revisión de estados GBM](docs/gbm_own_account_intake.md) separa la
 clasificación técnica de los resultados privados del caso.
+La [guía y registro de verificación](docs/verification_log.md) relaciona las funciones del producto
+con sus pruebas y las condiciones pendientes antes de una entrega a clientes.
 La aplicación incluye [escenarios Monte Carlo](docs/monte_carlo.md) para investigación interna,
 con métodos histórico por bloques y lognormal correlacionado, y
 [pruebas de estrés](docs/stress_testing.md) históricas e hipotéticas con shocks documentados

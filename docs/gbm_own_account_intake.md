@@ -185,6 +185,30 @@ movimientos ni valida que enumere todos los títulos. Si se conserva la salida d
 guardarse sólo en `data/private/`;
 no se debe ejecutar con documentos reales en CI ni adjuntar la salida a issues o PR.
 
+## Exportación mensual de movimientos CSV
+
+El [validador estructural](../scripts/inspect_gbm_export.py) reconoce el diseño observado de 13
+columnas: emisora, fecha, hora, descripción, títulos, precio, tasa, plazo, interés, impuesto,
+comisión, importe y saldo. Cuenta compras, ventas y vencimientos identificables, revisa formato de
+fecha/hora y números, y detecta archivos idénticos por SHA-256. No imprime símbolos, fechas,
+importes, descripciones ni nombres de archivo. Las funciones `_number`, `_day` y `_kind` validan
+los campos; `inspect_export` revisa un CSV y `inspect_folder` evita contar copias idénticas como
+operaciones nuevas. Sus pruebas usan exclusivamente filas inventadas.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/inspect_gbm_export.py Estados_de_Cuenta/GBM/Comprobantes > data/private/gbm_csv_preflight.json
+```
+
+La salida es `STRUCTURALLY_PLAUSIBLE` sólo cuando hay un archivo único reconocible. Un archivo
+duplicado, un formato nuevo o un valor no reconocido devuelve `REVIEW_REQUIRED` y código 2. Una
+exportación de varios meses o portafolios debe revisarse por separado: la carpeta no prueba a qué
+contrato pertenece. En el diseño observado, el precio de reporto del CSV tiene dos decimales,
+mientras que el estado PDF puede mostrar seis; el saldo CSV puede aparecer en cero en todas las
+filas. Por eso el validador **no calcula netos desde ese precio ni usa ese saldo como libro de
+efectivo**. Tampoco confirma que la exportación esté completa, que una fecha sea de liquidación o
+que una operación corresponda a un estado PDF. Esas relaciones necesitan el contraste privado
+con una clave de origen y revisión humana; cualquier centavo distinto permanece abierto.
+
 ## Conciliación pendiente
 
 1. Confirmar la relación de cada serie PDF con su contrato o subcuenta, y la relación de los XML
