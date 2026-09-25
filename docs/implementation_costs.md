@@ -5,8 +5,10 @@ El cálculo es un escenario manual y usa la moneda base del análisis. Los valor
 el equipo debe capturar los términos vigentes del contrato concreto.
 Si algún supuesto es distinto de cero, también debe declarar una referencia y su fecha de consulta;
 ambas aparecen en el PDF.
-Como alternativa, el [perfil contractual de costos](broker_tariffs.md) importa en un solo CSV la
-institución, producto, mercado, fecha, fuente y componentes transaccionales y recurrentes.
+Como alternativa, el [perfil de costos del intermediario](broker_tariffs.md) importa en un solo CSV
+la institución, producto, mercado, tipo y vigencia de tarifa, fuente y componentes transaccionales
+y recurrentes. Se debe elegir el perfil aplicable al cliente concreto; una tasa pública sirve como
+referencia, pero no sustituye una comisión negociada o condicionada por volumen.
 
 Por activo calcula la diferencia entre el importe objetivo y el importe actual. Cada diferencia
 positiva es una compra y cada diferencia negativa es una venta. Para cada orden no nula aplica:
@@ -33,3 +35,6 @@ después de los impuestos aplicables para evitar que la aplicación infiera trat
 
 Antes de entregar un reporte, conserva el tarifario o estado de cuenta usado, su fecha de consulta,
 el tipo de cliente y el producto. No extrapoles una tarifa de acciones a fondos, deuda o divisas.
+La versión actual aplica una tasa transaccional uniforme a todos los activos del análisis: una
+cartera con tarifas diferentes por producto o mercado requiere reglas por orden antes de presentar
+un costo agregado como específico para el cliente.

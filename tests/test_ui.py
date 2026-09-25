@@ -482,7 +482,7 @@ def test_current_holdings_csv_cannot_be_combined_with_manual_weights(monkeypatch
     assert any("sólo una entrada" in item.value for item in app.error)
 
 
-def test_contractual_tariff_profile_overrides_zero_manual_costs(monkeypatch):
+def test_client_tariff_profile_overrides_zero_manual_costs(monkeypatch):
     import access
 
     monkeypatch.setattr(access, "require_access", lambda: None)
@@ -491,19 +491,21 @@ def test_contractual_tariff_profile_overrides_zero_manual_costs(monkeypatch):
     values = 100 * np.cumprod(1 + rng.normal(0.0005, 0.009, (140, 2)), axis=0)
     prices = pd.DataFrame(values, columns=["AAPL", "MSFT"])
     prices.insert(0, "Fecha", dates.strftime("%Y-%m-%d"))
+    effective = (date.today() - timedelta(days=10)).isoformat()
+    expires = (date.today() + timedelta(days=365)).isoformat()
     tariff = (
-        "Intermediario,Producto,Mercado,FechaConsulta,ComisionOperacionPct,"
-        "IVAPctComision,ComisionMinimaMXN,CostoMercadoPbSupuesto,"
-        "CostoFijoAnualTotalMXN,AdministracionAnualTotalPct,Fuente\n"
-        "Casa de Bolsa,Cuenta de prueba,Capitales MX y SIC,2026-09-01,0.25,16,0,8,"
-        "1032,1.0,Contrato ficticio de prueba\n"
+        "Intermediario,Producto,Mercado,TipoTarifa,VigenteDesde,VigenteHasta,"
+        "FechaConsulta,ComisionOperacionPct,IVAPctComision,ComisionMinimaMXN,"
+        "CostoMercadoPbSupuesto,CostoFijoAnualTotalMXN,AdministracionAnualTotalPct,Fuente\n"
+        f"Casa de Bolsa,Cuenta de prueba,Capitales MX y SIC,NEGOCIADA_CLIENTE,"
+        f"{effective},{expires},{effective},0.25,16,0,8,1032,1.0,Contrato ficticio de prueba\n"
     )
     uploads = {
         "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
             prices.to_csv(index=False).encode("utf-8-sig")
         ),
         "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)": rights_manifest(),
-        "Perfil contractual de costos CSV (opcional)": BytesIO(tariff.encode("utf-8-sig")),
+        "Perfil de costos aplicable CSV (opcional)": BytesIO(tariff.encode("utf-8-sig")),
     }
     monkeypatch.setattr(st, "file_uploader", lambda label, **_kwargs: uploads.get(label))
     monkeypatch.setattr(
@@ -527,7 +529,7 @@ def test_contractual_tariff_profile_overrides_zero_manual_costs(monkeypatch):
     assert not app.error, [item.value for item in app.error]
     assert any(
         "Casa de Bolsa" in item.value and "Cuenta de prueba" in item.value
-        and "2,032.00 MXN" in item.value
+        and "2,032.00 MXN" in item.value and "negociada cliente" in item.value
         for item in app.info
     )
 

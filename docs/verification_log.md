@@ -19,6 +19,10 @@ cuentas, importes, operaciones, identificadores, excepciones y actas de revisió
 | Comparativo y PDF | [Piloto](first_real_client_pilot.md) | `tests/test_reporting.py`, `tests/test_ui.py` | Documento interno; revisión final y permiso de entrega pendientes |
 | Acceso, expedientes y operación | [Matriz del piloto](real_data_pilot.md) | Aún no hay prueba integral del dominio y del ciclo de expediente | No apto para datos de clientes en producción |
 
+El importador de perfiles de costos acepta una declaración de tarifa pública, contractual o
+negociada por cliente y verifica su ventana de vigencia. Esto registra el supuesto, pero no
+autentica el convenio ni calcula escalones de volumen o comisiones distintas por activo.
+
 ## Regla para cada cambio
 
 1. Registrar propósito, archivos modificados, función afectada, limitaciones y evidencia en esta
@@ -50,3 +54,15 @@ cuentas, importes, operaciones, identificadores, excepciones y actas de revisió
   de fuentes. No habilita expedientes de clientes ni despliegue comercial.
 
 Al cerrar este cambio, se anotarán aquí el resultado de CI y revisión.
+
+## Entrada de trabajo: vigencia y alcance de comisiones por cliente
+
+- **Cambio técnico:** el perfil CSV puede declarar tarifa `PUBLICA`, `CONTRACTUAL` o
+  `NEGOCIADA_CLIENTE` y fechas de vigencia; una tarifa fuera de la ventana se rechaza. El formato
+  anterior se mantiene como `SIN_ALCANCE` para reproducir análisis viejos, con advertencia.
+- **Verificación:** pruebas sintéticas de tarifa pública frente a negociada sobre la misma orden,
+  rechazo de vigencia y tipo inválidos, e integración en la interfaz. La suite local completa pasó:
+  **368 pruebas**; `ruff check .` pasó. No se usaron documentos reales de clientes.
+- **Límite:** la clasificación y fecha son declaradas, no prueban la elegibilidad contractual.
+  Un perfil aún aplica una sola tasa a todos los activos; quedan pendientes reglas por orden,
+  mercado, producto y escalón de volumen, además de la verificación del acuerdo particular.

@@ -51,8 +51,9 @@ y costos supuestos.
 El [estimador de costo de implementación](docs/implementation_costs.md) separa compras y ventas,
 comisión, IVA configurable y costo de mercado para cada alternativa, partiendo de efectivo o de la
 cartera actual.
-El [perfil contractual de costos](docs/broker_tariffs.md) añade trazabilidad por intermediario,
-producto, mercado, fecha y fuente, y separa los cargos iniciales de los recurrentes anuales.
+El [perfil de costos del intermediario](docs/broker_tariffs.md) distingue tarifas públicas,
+contractuales y negociadas para un cliente, comprueba su vigencia, registra la fuente y separa
+los cargos iniciales de los recurrentes anuales.
 La [reserva fiscal ilustrativa](docs/tax_reserve.md) vincula ventas estimadas con costos fiscales
 actualizados aportados por el equipo, conserva pendientes sin clasificar y no sustituye el cálculo anual.
 El [registro de flujos fiscales](docs/tax_cash_flows.md) separa dividendos, intereses y distribuciones
