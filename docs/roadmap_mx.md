@@ -31,7 +31,7 @@
 | 3. Instrumentos | Acciones/ETF mexicanos y SIC; CETES, [Bonos M](bonos_m_adapter.md), [liquidez MXN](liquidity_adapter.md) y [fondos MXN](fund_adapter.md) preparados por archivo | Valoración y flujos apropiados por tipo; no tratar tasas como retornos diarios; validar externamente precios, devengado, cupones, tasas, valores de acción y distribuciones |
 | 4. Optimización | Objetivos, límites, [benchmark independiente](benchmarking.md), [política por clase](allocation_policy.md), [atribución de riesgo](risk_attribution.md), [Black-Litterman](black_litterman.md), [sensibilidad histórica](allocation_sensitivity.md) y [covarianza diagonal fija o calibrada](covariance_shrinkage.md) | Restricciones individuales y por clase factibles; comparación con alternativa simple y benchmark en fechas comunes; contribuciones de volatilidad reconciliadas; escenario de retornos implícitos y opiniones trazables; falta validarlo en más regímenes y universos; asignación por perfil solo después de resolver las condiciones legales y laborales |
 | 5. Simulación | [Trayectorias Monte Carlo](monte_carlo.md) y [pruebas de estrés](stress_testing.md) históricas/manuales en app y PDF | Supuestos visibles; resultados hipotéticos; trayectorias sin patrimonio negativo; shocks nombrados por activo o clase declarada; tasas y duración de deuda aún requieren modelos propios |
-| 6. Validación | [Fecha de corte y revisiones sucesivas](backtesting.md), [cuatro cortes predefinidos](multi_cut_validation.md), referencias, [perfil contractual](broker_tariffs.md), [costo explícito de implementación](implementation_costs.md) y [reserva fiscal de ventas](tax_reserve.md) | Fechas de estimación/evaluación separadas; rebalanceos de 3, 6 o 12 meses sin datos futuros; sensibilidad al corte sin promediar evaluaciones solapadas; costos iniciales y recurrentes separados; costo fiscal actualizado aportado y ventas sin clasificar visibles; límites y fallos comunicados |
+| 6. Validación | [Fecha de corte y revisiones sucesivas](backtesting.md), [cuatro cortes predefinidos](multi_cut_validation.md), referencias, [perfil contractual](broker_tariffs.md), [alcance de una cuenta](account_scope.md), [costo explícito de implementación](implementation_costs.md) y [reserva fiscal de ventas](tax_reserve.md) | Fechas de estimación/evaluación separadas; rebalanceos de 3, 6 o 12 meses sin datos futuros; sensibilidad al corte sin promediar evaluaciones solapadas; costos iniciales y recurrentes separados; un reporte por cuenta antes de consolidar; costo fiscal actualizado aportado y ventas sin clasificar visibles; límites y fallos comunicados |
 | 7. Datos de clientes | Etapa condicionada a la definición legal del servicio | No guardar perfiles, carteras identificables ni historial de propuestas para clientes hasta definir finalidad, privacidad, autorización laboral y alcance regulatorio |
 
 ## Decisiones metodológicas iniciales
@@ -74,7 +74,10 @@
 2. Obtener series por emisión para validar renovaciones del [preparador CETES](cetes_adapter.md),
    incorporar precios de salida/entrada y ampliar el catálogo con claves oficiales e ISIN.
 3. Obtener y archivar tarifarios reales por contrato, cliente y producto. El importador ya concilia
-   un perfil fechado y separa costos iniciales y recurrentes; falta validarlo con contratos reales.
+   un perfil fechado y separa costos iniciales y recurrentes. El manifiesto de alcance vincula
+   archivos por huella para un reporte por cuenta, pero falta confirmar en originales la relación
+   entre subcuenta, cartera y convenio, y verificar elegibilidad por volumen. El consolidado de
+   varias cuentas queda para una etapa posterior.
 4. Obtener cotizaciones y contratos para la ruta definida en la [matriz de fuentes](data_sources.md):
    Banxico como referencia mexicana y precios BMV/SIC aportados bajo un permiso confirmado. El
    manifiesto ya impide usar archivos con derechos pendientes, vencidos o no autorizados.

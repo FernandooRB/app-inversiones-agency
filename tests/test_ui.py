@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 
@@ -553,12 +554,26 @@ def test_order_tariff_csv_flows_through_analysis_and_reports(monkeypatch):
         f"MSFT,Casa de prueba,ETF,SIC,AMBAS,CONTRACTUAL,"
         f"{effective},,{effective},0.30,16,0,5,Contrato ETF\n"
     )
+    tariff_bytes = tariff.encode("utf-8-sig")
+    holdings_bytes = (
+        "FechaCorte,Instrumento,ValorMXN\n"
+        f"{effective},AAPL,60000\n{effective},MSFT,40000\n"
+    ).encode("utf-8-sig")
+    scope = (
+        "AliasCuenta,Intermediario,PuntoPartida,FechaCorte,FechaRevision,"
+        "HuellaCarteraSHA256,HuellaTarifasSHA256,FuenteAlcance\n"
+        f"Cuenta_A,Casa de prueba,CARTERA,{effective},{date.today().isoformat()},"
+        f"{sha256(holdings_bytes).hexdigest()},"
+        f"{sha256(tariff_bytes).hexdigest()},Contrato de prueba revisado\n"
+    )
     uploads = {
         "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
             prices.to_csv(index=False).encode("utf-8-sig")
         ),
         "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)": rights_manifest(),
-        "Reglas de costos por orden CSV (opcional)": BytesIO(tariff.encode("utf-8-sig")),
+        "Cartera actual valuada en MXN CSV (opcional)": BytesIO(holdings_bytes),
+        "Reglas de costos por orden CSV (opcional)": BytesIO(tariff_bytes),
+        "Alcance de una cuenta CSV (obligatorio con reglas por orden)": BytesIO(scope.encode()),
     }
     monkeypatch.setattr(st, "file_uploader", lambda label, **_kwargs: uploads.get(label))
     monkeypatch.setattr(
@@ -576,18 +591,35 @@ def test_order_tariff_csv_flows_through_analysis_and_reports(monkeypatch):
     next(
         item for item in app.selectbox if item.label == "Moneda base del análisis"
     ).set_value("MXN")
+    next(
+        item for item in app.text_input
+        if item.label == "Fuente declarada de la cartera actual"
+    ).set_value("Estado de prueba revisado")
     app.run()
     app.button[0].click().run()
     assert not app.exception
     assert not app.error, [item.value for item in app.error]
     assert any("Reglas por orden: 2 filas" in item.value for item in app.info)
     assert any("Reglas por orden CSV SHA-256" in item.value for item in app.caption)
+    assert any("Alcance: Cuenta_A" in item.value for item in app.caption)
     next(
         item for item in app.number_input
         if item.label == "Comisión sobre cada operación (%)"
     ).set_value(0.25).run()
     app.button[0].click().run()
     assert any("deja en cero las tasas transaccionales" in item.value for item in app.error)
+    next(
+        item for item in app.number_input
+        if item.label == "Comisión sobre cada operación (%)"
+    ).set_value(0.0).run()
+    uploads.pop("Alcance de una cuenta CSV (obligatorio con reglas por orden)")
+    app.run()
+    app.button[0].click().run()
+    assert any("manifiesto de alcance de una cuenta" in item.value for item in app.error)
+    uploads["Alcance de una cuenta CSV (obligatorio con reglas por orden)"] = BytesIO(b"")
+    app.run()
+    app.button[0].click().run()
+    assert any("manifiesto de alcance cargado está vacío" in item.value for item in app.error)
 
 
 def test_bond_issue_csv_is_integrated_with_auditable_total_return(monkeypatch):

@@ -75,11 +75,14 @@ del cálculo.
 El CSV identifica un supuesto, no acredita un convenio ni la elegibilidad por volumen. No agregues
 nombres, cuentas ni otros datos personales. La interfaz ofrece una carga distinta del perfil general:
 ambas opciones son excluyentes y las cuatro tasas transaccionales manuales deben quedar en cero.
+El [manifiesto de alcance de una cuenta](account_scope.md) es obligatorio con estas reglas; ata
+por huella los archivos de cartera y tarifas y rechaza intermediarios mezclados. Para una cartera
+real se requiere el CSV valuado de esa cuenta, no pesos manuales.
 Los cargos anuales se declaran una vez en los campos manuales con su referencia. El detalle CSV de
 costos y ambos PDF muestran la fuente, tasas, vigencia e importes de cada orden y reconcilian el
 desglose con el resumen. Si falta cobertura para alguna orden del análisis, no se genera reporte.
 Si el mismo instrumento está en dos cuentas con condiciones distintas, la cartera agregada por
-símbolo tampoco separa esas órdenes; esta modalidad no resuelve ese caso.
+símbolo tampoco separa esas órdenes. Prepara un reporte por cuenta; el consolidado queda pendiente.
 
 ## Revisión de fuentes públicas
 
