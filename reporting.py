@@ -1,6 +1,7 @@
 """PDF reporting for the portfolio optimizer."""
 
 import io
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -23,6 +24,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from account_scope import AccountScope
 from benchmarking import BenchmarkAnalysis
 from black_litterman import BlackLittermanResult
 from cash_bridge import CashBridge
@@ -579,6 +581,7 @@ def _implementation_cost_story(
     currency: str,
     source: str | None,
     source_date: date | None,
+    account_scope: AccountScope | None,
     styles,
 ) -> list:
     if not estimates:
@@ -598,6 +601,41 @@ def _implementation_cost_story(
     if any(per_order) and not all(per_order):
         raise ValueError("Todas las alternativas deben usar el mismo método de tarifas.")
     order_mode = all(per_order)
+    if order_mode:
+        if not isinstance(account_scope, AccountScope):
+            raise ValueError("El PDF con tarifas por orden requiere alcance de una cuenta.")
+        if (
+            account_scope.starting_point not in {"CARTERA", "EFECTIVO"}
+            or type(account_scope.reviewed_on) is not date
+            or account_scope.reviewed_on > date.today()
+            or any(
+                not isinstance(value, str) or not value.strip()
+                or any(ord(character) < 32 for character in value)
+                for value in (
+                    account_scope.alias, account_scope.intermediary, account_scope.source,
+                )
+            )
+            or not isinstance(account_scope.tariff_fingerprint, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", account_scope.tariff_fingerprint)
+        ):
+            raise ValueError("El alcance de cuenta del PDF no es válido.")
+        if account_scope.starting_point == "CARTERA":
+            if (
+                type(account_scope.holdings_as_of) is not date
+                or account_scope.holdings_as_of > account_scope.reviewed_on
+                or not isinstance(account_scope.holdings_fingerprint, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", account_scope.holdings_fingerprint)
+            ):
+                raise ValueError("El alcance de cartera del PDF no es válido.")
+        elif account_scope.holdings_as_of is not None or account_scope.holdings_fingerprint is not None:
+            raise ValueError("El alcance de efectivo no debe declarar una cartera.")
+        expected_start = (
+            "Cartera actual" if account_scope.starting_point == "CARTERA" else "Efectivo"
+        )
+        if any(item.starting_point != expected_start for item in estimates):
+            raise ValueError("El punto de partida no coincide con el alcance de cuenta.")
+    elif account_scope is not None:
+        raise ValueError("El alcance de cuenta sólo acompaña tarifas por orden.")
     if order_mode and any((
         assumptions.commission_bps, assumptions.vat_rate,
         assumptions.minimum_commission, assumptions.market_cost_bps,
@@ -664,13 +702,30 @@ def _implementation_cost_story(
         Spacer(1, 3 * mm),
     ]
     if order_mode:
-        section.extend(_order_cost_detail_story(estimates, currency, styles))
+        scope_text = (
+            f"Alcance declarado: {escape(account_scope.alias)}; intermediario "
+            f"{escape(account_scope.intermediary)}; punto de partida "
+            f"{account_scope.starting_point.lower()}; revisión "
+            f"{account_scope.reviewed_on.isoformat()}; fuente "
+            f"{escape(account_scope.source)}; CSV de tarifas SHA-256 "
+            f"{account_scope.tariff_fingerprint[:12]}"
+            + (
+                f"; CSV de cartera SHA-256 {account_scope.holdings_fingerprint[:12]}; "
+                f"corte {account_scope.holdings_as_of.isoformat()}"
+                if account_scope.holdings_fingerprint else ""
+            )
+            + ". Las huellas vinculan archivos declarados; no prueban que pertenezcan a una "
+            "misma cuenta ni la elegibilidad contractual."
+        )
+        section.insert(2, Paragraph(scope_text, styles["Normal"]))
+        section.extend(_order_cost_detail_story(estimates, currency, account_scope, styles))
         return section
     return [KeepTogether(section)]
 
 
 def _order_cost_detail_story(
-    estimates: tuple[ImplementationCostEstimate, ...], currency: str, styles,
+    estimates: tuple[ImplementationCostEstimate, ...], currency: str,
+    account_scope: AccountScope, styles,
 ) -> list:
     """Show and reconcile every executed order with the terms used to price it."""
     required = {
@@ -709,6 +764,8 @@ def _order_cost_detail_story(
                 raise ValueError("La dirección de una orden no es válida.")
             if row["Tipo tarifa"] not in {"PUBLICA", "CONTRACTUAL", "NEGOCIADA_CLIENTE"}:
                 raise ValueError("El tipo de tarifa de una orden no es válido.")
+            if row["Intermediario"].strip().casefold() != account_scope.intermediary.casefold():
+                raise ValueError("Una orden pertenece a otro intermediario.")
             try:
                 valid_from = date.fromisoformat(row["Vigente desde"])
                 consulted_on = date.fromisoformat(row["Fecha consulta"])
@@ -1041,6 +1098,7 @@ def create_comparison_pdf_report(
     implementation_cost_assumptions: ImplementationCostAssumptions | None = None,
     implementation_cost_source: str | None = None,
     implementation_cost_source_date: date | None = None,
+    account_scope: AccountScope | None = None,
     tax_reserve_estimates: tuple[TaxReserveEstimate, ...] = (),
     tax_basis_profile: TaxBasisProfile | None = None,
     tax_cash_flow_ledger: TaxCashFlowLedger | None = None,
@@ -1204,7 +1262,7 @@ def create_comparison_pdf_report(
     story.extend(_implementation_cost_story(
         implementation_costs, implementation_cost_assumptions,
         portfolio_value, base_currency,
-        implementation_cost_source, implementation_cost_source_date, styles,
+        implementation_cost_source, implementation_cost_source_date, account_scope, styles,
     ))
     story.extend(_tax_reserve_story(
         tax_reserve_estimates, tax_basis_profile, base_currency, styles,
@@ -1470,6 +1528,7 @@ def create_pdf_report(
     implementation_cost_assumptions: ImplementationCostAssumptions | None = None,
     implementation_cost_source: str | None = None,
     implementation_cost_source_date: date | None = None,
+    account_scope: AccountScope | None = None,
     tax_reserve_estimates: tuple[TaxReserveEstimate, ...] = (),
     tax_basis_profile: TaxBasisProfile | None = None,
     tax_cash_flow_ledger: TaxCashFlowLedger | None = None,
@@ -1609,7 +1668,7 @@ def create_pdf_report(
     story.extend(_implementation_cost_story(
         implementation_costs, implementation_cost_assumptions,
         portfolio_value, base_currency,
-        implementation_cost_source, implementation_cost_source_date, styles,
+        implementation_cost_source, implementation_cost_source_date, account_scope, styles,
     ))
     story.extend(_tax_reserve_story(
         tax_reserve_estimates, tax_basis_profile, base_currency, styles,

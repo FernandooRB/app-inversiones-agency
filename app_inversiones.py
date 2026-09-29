@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from access import require_access
+from account_scope import read_account_scope_csv
 from allocation_policy import parse_asset_classes, parse_class_limits, policy_table
 from backtesting import run_holdout_backtest
 from benchmarking import analyze_benchmark
@@ -521,6 +522,14 @@ with st.sidebar:
             ),
             "plantilla_reglas_costos_orden.csv", "text/csv",
         )
+        account_scope_upload = st.file_uploader(
+            "Alcance de una cuenta CSV (obligatorio con reglas por orden)", type=["csv"],
+            help=(
+                "Vincula por SHA-256 el CSV de tarifas con la cartera importada, o declara "
+                "EFECTIVO sin cartera. Usa un alias no identificante; no incluyas número de "
+                "cuenta ni nombre. La coincidencia de huellas no acredita el convenio."
+            ),
+        )
     price_upload = st.file_uploader(
         "Precios ajustados CSV aportados por el equipo (opcional)",
         type=["csv"],
@@ -779,6 +788,26 @@ order_tariff_contents = (
 order_tariff_fingerprint = (
     sha256(order_tariff_contents).hexdigest() if order_tariff_contents else None
 )
+account_scope_contents = (
+    account_scope_upload.getvalue() if account_scope_upload is not None else b""
+)
+account_scope_fingerprint = (
+    sha256(account_scope_contents).hexdigest() if account_scope_contents else None
+)
+if order_tariff_contents:
+    point = "CARTERA" if holdings_contents else "EFECTIVO"
+    st.sidebar.download_button(
+        "Descargar manifiesto de alcance prellenado",
+        (
+            "AliasCuenta,Intermediario,PuntoPartida,FechaCorte,FechaRevision,"
+            "HuellaCarteraSHA256,HuellaTarifasSHA256,FuenteAlcance\n"
+            f"Cuenta_A,EDITAR_INTERMEDIARIO,{point},"
+            f"{'EDITAR_FECHA_CORTE' if holdings_contents else ''},{date.today().isoformat()},"
+            f"{holdings_fingerprint if holdings_contents else ''},"
+            f"{order_tariff_fingerprint},EDITAR_FUENTE\n"
+        ).encode("utf-8-sig"),
+        "plantilla_alcance_cuenta.csv", "text/csv",
+    )
 settings = (
     tickers_input,
     start_date,
@@ -826,6 +855,7 @@ settings = (
     implementation_source_date,
     tariff_fingerprint,
     order_tariff_fingerprint,
+    account_scope_fingerprint,
     price_fingerprint,
     identity_fingerprint,
     price_rights_fingerprint,
@@ -862,6 +892,12 @@ if st.session_state.get("analysis_settings") != settings:
     st.stop()
 
 try:
+    if tariff_upload is not None and not tariff_contents:
+        raise PortfolioError("El perfil de costos CSV cargado está vacío.")
+    if order_tariff_upload is not None and not order_tariff_contents:
+        raise PortfolioError("El CSV de reglas por orden cargado está vacío.")
+    if account_scope_upload is not None and not account_scope_contents:
+        raise PortfolioError("El manifiesto de alcance cargado está vacío.")
     tickers = tuple(normalize_tickers(tickers_input))
     quotes = currency_map(tickers, quote_input)
     asset_count = (
@@ -1264,6 +1300,7 @@ try:
         )
         tariff_profile = None
         order_rules = None
+        account_scope = None
         manual_cost_values = (
             implementation_commission_percent, implementation_vat_percent,
             implementation_market_bps, implementation_minimum,
@@ -1271,6 +1308,8 @@ try:
         )
         if tariff_contents and order_tariff_contents:
             raise PortfolioError("Elige un solo CSV de costos: perfil general o reglas por orden.")
+        if account_scope_contents and not order_tariff_contents:
+            raise PortfolioError("El alcance de cuenta requiere reglas de tarifas por orden.")
         if tariff_contents:
             if base_currency != "MXN":
                 raise PortfolioError("El perfil contractual en MXN requiere moneda base MXN.")
@@ -1302,6 +1341,22 @@ try:
                         "Con reglas por orden, deja en cero las tasas transaccionales manuales."
                     )
                 order_rules = read_order_tariffs_csv(order_tariff_contents, analysis_tickers)
+                if current_weights_input.strip():
+                    raise PortfolioError(
+                        "Con reglas por orden, usa cartera valuada CSV o efectivo; "
+                        "los pesos manuales no identifican una cuenta."
+                    )
+                if not account_scope_contents:
+                    raise PortfolioError(
+                        "Carga el manifiesto de alcance de una cuenta para las reglas por orden."
+                    )
+                account_scope = read_account_scope_csv(
+                    account_scope_contents,
+                    holdings_contents=holdings_contents,
+                    tariff_contents=order_tariff_contents,
+                    holdings=holdings_result,
+                    order_rules=order_rules,
+                )
             implementation_assumptions = ImplementationCostAssumptions(
                 commission_bps=implementation_commission_percent * 100,
                 market_cost_bps=implementation_market_bps,
@@ -1948,6 +2003,12 @@ try:
                 f"Reglas por orden: {len(order_rules)} filas; CSV SHA-256 "
                 f"{order_tariff_fingerprint[:12]}. Cada orden estimada muestra su tasa y fuente "
                 "en el detalle y en el PDF. Los costos anuales se declaran una sola vez."
+            )
+            st.caption(
+                f"Alcance: {account_scope.alias} · {account_scope.intermediary} · "
+                f"{account_scope.starting_point.lower()} · revisión "
+                f"{account_scope.reviewed_on.isoformat()} · manifiesto SHA-256 "
+                f"{account_scope_fingerprint[:12]}. {account_scope.source}."
             )
             st.caption(
                 "La regla declarada no acredita convenio, tramo de volumen ni elegibilidad "
@@ -2725,6 +2786,7 @@ try:
         implementation_cost_assumptions=implementation_assumptions,
         implementation_cost_source=implementation_source,
         implementation_cost_source_date=implementation_source_date,
+        account_scope=account_scope,
         tax_reserve_estimates=tax_reserve_estimates[:1],
         tax_basis_profile=tax_basis_profile,
         tax_cash_flow_ledger=tax_cash_flow_ledger,
@@ -2753,6 +2815,7 @@ try:
         implementation_cost_assumptions=implementation_assumptions,
         implementation_cost_source=implementation_source,
         implementation_cost_source_date=implementation_source_date,
+        account_scope=account_scope,
         tax_reserve_estimates=tax_reserve_estimates,
         tax_basis_profile=tax_basis_profile,
         tax_cash_flow_ledger=tax_cash_flow_ledger,

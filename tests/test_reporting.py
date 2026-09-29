@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 from pypdf import PdfReader
 
+from account_scope import AccountScope
 from benchmarking import analyze_benchmark
 from black_litterman import AbsoluteView, black_litterman_posterior
 from cash_bridge import read_cash_bridge_csv
@@ -354,6 +355,10 @@ def test_both_pdfs_show_and_reconcile_order_specific_rates_and_sources():
         ("AAA", "BBB"), metrics.weights, 100_000, assumptions,
         alternative_name="Objetivo", current_weights=[0.4, 0.6], order_rules=rules,
     )
+    scope = AccountScope(
+        "Cuenta_A", "Casa de prueba", "CARTERA", date.today(), date.today(),
+        "a" * 64, "b" * 64, "Estado de prueba revisado",
+    )
     reports = (
         create_pdf_report(
             ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
@@ -361,6 +366,7 @@ def test_both_pdfs_show_and_reconcile_order_specific_rates_and_sources():
             implementation_costs=(estimate,), implementation_cost_assumptions=assumptions,
             implementation_cost_source="CSV SHA-256 123456789abc; recurrentes: contrato",
             implementation_cost_source_date=date.today(),
+            account_scope=scope,
         ),
         create_comparison_pdf_report(
             ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
@@ -371,6 +377,7 @@ def test_both_pdfs_show_and_reconcile_order_specific_rates_and_sources():
             implementation_costs=(estimate,), implementation_cost_assumptions=assumptions,
             implementation_cost_source="CSV SHA-256 123456789abc; recurrentes: contrato",
             implementation_cost_source_date=date.today(),
+            account_scope=scope,
         ),
     )
     for report in reports:
@@ -379,6 +386,7 @@ def test_both_pdfs_show_and_reconcile_order_specific_rates_and_sources():
             "Detalle de tarifas por orden", "Acuerdo acciones", "Contrato ETF",
             "NEGOCIADA_CLIENTE", "CONTRACTUAL", "12 pb", "30 pb",
             "10 MXN", "120.00", "CSV SHA-256 123456789abc",
+            "Alcance declarado: Cuenta_A", "Estado de prueba revisado",
         ):
             assert expected in text
 
@@ -392,6 +400,25 @@ def test_both_pdfs_show_and_reconcile_order_specific_rates_and_sources():
             implementation_cost_assumptions=assumptions,
             implementation_cost_source="CSV de prueba",
             implementation_cost_source_date=date.today(),
+            account_scope=scope,
+        )
+
+    with pytest.raises(ValueError, match="requiere alcance de una cuenta"):
+        create_pdf_report(
+            ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+            metrics, risk, 100_000, base_currency="MXN",
+            implementation_costs=(estimate,), implementation_cost_assumptions=assumptions,
+            implementation_cost_source="CSV de prueba",
+            implementation_cost_source_date=date.today(),
+        )
+    with pytest.raises(ValueError, match="alcance de cuenta del PDF no es válido"):
+        create_pdf_report(
+            ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+            metrics, risk, 100_000, base_currency="MXN",
+            implementation_costs=(estimate,), implementation_cost_assumptions=assumptions,
+            implementation_cost_source="CSV de prueba",
+            implementation_cost_source_date=date.today(),
+            account_scope=replace(scope, starting_point="OTRO"),
         )
 
 

@@ -118,8 +118,30 @@ Al cerrar este cambio, se anotarán aquí el resultado de CI y revisión.
   de la restricción local de carpetas temporales. Dentro de la sandbox, 378 pruebas pasaron y
   tres de GBM no pudieron preparar su `tmp_path` por `PermissionError`; no fueron fallos de
   aserción. La revisión final del diff confirmó sólo ocho archivos públicos y ningún documento
-  de cuenta; el PDF sintético se volvió a renderizar y revisar tras los últimos ajustes. Pendiente:
-  CI de Ubuntu/Windows al publicar.
+  de cuenta; el PDF sintético se volvió a renderizar y revisar tras los últimos ajustes. El
+  [PR #53](https://github.com/FernandooRB/app-inversiones-agency/pull/53) pasó CI en Ubuntu y
+  Windows y se fusionó por squash en `main` como `e0b6532`. Su árbol publicado coincide con el
+  commit local autorizado `3fc8a24`; la rama remota se eliminó.
 - **Límite:** sin convenio real comprobado ni modelado de escalones por volumen mensual. La
   agregación por símbolo sigue sin distinguir cuentas con distintas condiciones. No implica
   aprobación de asesoría personalizada, de Citi ni despliegue comercial.
+
+## Entrada de trabajo: alcance de una cuenta
+
+- **Decisión de producto:** preparar primero un PDF por cuenta y dejar el consolidado para después.
+- **Cambio técnico local:** manifiesto de una fila con alias no identificante, intermediario,
+  punto de partida, fecha de revisión y huellas completas de cartera y tarifas. La app rechaza
+  reglas sin manifiesto, pesos manuales con tarifas por orden, carteras o tarifas con otra huella,
+  fechas incompatibles e intermediarios mezclados. Ambos PDF muestran el alcance y advierten que
+  la coincidencia de archivos no acredita pertenencia ni elegibilidad contractual.
+- **Verificación local:** pruebas sintéticas de ambas modalidades (`CARTERA` y `EFECTIVO`),
+  archivos sustituidos, intermediario distinto, fecha de corte y alias con apariencia de número
+  de cuenta; prueba de interfaz con cartera importada y rechazo de manifiesto ausente o vacío.
+  La app también rechaza perfiles y reglas de tarifas cargados pero vacíos. La suite
+  local completa pasó con **385 pruebas** y `ruff check .` no encontró problemas. Un comparativo
+  sintético de tres páginas se renderizó y revisó visualmente, incluido el nuevo alcance en PDF.
+  La revisión final del diff confirmó diez archivos públicos y ningún documento de cuenta.
+  Pendiente CI de Ubuntu/Windows al publicar.
+- **Límite:** un manifiesto declarado no detecta si una cartera ya suma varias cuentas. Falta
+  relacionar cada serie GBM con su subcuenta y convenio en el expediente privado; el consolidado
+  y los tramos de volumen no se calculan.
