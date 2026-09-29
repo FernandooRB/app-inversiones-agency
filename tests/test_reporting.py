@@ -332,7 +332,8 @@ def test_pdf_rejects_order_specific_rates_until_it_can_show_their_sources():
     risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
     assumptions = ImplementationCostAssumptions()
     rule = OrderCostRule(
-        asset="AAA", operation="Ambas", product="Capitales", market="BMV",
+        asset="AAA", operation="Ambas", intermediary="Casa de prueba",
+        product="Capitales", market="BMV",
         valid_from=date.today(), valid_until=None, consulted_on=date.today(),
         tariff_kind="NEGOCIADA_CLIENTE", source="Acuerdo de prueba",
         assumptions=ImplementationCostAssumptions(commission_bps=12, vat_rate=0.16),

@@ -49,8 +49,34 @@ fondos con gastos incorporados en su valor, penalizaciones, tipo de cambio opera
 ganancias, retenciones, lotes o profundidad real. Un perfil aplica la misma comisión transaccional a
 todos los activos del análisis; si el contrato cambia por instrumento o mercado, este perfil **no
 representa la cartera completa**. Prepara análisis separados o usa un supuesto explícitamente
-conservador y documenta la limitación hasta implementar reglas por orden. No promedies tasas ni
+conservador y documenta la limitación hasta conectar las reglas por orden a la interfaz y al PDF.
+No promedies tasas ni
 apliques una tarifa especial de un cliente a otro.
+
+## Reglas por orden (API interna)
+
+El importador `read_order_tariffs_csv` lee un archivo separado con reglas de compra, venta o ambas
+para cada activo del análisis. Requiere exactamente estas columnas y un máximo de 200 filas y
+100 KB; la plantilla siguiente contiene marcadores que deben sustituirse antes de usarla:
+
+```csv
+Activo,Intermediario,Producto,Mercado,Operacion,TipoTarifa,VigenteDesde,VigenteHasta,FechaConsulta,ComisionOperacionPct,IVAPctComision,ComisionMinimaMXN,CostoMercadoPbSupuesto,Fuente
+EDITAR_ACTIVO,EDITAR_INTERMEDIARIO,EDITAR_PRODUCTO,EDITAR_MERCADO,AMBAS,NEGOCIADA_CLIENTE,AAAA-MM-DD,,AAAA-MM-DD,EDITAR,EDITAR,EDITAR,EDITAR,EDITAR_FUENTE
+```
+
+`Activo` debe coincidir exactamente con un instrumento del análisis. `Operacion` admite `COMPRA`,
+`VENTA` o `AMBAS`. Dos filas no pueden cubrir el mismo activo y lado, incluso si una dice `AMBAS`.
+Las cuatro cifras son obligatorias, aunque su valor sea cero. La comisión se expresa en porcentaje,
+el IVA como porcentaje de la comisión, el mínimo en MXN y el costo de mercado en puntos base. La
+vigencia debe cubrir la fecha del análisis y la fuente no puede haberse consultado después de ella.
+El estimador rechaza una orden sin regla; nunca sustituye silenciosamente una tarifa faltante por
+la tasa general. Conserva el intermediario, producto, mercado, fuente y tarifa aplicada en cada fila
+del cálculo.
+
+El CSV identifica un supuesto, no acredita un convenio ni la elegibilidad por volumen. No agregues
+nombres, cuentas ni otros datos personales. Esta API todavía no está disponible en la interfaz; el
+PDF bloquea estos cálculos hasta incluir el desglose y las fuentes. Si el mismo instrumento está en
+dos cuentas con condiciones distintas, la cartera agregada por símbolo tampoco separa esas órdenes.
 
 ## Revisión de fuentes públicas
 

@@ -77,7 +77,8 @@ def test_annual_recurring_cost_keeps_fixed_and_asset_based_costs_separate():
 def _rule(asset, operation, commission_bps, *, market_cost_bps=0, minimum=0,
           valid_from=None, valid_until=None, annual_fixed_cost=0):
     return OrderCostRule(
-        asset=asset, operation=operation, product="Capitales", market="BMV",
+        asset=asset, operation=operation, intermediary="Casa de prueba",
+        product="Capitales", market="BMV",
         valid_from=valid_from or date.today(), valid_until=valid_until,
         consulted_on=date.today(), tariff_kind="NEGOCIADA_CLIENTE",
         source="Acuerdo de prueba", assumptions=ImplementationCostAssumptions(
