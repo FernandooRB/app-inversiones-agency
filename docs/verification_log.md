@@ -141,7 +141,28 @@ Al cerrar este cambio, se anotarán aquí el resultado de CI y revisión.
   local completa pasó con **385 pruebas** y `ruff check .` no encontró problemas. Un comparativo
   sintético de tres páginas se renderizó y revisó visualmente, incluido el nuevo alcance en PDF.
   La revisión final del diff confirmó diez archivos públicos y ningún documento de cuenta.
-  Pendiente CI de Ubuntu/Windows al publicar.
+  El [PR #54](https://github.com/FernandooRB/app-inversiones-agency/pull/54) pasó CI en Ubuntu y
+  Windows y se fusionó por squash en `main` como `5300b4e`. Su árbol coincide con el del commit
+  autorizado `6e01886`; la rama remota se eliminó.
 - **Límite:** un manifiesto declarado no detecta si una cartera ya suma varias cuentas. Falta
   relacionar cada serie GBM con su subcuenta y convenio en el expediente privado; el consolidado
   y los tramos de volumen no se calculan.
+
+## Auditoría de preparación para datos reales — 29 de septiembre de 2026
+
+- [Dictamen técnico](audit_2026-09-29.md): el producto sigue siendo investigación interna; no se
+  aprobó la entrega individualizada a clientes. Se creó un expediente privado neutro para el
+  piloto GBM BMV y un inventario de documentos sin publicar identificadores.
+- El cambio local de logging evita registrar mensajes y traceback de excepciones inesperadas;
+  la prueba dirigida de privacidad y las pruebas de interfaz pasaron (**13 pruebas**). `ruff check .`
+  compilación Python y `pip check` pasaron. En la suite completa de esta sandbox aprobaron **383 pruebas** y
+  tres de GBM fallaron durante la preparación de `tmp_path` por `WinError 5`; no llegaron a ejecutar
+  aserciones en pytest. Las tres funciones se ejecutaron luego directamente con carpetas privadas
+  y pasaron. La suite completa verde fuera de esa restricción y CI remoto siguen pendientes.
+- El control por cuenta de `6e01886` ya está integrado mediante el PR #54. Los cambios de esta
+  auditoría y del logging siguen locales; su propia suite completa y CI remoto están pendientes.
+- Una revisión ampliada del inventario GBM detectó 18 CFDI estructurales entre 22 XML distintos,
+  todos con aritmética interna exacta; cuatro XML requieren clasificación. Diecisiete CFDI tienen
+  referencia textual candidata a una serie y uno no. Las 30 compraventas visibles con cargos
+  presentan 26 netos exactos y cuatro diferencias de un centavo, todavía abiertas. Son controles
+  locales agregados, sin vincular ni aprobar el portafolio BMV o su convenio.

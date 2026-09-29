@@ -68,6 +68,9 @@
 
 ## Pendientes de definición
 
+La [auditoría del 29 de septiembre de 2026](audit_2026-09-29.md) registra el estado verificable
+del piloto, los bloqueos de uso con clientes y la secuencia para cerrar las brechas.
+
 1. Obtener dictamen jurídico sobre los productos y entregables permitidos sin registro CNBV y
    respuesta del empleador sobre la actividad externa. Constituir una persona moral no sustituye ninguna
    de estas dos evaluaciones.
