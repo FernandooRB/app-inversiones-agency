@@ -15,7 +15,7 @@ from allocation_policy import parse_asset_classes, parse_class_limits, policy_ta
 from backtesting import run_holdout_backtest
 from benchmarking import analyze_benchmark
 from black_litterman import black_litterman_posterior, parse_absolute_views
-from broker_tariffs import read_broker_tariff_csv
+from broker_tariffs import read_broker_tariff_csv, read_order_tariffs_csv
 from cash_bridge import read_cash_bridge_csv
 from covariance_calibration import select_diagonal_shrinkage
 from currencies import convert_prices, currency_map, download_fx
@@ -477,6 +477,10 @@ with st.sidebar:
         )
         implementation_source_date = st.date_input(
             "Fecha de consulta del tarifario", value=date.today(), max_value=date.today(),
+            help=(
+                "Con reglas por orden, esta fecha corresponde a la referencia del archivo o "
+                "cargos anuales; cada regla contiene su propia FechaConsulta."
+            ),
         )
         tariff_upload = st.file_uploader(
             "Perfil de costos aplicable CSV (opcional)", type=["csv"],
@@ -496,6 +500,26 @@ with st.sidebar:
                 b"AAAA-MM-DD,EDITAR,EDITAR,EDITAR,EDITAR,EDITAR,EDITAR,EDITAR_FUENTE\n"
             ),
             "plantilla_perfil_costos.csv", "text/csv",
+        )
+        order_tariff_upload = st.file_uploader(
+            "Reglas de costos por orden CSV (opcional)", type=["csv"],
+            help=(
+                "Hasta 200 reglas por activo y compra/venta; sólo MXN. No combines con el perfil "
+                "general ni con costos transaccionales manuales. Los costos anuales se declaran "
+                "una sola vez en los campos de este bloque. No incluyas datos personales."
+            ),
+        )
+        st.download_button(
+            "Descargar plantilla de reglas por orden CSV",
+            (
+                b"Activo,Intermediario,Producto,Mercado,Operacion,TipoTarifa,VigenteDesde,"
+                b"VigenteHasta,FechaConsulta,ComisionOperacionPct,IVAPctComision,"
+                b"ComisionMinimaMXN,CostoMercadoPbSupuesto,Fuente\n"
+                b"EDITAR_ACTIVO,EDITAR_INTERMEDIARIO,EDITAR_PRODUCTO,EDITAR_MERCADO,AMBAS,"
+                b"NEGOCIADA_CLIENTE,AAAA-MM-DD,,AAAA-MM-DD,EDITAR,EDITAR,EDITAR,EDITAR,"
+                b"EDITAR_FUENTE\n"
+            ),
+            "plantilla_reglas_costos_orden.csv", "text/csv",
         )
     price_upload = st.file_uploader(
         "Precios ajustados CSV aportados por el equipo (opcional)",
@@ -749,6 +773,12 @@ fund_contents = fund_upload.getvalue() if fund_upload is not None else b""
 fund_fingerprint = sha256(fund_contents).hexdigest() if fund_contents else None
 tariff_contents = tariff_upload.getvalue() if tariff_upload is not None else b""
 tariff_fingerprint = sha256(tariff_contents).hexdigest() if tariff_contents else None
+order_tariff_contents = (
+    order_tariff_upload.getvalue() if order_tariff_upload is not None else b""
+)
+order_tariff_fingerprint = (
+    sha256(order_tariff_contents).hexdigest() if order_tariff_contents else None
+)
 settings = (
     tickers_input,
     start_date,
@@ -795,6 +825,7 @@ settings = (
     implementation_source_input,
     implementation_source_date,
     tariff_fingerprint,
+    order_tariff_fingerprint,
     price_fingerprint,
     identity_fingerprint,
     price_rights_fingerprint,
@@ -1232,11 +1263,14 @@ try:
             for alternative in alternatives
         )
         tariff_profile = None
+        order_rules = None
         manual_cost_values = (
             implementation_commission_percent, implementation_vat_percent,
             implementation_market_bps, implementation_minimum,
             implementation_annual_fixed, implementation_annual_management_percent,
         )
+        if tariff_contents and order_tariff_contents:
+            raise PortfolioError("Elige un solo CSV de costos: perfil general o reglas por orden.")
         if tariff_contents:
             if base_currency != "MXN":
                 raise PortfolioError("El perfil contractual en MXN requiere moneda base MXN.")
@@ -1260,6 +1294,14 @@ try:
             )
             implementation_source_date = tariff_profile.consulted_on
         else:
+            if order_tariff_contents:
+                if base_currency != "MXN":
+                    raise PortfolioError("Las reglas de costos por orden requieren moneda base MXN.")
+                if any(manual_cost_values[:4]):
+                    raise PortfolioError(
+                        "Con reglas por orden, deja en cero las tasas transaccionales manuales."
+                    )
+                order_rules = read_order_tariffs_csv(order_tariff_contents, analysis_tickers)
             implementation_assumptions = ImplementationCostAssumptions(
                 commission_bps=implementation_commission_percent * 100,
                 market_cost_bps=implementation_market_bps,
@@ -1268,7 +1310,18 @@ try:
                 annual_fixed_cost=implementation_annual_fixed,
                 annual_management_rate=implementation_annual_management_percent / 100,
             )
-            implementation_source = implementation_source_input.strip()
+            if order_rules is not None:
+                recurring_source = implementation_source_input.strip()
+                if any(manual_cost_values[4:]) and not recurring_source:
+                    raise PortfolioError(
+                        "Declara la referencia de los costos recurrentes ingresados."
+                    )
+                implementation_source = (
+                    f"Reglas por orden CSV SHA-256 {order_tariff_fingerprint[:12]}"
+                    + (f"; recurrentes: {recurring_source}" if recurring_source else "")
+                )
+            else:
+                implementation_source = implementation_source_input.strip()
         has_implementation_cost = any((
             implementation_assumptions.commission_bps,
             implementation_assumptions.market_cost_bps,
@@ -1284,13 +1337,14 @@ try:
             raise PortfolioError(
                 "Declara la referencia del tarifario de costos en 1 a 400 caracteres."
             )
-        if not has_implementation_cost and tariff_profile is None:
+        if not has_implementation_cost and tariff_profile is None and order_rules is None:
             implementation_source = "Sin tarifario; supuestos de costo en cero"
         implementation_estimates = tuple(
             estimate_implementation_cost(
                 analysis_tickers, alternative.metrics.weights, portfolio_value,
                 implementation_assumptions, alternative_name=alternative.name,
                 current_weights=current_weights,
+                order_rules=order_rules,
             )
             for alternative in alternatives
         )
@@ -1888,6 +1942,22 @@ try:
                 st.warning(
                     "Este perfil no acredita una tarifa particular del cliente. "
                     "Confirma el contrato, producto, mercado y comisión efectiva antes de usar el costo."
+                )
+        if order_rules is not None:
+            st.info(
+                f"Reglas por orden: {len(order_rules)} filas; CSV SHA-256 "
+                f"{order_tariff_fingerprint[:12]}. Cada orden estimada muestra su tasa y fuente "
+                "en el detalle y en el PDF. Los costos anuales se declaran una sola vez."
+            )
+            st.caption(
+                "La regla declarada no acredita convenio, tramo de volumen ni elegibilidad "
+                "del cliente. Confirma las condiciones antes de entregar el reporte; una "
+                "cartera agregada por símbolo no separa cuentas con distintas tarifas."
+            )
+            if any(rule.tariff_kind == "PUBLICA" for rule in order_rules):
+                st.warning(
+                    "Una o más órdenes usan tarifa pública. Confirma la comisión efectiva "
+                    "del cliente antes de presentar sus costos como personalizados."
                 )
         annual_recurring_cost = implementation_assumptions.annual_recurring_cost(portfolio_value)
         first_year_cost_by_alternative = {

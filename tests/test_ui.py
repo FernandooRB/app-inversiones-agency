@@ -534,6 +534,62 @@ def test_client_tariff_profile_overrides_zero_manual_costs(monkeypatch):
     )
 
 
+def test_order_tariff_csv_flows_through_analysis_and_reports(monkeypatch):
+    import access
+
+    monkeypatch.setattr(access, "require_access", lambda: None)
+    rng = np.random.default_rng(282)
+    dates = pd.date_range("2024-01-02", periods=140, freq="B")
+    values = 100 * np.cumprod(1 + rng.normal(0.0005, 0.009, (140, 2)), axis=0)
+    prices = pd.DataFrame(values, columns=["AAPL", "MSFT"])
+    prices.insert(0, "Fecha", dates.strftime("%Y-%m-%d"))
+    effective = (date.today() - timedelta(days=10)).isoformat()
+    tariff = (
+        "Activo,Intermediario,Producto,Mercado,Operacion,TipoTarifa,VigenteDesde,"
+        "VigenteHasta,FechaConsulta,ComisionOperacionPct,IVAPctComision,"
+        "ComisionMinimaMXN,CostoMercadoPbSupuesto,Fuente\n"
+        f"AAPL,Casa de prueba,Acciones,SIC,AMBAS,NEGOCIADA_CLIENTE,"
+        f"{effective},,{effective},0.12,16,10,2,Acuerdo acciones\n"
+        f"MSFT,Casa de prueba,ETF,SIC,AMBAS,CONTRACTUAL,"
+        f"{effective},,{effective},0.30,16,0,5,Contrato ETF\n"
+    )
+    uploads = {
+        "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
+            prices.to_csv(index=False).encode("utf-8-sig")
+        ),
+        "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)": rights_manifest(),
+        "Reglas de costos por orden CSV (opcional)": BytesIO(tariff.encode("utf-8-sig")),
+    }
+    monkeypatch.setattr(st, "file_uploader", lambda label, **_kwargs: uploads.get(label))
+    monkeypatch.setattr(
+        core.yf, "download",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Yahoo no debe consultarse")),
+    )
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
+    ).run()
+    next(item for item in app.text_input if item.label == "Tickers").set_value("AAPL, MSFT")
+    next(
+        item for item in app.text_input
+        if item.label == "Monedas de cotización, en el mismo orden"
+    ).set_value("MXN, MXN")
+    next(
+        item for item in app.selectbox if item.label == "Moneda base del análisis"
+    ).set_value("MXN")
+    app.run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error, [item.value for item in app.error]
+    assert any("Reglas por orden: 2 filas" in item.value for item in app.info)
+    assert any("Reglas por orden CSV SHA-256" in item.value for item in app.caption)
+    next(
+        item for item in app.number_input
+        if item.label == "Comisión sobre cada operación (%)"
+    ).set_value(0.25).run()
+    app.button[0].click().run()
+    assert any("deja en cero las tasas transaccionales" in item.value for item in app.error)
+
+
 def test_bond_issue_csv_is_integrated_with_auditable_total_return(monkeypatch):
     import access
 

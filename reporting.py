@@ -594,10 +594,15 @@ def _implementation_cost_story(
         raise ValueError("Capital inválido para el costo de implementación.")
     if len({item.alternative_name for item in estimates}) != len(estimates):
         raise ValueError("Las alternativas de costos deben tener nombres únicos.")
-    if any("Comisión aplicada (pb)" in item.detail.columns for item in estimates):
-        raise ValueError(
-            "El PDF aún no admite el detalle y las fuentes de las reglas de costo por orden."
-        )
+    per_order = ["Comisión aplicada (pb)" in item.detail.columns for item in estimates]
+    if any(per_order) and not all(per_order):
+        raise ValueError("Todas las alternativas deben usar el mismo método de tarifas.")
+    order_mode = all(per_order)
+    if order_mode and any((
+        assumptions.commission_bps, assumptions.vat_rate,
+        assumptions.minimum_commission, assumptions.market_cost_bps,
+    )):
+        raise ValueError("Las reglas por orden no admiten una tasa transaccional general.")
     for item in estimates:
         components = np.array([
             item.buy_notional, item.sell_notional, item.commission,
@@ -626,16 +631,26 @@ def _implementation_cost_story(
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
     ]))
-    assumptions_text = (
-        f"Referencia: {escape(source)}; consulta: {source_date.isoformat()}. "
-        f"Moneda: {escape(currency)}. Comisión: {assumptions.commission_bps:.1f} pb por orden; "
-        f"IVA sobre comisión: {assumptions.vat_rate:.2%}; costo de mercado: "
-        f"{assumptions.market_cost_bps:.1f} pb sobre nominal; mínimo por orden: "
-        f"{assumptions.minimum_commission:,.2f}. Costo fijo anual total: "
-        f"{assumptions.annual_fixed_cost:,.2f}; administración anual total: "
-        f"{assumptions.annual_management_rate:.3%}; costo recurrente anual estimado: "
-        f"{assumptions.annual_recurring_cost(portfolio_value):,.2f}."
-    )
+    if order_mode:
+        assumptions_text = (
+            f"Referencia del archivo y cargos recurrentes: {escape(source)}; fecha de referencia: "
+            f"{source_date.isoformat()}. Moneda: {escape(currency)}. Las tasas de cada compra "
+            "y venta, su vigencia y fuente aparecen abajo. Costo fijo anual total: "
+            f"{assumptions.annual_fixed_cost:,.2f}; administración anual total: "
+            f"{assumptions.annual_management_rate:.3%}; costo recurrente anual estimado: "
+            f"{assumptions.annual_recurring_cost(portfolio_value):,.2f}."
+        )
+    else:
+        assumptions_text = (
+            f"Referencia: {escape(source)}; consulta: {source_date.isoformat()}. "
+            f"Moneda: {escape(currency)}. Comisión: {assumptions.commission_bps:.1f} pb por orden; "
+            f"IVA sobre comisión: {assumptions.vat_rate:.2%}; costo de mercado: "
+            f"{assumptions.market_cost_bps:.1f} pb sobre nominal; mínimo por orden: "
+            f"{assumptions.minimum_commission:,.2f}. Costo fijo anual total: "
+            f"{assumptions.annual_fixed_cost:,.2f}; administración anual total: "
+            f"{assumptions.annual_management_rate:.3%}; costo recurrente anual estimado: "
+            f"{assumptions.annual_recurring_cost(portfolio_value):,.2f}."
+        )
     section = [
         Paragraph("Costo estimado de implementación", styles["Heading2"]),
         Paragraph(assumptions_text, styles["Normal"]),
@@ -648,7 +663,148 @@ def _implementation_cost_story(
         ),
         Spacer(1, 3 * mm),
     ]
+    if order_mode:
+        section.extend(_order_cost_detail_story(estimates, currency, styles))
+        return section
     return [KeepTogether(section)]
+
+
+def _order_cost_detail_story(
+    estimates: tuple[ImplementationCostEstimate, ...], currency: str, styles,
+) -> list:
+    """Show and reconcile every executed order with the terms used to price it."""
+    required = {
+        "Activo", "Operación", "Nominal", "Comisión", "IVA", "Costo de mercado",
+        "Costo total", "Intermediario", "Producto", "Mercado", "Fuente tarifa",
+        "Tipo tarifa", "Vigente desde", "Vigente hasta", "Fecha consulta",
+        "Comisión aplicada (pb)", "IVA aplicado (%)", "Mínimo aplicado",
+        "Costo mercado aplicado (pb)",
+    }
+    result = []
+    for estimate_index, estimate in enumerate(estimates):
+        detail = estimate.detail
+        if not required.issubset(detail.columns):
+            raise ValueError("Faltan tasas o fuentes en el detalle de costos por orden.")
+        totals = {key: 0.0 for key in (
+            "Nominal compra", "Nominal venta", "Comisión", "IVA", "Costo de mercado",
+        )}
+        heading = Paragraph(escape(estimate.alternative_name), styles["Heading4"])
+        heading_story = (
+            [Paragraph("Detalle de tarifas por orden", styles["Heading3"]), heading]
+            if estimate_index == 0 else [heading]
+        )
+        first_order = True
+        if detail.empty:
+            result.append(KeepTogether([
+                *heading_story, Paragraph("Sin órdenes para esta alternativa.", styles["Normal"]),
+            ]))
+        for _, row in detail.iterrows():
+            text_fields = (
+                "Activo", "Operación", "Intermediario", "Producto", "Mercado",
+                "Fuente tarifa", "Tipo tarifa", "Vigente desde", "Fecha consulta",
+            )
+            if any(not isinstance(row[key], str) or not row[key].strip() for key in text_fields):
+                raise ValueError("Falta la identificación o fuente de una orden.")
+            if row["Operación"] not in {"Compra", "Venta"}:
+                raise ValueError("La dirección de una orden no es válida.")
+            if row["Tipo tarifa"] not in {"PUBLICA", "CONTRACTUAL", "NEGOCIADA_CLIENTE"}:
+                raise ValueError("El tipo de tarifa de una orden no es válido.")
+            try:
+                valid_from = date.fromisoformat(row["Vigente desde"])
+                consulted_on = date.fromisoformat(row["Fecha consulta"])
+                valid_until = (
+                    date.fromisoformat(row["Vigente hasta"])
+                    if row["Vigente hasta"] else None
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Las fechas de una tarifa por orden no son válidas.") from exc
+            if (
+                consulted_on > date.today() or valid_from > date.today()
+                or valid_until is not None and (
+                    valid_until < valid_from or valid_until < date.today()
+                )
+            ):
+                raise ValueError("La vigencia de una tarifa por orden no es válida.")
+            numeric_fields = (
+                "Nominal", "Comisión", "IVA", "Costo de mercado", "Costo total",
+                "Comisión aplicada (pb)", "IVA aplicado (%)", "Mínimo aplicado",
+                "Costo mercado aplicado (pb)",
+            )
+            try:
+                numbers = {key: float(row[key]) for key in numeric_fields}
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Una orden contiene importes o tasas inválidos.") from exc
+            if not np.isfinite(list(numbers.values())).all() or any(
+                value < 0 for value in numbers.values()
+            ):
+                raise ValueError("Una orden contiene importes o tasas inválidos.")
+            if (
+                numbers["Comisión aplicada (pb)"] > 500
+                or numbers["IVA aplicado (%)"] > 100
+                or numbers["Mínimo aplicado"] > 100_000
+                or numbers["Costo mercado aplicado (pb)"] > 500
+            ):
+                raise ValueError("Una orden contiene tasas fuera del rango permitido.")
+            nominal = numbers["Nominal"]
+            commission = max(
+                nominal * numbers["Comisión aplicada (pb)"] / 10_000,
+                numbers["Mínimo aplicado"],
+            )
+            vat = commission * numbers["IVA aplicado (%)"] / 100
+            market_cost = nominal * numbers["Costo mercado aplicado (pb)"] / 10_000
+            if nominal <= 0 or any(not np.isclose(numbers[key], expected, atol=0.005, rtol=0)
+                for key, expected in (
+                    ("Comisión", commission), ("IVA", vat),
+                    ("Costo de mercado", market_cost),
+                    ("Costo total", commission + vat + market_cost),
+                )
+            ):
+                raise ValueError("Una orden no reconcilia con sus tasas declaradas.")
+            totals["Nominal compra" if row["Operación"] == "Compra" else "Nominal venta"] += nominal
+            for key in ("Comisión", "IVA", "Costo de mercado"):
+                totals[key] += numbers[key]
+            title = (
+                f"{escape(row['Activo'])} - {escape(row['Operación'])} - "
+                f"nominal {nominal:,.2f} {escape(currency)}; comisión "
+                f"{numbers['Comisión']:,.2f}; IVA {numbers['IVA']:,.2f}; "
+                f"costo de mercado {numbers['Costo de mercado']:,.2f}; "
+                f"total {numbers['Costo total']:,.2f}."
+            )
+            terms = (
+                f"{escape(row['Intermediario'])} / {escape(row['Producto'])} / "
+                f"{escape(row['Mercado'])}; tipo {escape(row['Tipo tarifa'])}; "
+                f"comisión {numbers['Comisión aplicada (pb)']:.12g} pb; "
+                f"IVA {numbers['IVA aplicado (%)']:.12g}% sobre comisión; "
+                f"mínimo {numbers['Mínimo aplicado']:.12g} {escape(currency)}; "
+                f"mercado {numbers['Costo mercado aplicado (pb)']:.12g} pb. "
+                f"Vigencia: {valid_from.isoformat()} a "
+                f"{valid_until.isoformat() if valid_until else 'sin fin declarado'}; "
+                f"fuente consultada {consulted_on.isoformat()}: "
+                f"{escape(row['Fuente tarifa'])}."
+            )
+            order_story = [
+                Paragraph(title, styles["Normal"]), Paragraph(terms, styles["Normal"]),
+                Spacer(1, 1.5 * mm),
+            ]
+            result.append(KeepTogether(
+                [*heading_story, *order_story] if first_order else order_story
+            ))
+            first_order = False
+        expected_totals = (
+            ("Nominal compra", estimate.buy_notional),
+            ("Nominal venta", estimate.sell_notional),
+            ("Comisión", estimate.commission), ("IVA", estimate.vat),
+            ("Costo de mercado", estimate.market_cost),
+        )
+        if any(not np.isclose(totals[key], value, atol=0.005, rtol=0)
+               for key, value in expected_totals):
+            raise ValueError("El detalle por orden no reconcilia con el resumen de costos.")
+    result.append(Paragraph(
+        "La fuente y vigencia se declararon para cada orden. Confirma el contrato, las "
+        "condiciones del cliente y los posibles tramos de volumen antes de entregar este reporte. "
+        "Los costos son un escenario y no una confirmación de ejecución.", styles["Normal"],
+    ))
+    return result
 
 
 def _tax_reserve_story(

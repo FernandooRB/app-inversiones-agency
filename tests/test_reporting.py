@@ -327,27 +327,70 @@ def test_both_pdfs_report_explicit_implementation_cost_assumptions():
         assert "2,032.00" in text
 
 
-def test_pdf_rejects_order_specific_rates_until_it_can_show_their_sources():
-    metrics = PortfolioMetrics(np.array([1.0]), 0.10, 0.15, 0.40)
+def test_both_pdfs_show_and_reconcile_order_specific_rates_and_sources():
+    metrics = PortfolioMetrics(np.array([0.7, 0.3]), 0.10, 0.15, 0.40)
     risk = RiskMetrics(0.95, 1, 0.02, 0.025, 0.035)
-    assumptions = ImplementationCostAssumptions()
-    rule = OrderCostRule(
-        asset="AAA", operation="Ambas", intermediary="Casa de prueba",
-        product="Capitales", market="BMV",
-        valid_from=date.today(), valid_until=None, consulted_on=date.today(),
-        tariff_kind="NEGOCIADA_CLIENTE", source="Acuerdo de prueba",
-        assumptions=ImplementationCostAssumptions(commission_bps=12, vat_rate=0.16),
+    assumptions = ImplementationCostAssumptions(annual_fixed_cost=120)
+    rules = (
+        OrderCostRule(
+            asset="AAA", operation="Compra", intermediary="Casa de prueba",
+            product="Capitales", market="BMV", valid_from=date.today(),
+            valid_until=None, consulted_on=date.today(), tariff_kind="NEGOCIADA_CLIENTE",
+            source="Acuerdo acciones", assumptions=ImplementationCostAssumptions(
+                commission_bps=12, vat_rate=0.16, minimum_commission=10,
+                market_cost_bps=2,
+            ),
+        ),
+        OrderCostRule(
+            asset="BBB", operation="Venta", intermediary="Casa de prueba",
+            product="ETF", market="SIC", valid_from=date.today(),
+            valid_until=None, consulted_on=date.today(), tariff_kind="CONTRACTUAL",
+            source="Contrato ETF", assumptions=ImplementationCostAssumptions(
+                commission_bps=30, vat_rate=0.16, market_cost_bps=5,
+            ),
+        ),
     )
     estimate = estimate_implementation_cost(
-        ("AAA",), metrics.weights, 100_000, assumptions,
-        alternative_name="Objetivo", order_rules=(rule,),
+        ("AAA", "BBB"), metrics.weights, 100_000, assumptions,
+        alternative_name="Objetivo", current_weights=[0.4, 0.6], order_rules=rules,
     )
-    with pytest.raises(ValueError, match="PDF aún no admite"):
+    reports = (
         create_pdf_report(
-            ("AAA",), date(2023, 1, 1), date(2024, 1, 1),
+            ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
             metrics, risk, 100_000, base_currency="MXN",
             implementation_costs=(estimate,), implementation_cost_assumptions=assumptions,
-            implementation_cost_source="Acuerdo de prueba",
+            implementation_cost_source="CSV SHA-256 123456789abc; recurrentes: contrato",
+            implementation_cost_source_date=date.today(),
+        ),
+        create_comparison_pdf_report(
+            ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+            (PortfolioAlternative("Objetivo", metrics, risk),
+             PortfolioAlternative("Pesos iguales", metrics, risk)),
+            100_000, base_currency="MXN", risk_free_rate=0.05, observations=252,
+            quotes={"AAA": "MXN", "BBB": "MXN"},
+            implementation_costs=(estimate,), implementation_cost_assumptions=assumptions,
+            implementation_cost_source="CSV SHA-256 123456789abc; recurrentes: contrato",
+            implementation_cost_source_date=date.today(),
+        ),
+    )
+    for report in reports:
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+        for expected in (
+            "Detalle de tarifas por orden", "Acuerdo acciones", "Contrato ETF",
+            "NEGOCIADA_CLIENTE", "CONTRACTUAL", "12 pb", "30 pb",
+            "10 MXN", "120.00", "CSV SHA-256 123456789abc",
+        ):
+            assert expected in text
+
+    tampered = estimate.detail.copy()
+    tampered.loc[0, "Comisión"] += 1
+    with pytest.raises(ValueError, match="no reconcilia"):
+        create_pdf_report(
+            ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),
+            metrics, risk, 100_000, base_currency="MXN",
+            implementation_costs=(replace(estimate, detail=tampered),),
+            implementation_cost_assumptions=assumptions,
+            implementation_cost_source="CSV de prueba",
             implementation_cost_source_date=date.today(),
         )
 

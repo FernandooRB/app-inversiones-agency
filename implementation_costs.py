@@ -241,6 +241,9 @@ def estimate_implementation_cost(
                 "Vigente hasta": rule.valid_until.isoformat() if rule.valid_until else "",
                 "Fecha consulta": rule.consulted_on.isoformat(),
                 "Comisión aplicada (pb)": transaction_assumptions.commission_bps,
+                "IVA aplicado (%)": transaction_assumptions.vat_rate * 100,
+                "Mínimo aplicado": transaction_assumptions.minimum_commission,
+                "Costo mercado aplicado (pb)": transaction_assumptions.market_cost_bps,
             })
         rows.append(row)
     columns = [
@@ -251,6 +254,7 @@ def estimate_implementation_cost(
         columns.extend((
             "Intermediario", "Producto", "Mercado", "Fuente tarifa", "Tipo tarifa", "Vigente desde",
             "Vigente hasta", "Fecha consulta", "Comisión aplicada (pb)",
+            "IVA aplicado (%)", "Mínimo aplicado", "Costo mercado aplicado (pb)",
         ))
     detail = pd.DataFrame(rows, columns=columns)
     buys = float(sum(row["Nominal"] for row in rows if row["Operación"] == "Compra"))
