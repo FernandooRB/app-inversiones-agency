@@ -96,6 +96,30 @@ Al cerrar este cambio, se anotarán aquí el resultado de CI y revisión.
 - **Verificación:** prueba sintética de rebalanceo con dos tasas distintas, además de casos de
   rechazo y control de PDF. La suite local completa aprobó **380 pruebas** y el código afectado pasó
   `ruff check`. No se usaron datos reales de clientes.
-- **Límite:** el importador es interno; faltan carga en la interfaz, trazabilidad en el PDF,
-  verificación de convenios y elegibilidad por volumen. Una cartera agregada por símbolo no separa
-  dos cuentas con tarifas distintas para el mismo instrumento. Requiere CI antes de integrar.
+- **Integración:** el [PR #52](https://github.com/FernandooRB/app-inversiones-agency/pull/52)
+  pasó CI en Ubuntu y Windows y se fusionó por squash en `main` como `412c1ae`. El árbol publicado
+  coincide con el del commit autorizado `3d62685`; la rama remota se eliminó.
+- **Límite de esa entrega:** el importador era interno; faltaban carga en la interfaz, trazabilidad
+  en el PDF, verificación de convenios y elegibilidad por volumen. Una cartera agregada por símbolo
+  no separa dos cuentas con tarifas distintas para el mismo instrumento.
+
+## Entrada de trabajo: interfaz y PDF para reglas por orden
+
+- **Cambio técnico local:** la interfaz acepta el CSV de tarifas por orden, excluye el perfil general
+  y las tasas transaccionales manuales, permite costos anuales separados con fuente, y pasa las
+  reglas al estimador de todas las alternativas. El detalle conserva tasa, IVA, mínimo, costo de
+  mercado, fuente y vigencia por operación. Ambos PDF presentan cada orden y comprueban que sus
+  cargos reconcilien con el resumen; separan los costos recurrentes y advierten que la elegibilidad
+  contractual no queda acreditada.
+- **Verificación:** pruebas sintéticas de integración en Streamlit, PDF individual y comparativo,
+  detección de cifras alteradas; render visual de un comparativo sintético de tres páginas. La
+  primera revisión visual detectó un encabezado huérfano; se corrigió y se volvió a renderizar.
+  `ruff check .` pasó. La suite completa en Windows aprobó **381 pruebas** al ejecutarse fuera
+  de la restricción local de carpetas temporales. Dentro de la sandbox, 378 pruebas pasaron y
+  tres de GBM no pudieron preparar su `tmp_path` por `PermissionError`; no fueron fallos de
+  aserción. La revisión final del diff confirmó sólo ocho archivos públicos y ningún documento
+  de cuenta; el PDF sintético se volvió a renderizar y revisar tras los últimos ajustes. Pendiente:
+  CI de Ubuntu/Windows al publicar.
+- **Límite:** sin convenio real comprobado ni modelado de escalones por volumen mensual. La
+  agregación por símbolo sigue sin distinguir cuentas con distintas condiciones. No implica
+  aprobación de asesoría personalizada, de Citi ni despliegue comercial.

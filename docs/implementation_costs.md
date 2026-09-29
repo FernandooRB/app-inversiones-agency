@@ -35,11 +35,12 @@ después de los impuestos aplicables para evitar que la aplicación infiera trat
 
 Antes de entregar un reporte, conserva el tarifario o estado de cuenta usado, su fecha de consulta,
 el tipo de cliente y el producto. No extrapoles una tarifa de acciones a fondos, deuda o divisas.
-La interfaz y el PDF aún aplican una tasa transaccional uniforme a todos los activos del análisis:
-una cartera con tarifas diferentes por producto o mercado no puede presentarse desde esta interfaz
-con un costo agregado específico para el cliente.
+El perfil general aún aplica una tasa transaccional uniforme a todos los activos del análisis.
+Cuando las condiciones difieren por activo o lado, se puede cargar el CSV de reglas por orden. El
+desglose por orden se conserva en la tabla descargable y en ambos PDF; cada importe debe reconciliar
+con la tasa, el mínimo, el IVA, el supuesto de costo de mercado y su fuente declarada.
 
-## Motor de reglas por orden (fase técnica)
+## Motor de reglas por orden
 
 `implementation_costs.OrderCostRule` permite definir términos distintos para cada activo y lado
 (`Compra`, `Venta` o `Ambas`). La regla registra intermediario, producto, mercado, fuente, tipo de
@@ -52,10 +53,10 @@ vigencia y cargos anuales repetidos dentro de las reglas. Cuando se usan reglas,
 transaccionales generales deben ser cero; sólo aportan los costos recurrentes, que se declaran una
 vez. La operación sin reglas conserva el comportamiento anterior.
 
-Esta fase es una API interna comprobada con datos sintéticos. El importador
-`broker_tariffs.read_order_tariffs_csv` ya valida el [CSV de reglas por orden](broker_tariffs.md#reglas-por-orden-api-interna),
-pero todavía faltan su integración en la interfaz, el desglose por orden en el PDF y la comprobación
-del convenio real. El generador de PDF rechaza las estimaciones con reglas por orden mientras no pueda mostrar
-sus fuentes y tasas, evitando una descripción falsa de comisión uniforme. No calcula elegibilidad
-por volumen mensual ni verifica que un cliente tenga una tarifa negociada; esas condiciones deben
-estar documentadas por el equipo antes de habilitar la función en reportes de clientes.
+El importador `broker_tariffs.read_order_tariffs_csv` valida el
+[CSV de reglas por orden](broker_tariffs.md#reglas-por-orden), que se carga en la interfaz en lugar
+del perfil general. La interfaz rechaza tasas transaccionales manuales simultáneas; permite cargos
+anuales sólo con referencia propia. Ambos PDF muestran y reconcilian las órdenes y sus fuentes; no
+describen una tasa uniforme cuando se usan reglas. Las pruebas usan datos sintéticos. El archivo
+no demuestra que el cliente tenga una tarifa negociada ni calcula elegibilidad por volumen mensual.
+El equipo debe verificar el convenio y sus condiciones antes de entregar un reporte real.

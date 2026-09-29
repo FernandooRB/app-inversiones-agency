@@ -48,12 +48,11 @@ pesos objetivo. La estimación no modela escalones calculados con promedios móv
 fondos con gastos incorporados en su valor, penalizaciones, tipo de cambio operativo, impuestos sobre
 ganancias, retenciones, lotes o profundidad real. Un perfil aplica la misma comisión transaccional a
 todos los activos del análisis; si el contrato cambia por instrumento o mercado, este perfil **no
-representa la cartera completa**. Prepara análisis separados o usa un supuesto explícitamente
-conservador y documenta la limitación hasta conectar las reglas por orden a la interfaz y al PDF.
-No promedies tasas ni
-apliques una tarifa especial de un cliente a otro.
+representa la cartera completa**. En ese caso usa las reglas por orden del bloque siguiente y
+comprueba que cada activo y dirección estimada estén cubiertos. No promedies tasas ni apliques una
+tarifa especial de un cliente a otro.
 
-## Reglas por orden (API interna)
+## Reglas por orden
 
 El importador `read_order_tariffs_csv` lee un archivo separado con reglas de compra, venta o ambas
 para cada activo del análisis. Requiere exactamente estas columnas y un máximo de 200 filas y
@@ -74,9 +73,13 @@ la tasa general. Conserva el intermediario, producto, mercado, fuente y tarifa a
 del cálculo.
 
 El CSV identifica un supuesto, no acredita un convenio ni la elegibilidad por volumen. No agregues
-nombres, cuentas ni otros datos personales. Esta API todavía no está disponible en la interfaz; el
-PDF bloquea estos cálculos hasta incluir el desglose y las fuentes. Si el mismo instrumento está en
-dos cuentas con condiciones distintas, la cartera agregada por símbolo tampoco separa esas órdenes.
+nombres, cuentas ni otros datos personales. La interfaz ofrece una carga distinta del perfil general:
+ambas opciones son excluyentes y las cuatro tasas transaccionales manuales deben quedar en cero.
+Los cargos anuales se declaran una vez en los campos manuales con su referencia. El detalle CSV de
+costos y ambos PDF muestran la fuente, tasas, vigencia e importes de cada orden y reconcilian el
+desglose con el resumen. Si falta cobertura para alguna orden del análisis, no se genera reporte.
+Si el mismo instrumento está en dos cuentas con condiciones distintas, la cartera agregada por
+símbolo tampoco separa esas órdenes; esta modalidad no resuelve ese caso.
 
 ## Revisión de fuentes públicas
 
