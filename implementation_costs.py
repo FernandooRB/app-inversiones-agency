@@ -32,6 +32,7 @@ class OrderCostRule:
 
     asset: str
     operation: str  # Compra, Venta or Ambas
+    intermediary: str
     product: str
     market: str
     valid_from: date
@@ -103,7 +104,8 @@ def _order_rule_lookup(
         ):
             raise PortfolioError("El tipo de tarifa de la regla por orden no es válido.")
         for label, value in (
-            ("Producto", rule.product), ("Mercado", rule.market), ("Fuente", rule.source),
+            ("Intermediario", rule.intermediary), ("Producto", rule.product),
+            ("Mercado", rule.market), ("Fuente", rule.source),
         ):
             if (
                 not isinstance(value, str) or not value.strip() or len(value) > 300
@@ -230,6 +232,7 @@ def estimate_implementation_cost(
         }
         if rule is not None:
             row.update({
+                "Intermediario": rule.intermediary,
                 "Producto": rule.product,
                 "Mercado": rule.market,
                 "Fuente tarifa": rule.source,
@@ -246,7 +249,7 @@ def estimate_implementation_cost(
     ]
     if rules is not None:
         columns.extend((
-            "Producto", "Mercado", "Fuente tarifa", "Tipo tarifa", "Vigente desde",
+            "Intermediario", "Producto", "Mercado", "Fuente tarifa", "Tipo tarifa", "Vigente desde",
             "Vigente hasta", "Fecha consulta", "Comisión aplicada (pb)",
         ))
     detail = pd.DataFrame(rows, columns=columns)

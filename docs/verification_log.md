@@ -15,7 +15,7 @@ cuentas, importes, operaciones, identificadores, excepciones y actas de revisió
 | Instrumentos, derechos y precios | [Identidad](instrument_identity.md), [fuentes](data_sources.md), [precios](price_upload.md) | `tests/test_instrument_identity.py`, `tests/test_data_rights.py`, `tests/test_price_upload.py`, `tests/test_price_source_validation.py` | Contratos y fuentes independientes pendientes |
 | Markowitz, restricciones y sensibilidad | [Política](allocation_policy.md), [sensibilidad](allocation_sensitivity.md) | `tests/test_portfolio_core.py`, `tests/test_allocation_policy.py`, `tests/test_sensitivity.py` | Calibración del caso real pendiente |
 | Monte Carlo, estrés y validación temporal | [Monte Carlo](monte_carlo.md), [estrés](stress_testing.md), [backtesting](backtesting.md) | `tests/test_simulation.py`, `tests/test_stress.py`, `tests/test_backtesting.py`, `tests/test_walk_forward.py` | Escenarios históricos, no predicciones garantizadas |
-| Costos, impuestos y flujos | [Costos](implementation_costs.md), [tarifas](broker_tariffs.md), [flujos](tax_cash_flows.md) | `tests/test_implementation_costs.py`, `tests/test_broker_tariffs.py`, `tests/test_tax_cash_flows.py` | Contrato y revisión fiscal del caso pendientes |
+| Costos, impuestos y flujos | [Costos](implementation_costs.md), [tarifas](broker_tariffs.md), [flujos](tax_cash_flows.md) | `tests/test_implementation_costs.py`, `tests/test_broker_tariffs.py`, `tests/test_order_tariffs.py`, `tests/test_tax_cash_flows.py` | Contrato y revisión fiscal del caso pendientes |
 | Comparativo y PDF | [Piloto](first_real_client_pilot.md) | `tests/test_reporting.py`, `tests/test_ui.py` | Documento interno; revisión final y permiso de entrega pendientes |
 | Acceso, expedientes y operación | [Matriz del piloto](real_data_pilot.md) | Aún no hay prueba integral del dominio y del ciclo de expediente | No apto para datos de clientes en producción |
 
@@ -66,24 +66,36 @@ Al cerrar este cambio, se anotarán aquí el resultado de CI y revisión.
   **368 pruebas**; `ruff check .` pasó. El [PR #50](https://github.com/FernandooRB/app-inversiones-agency/pull/50)
   pasó CI en Ubuntu y Windows y se fusionó por squash en `main` como `42706ce`. El árbol publicado
   coincide con el del commit local aprobado; GitHub asignó otro SHA al reconstruir los metadatos.
-  No se usaron documentos reales de clientes. La rama remota de ese PR sigue pendiente de borrar:
-  la conexión de GitHub disponible permitió integrar el PR, pero no expone el borrado de ramas.
+  No se usaron documentos reales de clientes. La rama remota del PR ya se eliminó.
 - **Límite:** la clasificación y fecha son declaradas, no prueban la elegibilidad contractual.
   Un perfil de la interfaz aún aplica una sola tasa a todos los activos; quedan pendientes las
   reglas por orden en interfaz y PDF, los escalones de volumen y la verificación del acuerdo.
 
 ## Entrada de trabajo: motor interno de costos por orden
 
-- **Cambio técnico local:** `OrderCostRule` identifica activo, compra/venta, producto, mercado,
+- **Cambio técnico:** `OrderCostRule` identifica activo, compra/venta, producto, mercado,
   fuente, tipo y vigencia de tarifa. El estimador usa la tasa, IVA, mínimo y costo de mercado de
   cada orden; rechaza operaciones sin regla, solapamientos, tarifas caducadas y una fuente consultada
   después de la fecha del análisis. Los costos recurrentes sólo se declaran en los supuestos
   generales. El PDF bloquea estas estimaciones hasta poder mostrar sus fuentes y tasas por orden.
-- **Verificación hasta ahora:** `ruff check .` pasó y la última ejecución enfocada de costos y
-  reporte aprobó **36 pruebas**. La ejecución completa bajo la sandbox anterior al último caso de
-  regresión registró **371 pruebas aprobadas y 3 errores de preparación** por acceso denegado a
-  directorios temporales de pytest, sin fallos de aserción.
-  La revisión automática de permisos agotó su tiempo dos veces al intentar repetirla fuera de la
-  sandbox; se requiere CI de Ubuntu y Windows antes de integrar esta fase.
+- **Verificación:** `ruff check .` y **36 pruebas enfocadas** pasaron localmente. La primera
+  ejecución completa bajo la sandbox registró 371 aprobadas y tres errores de preparación por
+  carpetas temporales, sin fallos de aserción. El [PR #51](https://github.com/FernandooRB/app-inversiones-agency/pull/51)
+  pasó la suite en CI Ubuntu y Windows y se fusionó por squash en `main` como `936e243`. Su árbol
+  coincide con el del commit local aprobado `878328e`; la rama remota se eliminó.
 - **Límite:** es una API interna con pruebas sintéticas. Faltan importador, interfaz, detalle en PDF,
   verificación contractual y elegibilidad por tramos de volumen. No habilita reportes para clientes.
+
+## Entrada de trabajo: importador CSV de reglas por orden
+
+- **Cambio técnico local:** `read_order_tariffs_csv` acepta hasta 200 reglas de compra/venta para
+  activos del análisis, con esquema exacto, vigencia, fecha de consulta, fuente y cuatro cifras
+  transaccionales obligatorias. Rechaza activos ajenos, reglas superpuestas, términos incompletos,
+  tasas inválidas y contenido con apariencia de fórmula. El intermediario queda registrado en cada
+  regla y fila de cálculo. Una orden sin cobertura continúa bloqueada por el estimador.
+- **Verificación:** prueba sintética de rebalanceo con dos tasas distintas, además de casos de
+  rechazo y control de PDF. La suite local completa aprobó **380 pruebas** y el código afectado pasó
+  `ruff check`. No se usaron datos reales de clientes.
+- **Límite:** el importador es interno; faltan carga en la interfaz, trazabilidad en el PDF,
+  verificación de convenios y elegibilidad por volumen. Una cartera agregada por símbolo no separa
+  dos cuentas con tarifas distintas para el mismo instrumento. Requiere CI antes de integrar.

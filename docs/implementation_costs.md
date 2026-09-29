@@ -42,8 +42,8 @@ con un costo agregado específico para el cliente.
 ## Motor de reglas por orden (fase técnica)
 
 `implementation_costs.OrderCostRule` permite definir términos distintos para cada activo y lado
-(`Compra`, `Venta` o `Ambas`). La regla registra producto, mercado, fuente, tipo de tarifa, fecha de
-consulta y ventana de vigencia. `estimate_implementation_cost(..., order_rules=...)` selecciona la
+(`Compra`, `Venta` o `Ambas`). La regla registra intermediario, producto, mercado, fuente, tipo de
+tarifa, fecha de consulta y ventana de vigencia. `estimate_implementation_cost(..., order_rules=...)` selecciona la
 regla exacta de cada operación y aplica su tasa, mínimo, IVA y costo de mercado. El detalle calculado
 conserva la regla utilizada para poder revisar cada importe.
 
@@ -52,9 +52,10 @@ vigencia y cargos anuales repetidos dentro de las reglas. Cuando se usan reglas,
 transaccionales generales deben ser cero; sólo aportan los costos recurrentes, que se declaran una
 vez. La operación sin reglas conserva el comportamiento anterior.
 
-Esta fase es una API interna comprobada con datos sintéticos. Todavía faltan la importación segura
-de un archivo de reglas, la interfaz, el desglose por orden en el PDF y la comprobación del convenio
-real. El generador de PDF rechaza las estimaciones con reglas por orden mientras no pueda mostrar
+Esta fase es una API interna comprobada con datos sintéticos. El importador
+`broker_tariffs.read_order_tariffs_csv` ya valida el [CSV de reglas por orden](broker_tariffs.md#reglas-por-orden-api-interna),
+pero todavía faltan su integración en la interfaz, el desglose por orden en el PDF y la comprobación
+del convenio real. El generador de PDF rechaza las estimaciones con reglas por orden mientras no pueda mostrar
 sus fuentes y tasas, evitando una descripción falsa de comisión uniforme. No calcula elegibilidad
 por volumen mensual ni verifica que un cliente tenga una tarifa negociada; esas condiciones deben
 estar documentadas por el equipo antes de habilitar la función en reportes de clientes.
