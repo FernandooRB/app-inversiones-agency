@@ -72,7 +72,10 @@ Ya se observó una exportación CSV mensual de movimientos con 13 campos; su
 [revisión estructural](gbm_own_account_intake.md#exportación-mensual-de-movimientos-csv) comprueba
 el formato y detecta copias idénticas, pero no la integridad ni el vínculo contractual. No se
 presume que todos los productos de GBM tengan el mismo diseño ni que una exportación sea una fuente
-de precios con derechos comerciales. La primera revisión usará esta correspondencia:
+de precios con derechos comerciales. El titular confirmó que **no puede descargar el historial
+de movimientos de su cartera BMV**: ese CSV previo no es requisito del piloto BMV. Se aplicará la
+[conciliación desde PDF](gbm_own_account_intake.md#conciliación-cuando-no-hay-descarga-de-movimientos).
+La primera revisión usará esta correspondencia:
 
 Los XML reconocidos como CFDI no contienen posiciones estructuradas al corte. Los PDF serán la
 fuente de las posiciones y movimientos del piloto; una extracción específica debe contrastarse
@@ -94,13 +97,13 @@ cada cargo requieren una fuente o revisión adicional antes de usarlos en el per
 | Efectivo y partidas pendientes | Cobertura de cuenta | Total de cuenta del estado original |
 | Movimientos de efectivo | Puente de efectivo liquidado | Saldos inicial y final del periodo |
 | Cantidades y operaciones de títulos | Puente de cantidades | Posiciones finales transcritas del estado original |
-| Comisiones y condiciones del contrato | Perfil de costos por intermediario | Tarifario contractual vigente |
+| Comisiones y condiciones del cliente | Perfil de costos por intermediario | Tabla pública y cargos observados; convenio particular si existe o difiere |
 | Dividendos, intereses y retenciones | Registro de flujos fiscales | Constancias y movimientos revisados por especialista |
 | Identidad y precios de cada serie | Manifiestos y contraste de fuentes | Fuente de mercado autorizada y comparable |
 
 La conciliación automática detecta diferencias aritméticas entre archivos declarados. Una persona
-debe comprobar que las exportaciones estén completas y correspondan al mismo periodo, cuenta,
-instrumento, moneda y convención de liquidación.
+debe comprobar la cobertura de las fuentes disponibles y que correspondan al mismo periodo,
+cuenta, instrumento, moneda y convención de liquidación.
 
 ## Secuencia de ejecución
 

@@ -86,7 +86,35 @@ símbolo tampoco separa esas órdenes. Prepara un reporte por cuenta; el consoli
 
 ## Revisión de fuentes públicas
 
-Estado de la revisión: 17 de septiembre de 2026. Estos hallazgos sirven para pedir y conciliar el
+### GBM: tabla general confirmada para el piloto propio
+
+El titular confirmó el 30 de septiembre de 2026 que la tabla de la ayuda de GBM es la referencia
+general que quiere usar. La [FAQ oficial de GBM](https://gbm.com/faqs/que-comisiones-cobran-al-invertir-en-gbm)
+publica: Smart Cash sin comisión; Smart Cash Dólares con 1.5 % anual más IVA descontado a diario;
+corretaje de fondos de renta variable en Trading MX y portafolios recomendados según monto operado
+promedio de los últimos tres meses; y fondos de deuda sin comisión de corretaje. Los cinco tramos
+de ese corretaje son **0.25 % hasta 1 millón MXN, 0.20 % de 1,000,001 a 3 millones, 0.15 % de
+3,000,001 a 5 millones, 0.125 % de 5,000,001 a 10 millones y 0.10 % por encima de 10 millones**.
+La FAQ también indica un arancel anual más IVA para cada portafolio recomendado, consultable en
+su ficha, y un arancel anual de fondos que la FAQ resume como 1 % a 2.75 %, pero cuya cifra
+aplicable depende de la serie y tipo de titular y debe consultarse en el DICI. Estos cargos
+diarios no se deben transformar en corretaje por operación.
+
+Para la cartera BMV propia, **22 de 22 comisiones de compraventa visibles** coincidieron al
+centavo con 0.25 % del nominal calculado. Los cargos históricos se toman del estado; para
+escenarios internos se puede declarar 0.25 % como **tasa observada en esta cartera**, con producto,
+fecha y fuente explícitos. Ese número coincide con el primer tramo de la FAQ, pero la redacción
+de la FAQ no prueba automáticamente que esa tasa
+rija cada acción, ETF, FIBRA o título SIC, ni define cómo tratar promedios fraccionarios en los
+límites. El software no selecciona el tramo sin el promedio de tres meses y su convención.
+Las tarifas particulares de futuros clientes pueden diferir; se aplican sólo a las órdenes
+que cubran. Un fondo o portafolio necesita su serie/ficha y revisión de si los rendimientos
+utilizados ya incorporan cargos diarios para evitar doble conteo. El IVA de corretaje de una
+orden se registra según el cargo o documento aplicable; la FAQ no fija por sí sola el importe
+de IVA de cada operación de la cartera.
+
+Estado de la revisión comparativa: 17 de septiembre de 2026; aclaración GBM: 30 de septiembre
+de 2026. Estos hallazgos sirven para pedir y conciliar el
 documento correcto; **no son perfiles precargados** porque las condiciones dependen del producto,
 segmento, volumen, contrato y fecha.
 
