@@ -163,18 +163,27 @@ subtotal menos descuento más traslados menos retenciones igual al total. Sólo 
 ecuaciones exactas, con diferencia de hasta un centavo o mayores, y distingue comprobantes con
 total cero de comprobantes con importe positivo. También rechaza fechas u horas imposibles y una
 versión declarada que no corresponda al espacio de nombres del XML. Una diferencia, un archivo
-ilegible, duplicado o fuera del alcance exige revisión y devuelve código distinto de cero. Los 11
-XML del piloto propio cuadraron exactamente en estas ecuaciones: siete tienen total cero por
-descuento completo y cuatro tienen importe positivo. Esto **no comprueba timbrado, autenticidad,
-tratamiento fiscal, vínculo con un contrato ni correspondencia con cargos del PDF**.
-Diez de los once XML contienen una referencia explícita a un contrato presente en los estados;
+ilegible, duplicado o fuera del alcance exige revisión y devuelve código distinto de cero. En una
+revisión anterior de 11 CFDI del piloto propio, todos cuadraron en estas ecuaciones: siete tenían
+total cero por descuento completo y cuatro tenían importe positivo. Esto **no comprueba timbrado,
+autenticidad, tratamiento fiscal, vínculo con un contrato ni correspondencia con cargos del PDF**.
+Diez de esos once XML contienen una referencia explícita a un contrato presente en los estados;
 el restante, que tiene importe positivo, carece de esa referencia en el contenido y su ubicación
 en una carpeta no la sustituye. No se asignará ese comprobante a una cuenta por inferencia. En la
-comparación exploratoria, ninguno de los cuatro comprobantes con importe positivo coincidió, por
-importe de comisión más impuesto, con una fila individual de cargos del libro de movimientos PDF.
+comparación exploratoria de esa muestra, ninguno de los cuatro comprobantes con importe positivo
+coincidió, por importe de comisión más impuesto, con una fila individual de cargos del libro PDF.
 Una igualdad de ceros entre un CFDI descontado y un periodo sin cargos no demuestra conciliación.
 Se requiere identificar el alcance de cada CFDI y su periodo de facturación antes de comparar
 cargos agregados.
+
+**Revisión ampliada del 29 de septiembre de 2026:** el inventario privado contiene 22 XML
+distintos. Dieciocho son CFDI reconocibles y las siete ecuaciones anteriores cuadran en todos:
+diez tienen total cero y ocho importe positivo. Los otros cuatro no pasaron la clasificación
+estructural (uno con codificación no admitida y tres que no son CFDI reconocibles); deben revisarse
+por separado. Diecisiete de los 18 CFDI contienen una referencia contractual exacta candidata a
+una de las cinco series de estados; uno no. Estos son cotejos de texto y aritmética, **no una
+asignación aprobada a una cuenta ni una conciliación de cargos**. Las matrices de candidatos
+permanecen en el expediente privado.
 
 La dependencia `pypdf` está en `requirements-dev.txt`; esta herramienta es una revisión local,
 no un importador listo para recibir documentos de clientes. Un XML CFDI de ingreso puede servir

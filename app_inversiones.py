@@ -71,6 +71,7 @@ from reporting import (
     create_pdf_report,
 )
 from risk_attribution import attribute_volatility
+from safe_logging import log_unexpected_analysis_error
 from sensitivity import analyze_allocation_sensitivity
 from simulation import simulate_portfolio_paths
 from stress import (
@@ -2844,6 +2845,6 @@ try:
     )
 except PortfolioError as exc:
     st.error(str(exc))
-except Exception:
-    LOGGER.exception("Unexpected portfolio analysis error")
+except Exception as exc:
+    log_unexpected_analysis_error(LOGGER, exc)
     st.error("Ocurrió un error inesperado. Revisa los parámetros o inténtalo nuevamente más tarde.")
