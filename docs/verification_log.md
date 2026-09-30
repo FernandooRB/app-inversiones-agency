@@ -155,14 +155,16 @@ Al cerrar este cambio, se anotarán aquí el resultado de CI y revisión.
   piloto GBM BMV y un inventario de documentos sin publicar identificadores.
 - El cambio local de logging evita registrar mensajes y traceback de excepciones inesperadas;
   la prueba dirigida de privacidad y las pruebas de interfaz pasaron (**13 pruebas**). `ruff check .`
-  compilación Python y `pip check` pasaron. En la suite completa de esta sandbox aprobaron **383 pruebas** y
-  tres de GBM fallaron durante la preparación de `tmp_path` por `WinError 5`; no llegaron a ejecutar
-  aserciones en pytest. Las tres funciones se ejecutaron luego directamente con carpetas privadas
-  y pasaron. La suite completa verde fuera de esa restricción y CI remoto siguen pendientes.
+  compilación Python y `pip check` pasaron. La suite completa aprobó **386 pruebas** fuera de la
+  restricción local de carpetas temporales. Dentro de la sandbox aprobaron 383 y tres pruebas GBM
+  no pudieron preparar `tmp_path` por `WinError 5`; no llegaron a ejecutar aserciones. CI remoto
+  para el cambio de auditoría sigue pendiente.
 - El control por cuenta de `6e01886` ya está integrado mediante el PR #54. Los cambios de esta
-  auditoría y del logging siguen locales; su propia suite completa y CI remoto están pendientes.
+  auditoría y del logging pasaron la suite local completa; el resultado de CI remoto se registra
+  en el PR correspondiente.
 - Una revisión ampliada del inventario GBM detectó 18 CFDI estructurales entre 22 XML distintos,
   todos con aritmética interna exacta; cuatro XML requieren clasificación. Diecisiete CFDI tienen
   referencia textual candidata a una serie y uno no. Las 30 compraventas visibles con cargos
-  presentan 26 netos exactos y cuatro diferencias de un centavo, todavía abiertas. Son controles
-  locales agregados, sin vincular ni aprobar el portafolio BMV o su convenio.
+  presentan 26 netos exactos y cuatro diferencias de un centavo, todavía abiertas. La serie BMV
+  quedó vinculada documentalmente por un estado entregado desde esa cartera; no se ha aprobado
+  su convenio ni la conciliación financiera.
