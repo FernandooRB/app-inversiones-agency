@@ -182,4 +182,23 @@ Al cerrar este cambio, se anotarán aquí el resultado de CI y revisión.
   `ruff check .`, `pip check` y `git diff --check` pasaron. En una ejecución previa Windows
   imprimió una violación de acceso nativa al iniciar una prueba de Streamlit; la interfaz
   aislada aprobó 12 pruebas, el resto 380 y la repetición completa terminó sin esa señal.
-  Se requiere CI remoto en Ubuntu y Windows para este cambio.
+  El [PR #56](https://github.com/FernandooRB/app-inversiones-agency/pull/56) pasó CI en Ubuntu y
+  Windows y se integró por squash en `main` como `bfcc1ba`; su rama remota se eliminó.
+
+## Aclaración de fuentes y costos GBM — 30 de septiembre de 2026
+
+- El titular confirmó que no puede descargar el historial de movimientos de su cartera BMV.
+  La ruta documentada usa los estados PDF como fuente principal, con procedencia por fila,
+  revisión independiente y excepciones abiertas; el XLSX sigue siendo sólo una foto.
+- Confirmó como referencia general la tabla de la ayuda GBM, coincidente con su FAQ pública.
+  Los 22 cargos históricos visibles de la serie BMV corresponden a 0.25 % al centavo. Se
+  conserva la diferencia entre tasa observada para el ensayo propio, tabla pública por
+  producto y posibles condiciones particulares de clientes futuros. No se automatiza el
+  tramo de tres meses ni se recalculan cargos históricos para sustituir el estado.
+- En el expediente privado se generó un libro de efectivo desde los dos PDF consecutivos:
+  45 filas con procedencia (dos aperturas y 43 movimientos). Reproduce el preflight:
+  32 transiciones exactas, 11 con un centavo y tres desfases de día. Se inspeccionó visualmente
+  una página de movimientos de cada PDF; el resto y el puente de títulos requieren revisión.
+  El libro conserva `REVIEW_REQUIRED` y no se publica con los documentos.
+- Esta aclaración modifica guías, no código. Se revisaron enlaces, alcance y ausencia de
+  identificadores privados en el cambio público; la conciliación financiera sigue abierta.

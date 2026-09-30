@@ -194,6 +194,22 @@ movimientos ni valida que enumere todos los títulos. Si se conserva la salida d
 guardarse sólo en `data/private/`;
 no se debe ejecutar con documentos reales en CI ni adjuntar la salida a issues o PR.
 
+## Conciliación cuando no hay descarga de movimientos
+
+En el piloto BMV, el titular confirmó el 30 de septiembre de 2026 que no puede descargar el
+historial de movimientos de esa cartera. La ausencia de CSV no impide revisar los estados PDF:
+la serie mensual vinculada a BMV será la fuente operativa principal. Para cada operación visible
+se conservarán periodo, página, fila o fragmento, tipo, fecha impresa, cantidad, efectivo y cargo
+cuando aparezcan. Una segunda persona cotejará las filas partidas entre páginas, los subtotales,
+las cantidades iniciales y finales y el saldo de efectivo. Los CFDI sirven como contraste de
+cargos facturados; el XLSX de cartera es una foto de posiciones, no un libro de operaciones.
+
+El control debe distinguir **operación ausente en el PDF**, **dato no legible** y **no aplicable**.
+No se rellenarán huecos con transacciones supuestas ni se cerrarán diferencias de un centavo por
+tolerancia automática. El resultado indicará expresamente que la cobertura de movimientos se
+limita a lo visible en los estados y mantendrá las excepciones abiertas hasta tener explicación
+o decisión firmada. No se solicitará otra vez un CSV de movimientos BMV para este piloto.
+
 ## Exportación mensual de movimientos CSV
 
 El [validador estructural](../scripts/inspect_gbm_export.py) reconoce el diseño observado de 13
@@ -234,7 +250,7 @@ forma parte de la carga de la app.
 
 El estado `ESTRUCTURA_PLAUSIBLE_NO_AUTENTICADA` **no acredita fecha de corte, contrato,
 integridad de posiciones ni movimientos**. El archivo observado no contiene operaciones y no
-reemplaza la exportación mensual CSV ni los estados PDF. Una hoja nueva, fórmulas o estructura
+reemplaza un historial de operaciones ni los estados PDF. Una hoja nueva, fórmulas o estructura
 desconocida exige revisión manual y devuelve `REVIEW_REQUIRED`; no se fuerza un importador.
 
 ## Conciliación pendiente
