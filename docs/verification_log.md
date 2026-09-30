@@ -157,11 +157,10 @@ Al cerrar este cambio, se anotarán aquí el resultado de CI y revisión.
   la prueba dirigida de privacidad y las pruebas de interfaz pasaron (**13 pruebas**). `ruff check .`
   compilación Python y `pip check` pasaron. La suite completa aprobó **386 pruebas** fuera de la
   restricción local de carpetas temporales. Dentro de la sandbox aprobaron 383 y tres pruebas GBM
-  no pudieron preparar `tmp_path` por `WinError 5`; no llegaron a ejecutar aserciones. CI remoto
-  para el cambio de auditoría sigue pendiente.
+  no pudieron preparar `tmp_path` por `WinError 5`; no llegaron a ejecutar aserciones. El
+  [PR #55](https://github.com/FernandooRB/app-inversiones-agency/pull/55) pasó CI en Ubuntu y Windows.
 - El control por cuenta de `6e01886` ya está integrado mediante el PR #54. Los cambios de esta
-  auditoría y del logging pasaron la suite local completa; el resultado de CI remoto se registra
-  en el PR correspondiente.
+  auditoría y del logging pasaron la suite local completa y CI remoto para el PR #55.
 - Una revisión ampliada del inventario GBM detectó 18 CFDI estructurales entre 22 XML distintos,
   todos con aritmética interna exacta; cuatro XML requieren clasificación. Diecisiete CFDI tienen
   referencia textual candidata a una serie y uno no. Las 30 compraventas visibles con cargos
