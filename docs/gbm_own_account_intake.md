@@ -218,6 +218,25 @@ efectivo**. Tampoco confirma que la exportación esté completa, que una fecha s
 que una operación corresponda a un estado PDF. Esas relaciones necesitan el contraste privado
 con una clave de origen y revisión humana; cualquier centavo distinto permanece abierto.
 
+## Exportación de cartera XLSX
+
+El [preflight de cartera](../scripts/inspect_gbm_portfolio_xlsx.py) reconoce únicamente el
+diseño observado de una hoja con secciones de mercado de capitales nacional y efectivo. Valida
+encabezados, cantidades, valuaciones no negativas, etiquetas únicas, ausencia de fórmulas y
+límites del archivo. Devuelve únicamente una huella SHA-256 y conteos de renglones; nunca imprime
+símbolos, saldos, precios ni nombres contenidos en el libro. Sus pruebas generan Excel sintéticos.
+La dependencia `openpyxl` está en `requirements-dev.txt`, pues esta herramienta es local y no
+forma parte de la carga de la app.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/inspect_gbm_portfolio_xlsx.py "<ruta-privada-al-archivo.xlsx>" > data/private/gbm_portfolio_xlsx_preflight.json
+```
+
+El estado `ESTRUCTURA_PLAUSIBLE_NO_AUTENTICADA` **no acredita fecha de corte, contrato,
+integridad de posiciones ni movimientos**. El archivo observado no contiene operaciones y no
+reemplaza la exportación mensual CSV ni los estados PDF. Una hoja nueva, fórmulas o estructura
+desconocida exige revisión manual y devuelve `REVIEW_REQUIRED`; no se fuerza un importador.
+
 ## Conciliación pendiente
 
 1. Confirmar la relación de cada serie PDF con su contrato o subcuenta, y la relación de los XML

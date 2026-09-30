@@ -167,3 +167,19 @@ Al cerrar este cambio, se anotarán aquí el resultado de CI y revisión.
   presentan 26 netos exactos y cuatro diferencias de un centavo, todavía abiertas. La serie BMV
   quedó vinculada documentalmente por un estado entregado desde esa cartera; no se ha aprobado
   su convenio ni la conciliación financiera.
+
+## Preflight local de cartera XLSX GBM — 29 de septiembre de 2026
+
+- Se añadió un [lector estructural](../scripts/inspect_gbm_portfolio_xlsx.py) del diseño observado
+  de una hoja de cartera. Rechaza fórmulas, etiquetas duplicadas, estructura desconocida y ZIP
+  con contenido descomprimido excesivo. Sólo devuelve huella y conteos. No importa movimientos
+  ni asigna fecha o contrato.
+- Se ejecutó contra una exportación privada propia: reconoció tres renglones de posiciones y
+  cuatro de efectivo, sin imprimir símbolos ni importes. El cotejo con el estado de agosto se
+  conserva únicamente en el expediente privado; ninguna valuación del XLSX se aceptó para el
+  corte por coincidencia de carpeta.
+- Seis pruebas sintéticas dirigidas pasaron. La suite completa terminó con **392 pruebas**;
+  `ruff check .`, `pip check` y `git diff --check` pasaron. En una ejecución previa Windows
+  imprimió una violación de acceso nativa al iniciar una prueba de Streamlit; la interfaz
+  aislada aprobó 12 pruebas, el resto 380 y la repetición completa terminó sin esa señal.
+  Se requiere CI remoto en Ubuntu y Windows para este cambio.
