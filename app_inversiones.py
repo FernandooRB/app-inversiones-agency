@@ -17,6 +17,7 @@ from backtesting import run_holdout_backtest
 from benchmarking import analyze_benchmark
 from black_litterman import black_litterman_posterior, parse_absolute_views
 from broker_tariffs import read_broker_tariff_csv, read_order_tariffs_csv
+from case_preflight import CasePreflightInputs, evaluate_case_preflight
 from cash_bridge import read_cash_bridge_csv
 from covariance_calibration import select_diagonal_shrinkage
 from currencies import convert_prices, currency_map, download_fx
@@ -2768,6 +2769,40 @@ try:
         risk_free_rate, max_weight, confidence, horizon,
     )
 
+    preflight = evaluate_case_preflight(CasePreflightInputs(
+        account_scope=account_scope,
+        account_scope_fingerprint=account_scope_fingerprint,
+        holdings=holdings_result,
+        holdings_fingerprint=holdings_fingerprint,
+        holdings_detail=holdings_detail_result,
+        holdings_total=holdings_control_result,
+        holdings_coverage=holdings_coverage_result,
+        cash_bridge=cash_bridge_result,
+        position_bridge=position_bridge_result,
+        price_rights=price_rights,
+        price_fingerprint=price_fingerprint,
+        identity=identity_profile,
+        price_comparison=price_source_comparison,
+        price_quality_issues=price_quality_issues,
+        order_rules=order_rules,
+        order_tariff_fingerprint=order_tariff_fingerprint,
+    ))
+    st.subheader("Revisión previa de la cuenta")
+    st.warning(
+        f"{preflight.account_alias or 'Sin cuenta vinculada'} · "
+        f"{preflight.unresolved_count} control(es) pendientes o con alerta. "
+        "Estos PDF son borradores de uso interno; esta revisión no autoriza su entrega a clientes."
+    )
+    st.dataframe(pd.DataFrame([
+        {"Control": item.name, "Estado": item.status, "Evidencia o pendiente": item.detail}
+        for item in preflight.controls
+    ]), hide_index=True, use_container_width=True)
+    st.caption(
+        "EVIDENCIA_CARGADA indica una comprobación automática o una declaración importada, "
+        "no autenticidad, cobertura documental ni aprobación. Las excepciones y firmas "
+        "se documentan fuera de esta app."
+    )
+
     pdf = create_pdf_report(
         analysis_tickers,
         prices.index.min().date(),
@@ -2797,7 +2832,8 @@ try:
         risk_attributions=risk_attributions[:1],
     )
     st.download_button(
-        "Descargar reporte metodológico PDF", pdf, f"reporte_portafolio_{date.today()}.pdf", "application/pdf"
+        "Descargar reporte metodológico interno PDF", pdf,
+        f"reporte_interno_portafolio_{date.today()}.pdf", "application/pdf"
     )
     comparison_pdf = create_comparison_pdf_report(
         analysis_tickers,
@@ -2831,11 +2867,11 @@ try:
     )
     st.download_button(
         (
-            "Descargar comparativo ampliado PDF"
+            "Descargar comparativo interno ampliado PDF"
             if simulation_report is not None or stress_report is not None
-            else "Descargar comparativo de carteras PDF"
+            else "Descargar comparativo interno de carteras PDF"
         ), comparison_pdf,
-        f"comparativo_carteras_{date.today()}.pdf", "application/pdf",
+        f"comparativo_interno_carteras_{date.today()}.pdf", "application/pdf",
     )
     st.warning(
         "Los resultados dependen de datos históricos y supuestos estadísticos. Los costos "

@@ -52,6 +52,8 @@ def test_complete_analysis_survives_rerun(monkeypatch):
     app.button[0].click().run()
     assert not app.exception
     assert not app.error
+    assert any(item.value == "Revisión previa de la cuenta" for item in app.subheader)
+    assert any("borradores de uso interno" in item.value for item in app.warning)
     policy_toggle = next(
         item for item in app.checkbox if item.label == "Aplicar límites por clase"
     )

@@ -17,12 +17,30 @@ cuentas, importes, operaciones, identificadores, excepciones y actas de revisió
 | Monte Carlo, estrés y validación temporal | [Monte Carlo](monte_carlo.md), [estrés](stress_testing.md), [backtesting](backtesting.md) | `tests/test_simulation.py`, `tests/test_stress.py`, `tests/test_backtesting.py`, `tests/test_walk_forward.py` | Escenarios históricos, no predicciones garantizadas |
 | Costos, impuestos y flujos | [Costos](implementation_costs.md), [tarifas](broker_tariffs.md), [flujos](tax_cash_flows.md) | `tests/test_implementation_costs.py`, `tests/test_broker_tariffs.py`, `tests/test_order_tariffs.py`, `tests/test_tax_cash_flows.py` | Contrato y revisión fiscal del caso pendientes |
 | Comparativo y PDF | [Piloto](first_real_client_pilot.md) | `tests/test_reporting.py`, `tests/test_ui.py` | Documento interno; revisión final y permiso de entrega pendientes |
+| Revisión previa por cuenta | [Piloto](first_real_client_pilot.md#revisión-previa-por-cuenta-y-siguiente-trabajo) | `tests/test_case_preflight.py`, `tests/test_ui.py` | Inventario en memoria; no firma ni habilita entrega |
 | Acceso, expedientes y operación | [Matriz del piloto](real_data_pilot.md) | Aún no hay prueba integral del dominio y del ciclo de expediente | No apto para datos de clientes en producción |
+
+## Entrada de trabajo: revisión previa por cuenta (2026-09-30)
+
+- **Cambio:** `case_preflight.py` reúne en memoria los resultados ya cargados por la aplicación,
+  registra evidencia, pendientes y alertas por control, y conserva siempre la revisión humana y el
+  permiso de entrega como pendientes. La tabla aparece antes de descargar los PDF. Ambos archivos
+  descargables se nombran como internos; sus páginas también contienen un aviso de revisión interna.
+- **Verificación:** `tests/test_case_preflight.py` usa sólo objetos sintéticos para comprobar el caso
+  vacío, evidencia completa sin autorización automática, alertas de alcance/derechos/costos/mercado
+  y vigencia o fechas incompatibles. `tests/test_reporting.py` comprueba el aviso en PDF. La suite
+  local completa pasó con **396 pruebas**; `ruff check .` y `git diff --check` pasaron. Se renderizó
+  una muestra sintética de cada PDF y se revisaron título, tablas, márgenes, pies y paginación. Un
+  aviso inicial en la portada del PDF metodológico añadió una segunda página; se retiró y se dejó
+  el aviso en el pie, conservando el documento compacto de una página.
+- **Límite:** el resultado es un inventario temporal de archivos declarados, sin persistencia ni
+  firmas. Las huellas prueban correspondencia de bytes, no autenticidad. No valida excepciones
+  privadas del piloto GBM ni habilita recepción, análisis o entrega a clientes reales.
 
 El importador de perfiles de costos acepta una declaración de tarifa pública, contractual o
 negociada por cliente y verifica su ventana de vigencia. Esto registra el supuesto, pero no
-autentica el convenio ni calcula escalones de volumen. El motor interno ya puede aplicar reglas
-distintas por activo y operación, pero todavía no están conectadas a la interfaz ni al PDF.
+autentica el convenio ni calcula escalones de volumen. Las reglas por activo y operación ya se
+pueden cargar en la interfaz y mostrar en ambos PDF; siguen siendo costos declarados.
 
 ## Regla para cada cambio
 
