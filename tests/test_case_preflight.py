@@ -116,3 +116,9 @@ def test_expired_rights_and_mismatched_dates_are_not_loaded():
     assert statuses["Derechos de precios"] == "ALERTA"
     assert statuses["Subtotal de posiciones"] == "ALERTA"
     assert statuses["Efectivo"] == "ALERTA"
+
+
+def test_account_scope_without_its_own_fingerprint_remains_pending():
+    evidence = _complete_evidence()
+    statuses = _statuses(replace(evidence, account_scope_fingerprint=None))
+    assert statuses["Alcance de cuenta"] == "PENDIENTE"

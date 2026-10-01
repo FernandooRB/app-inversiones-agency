@@ -29,7 +29,9 @@ cuentas, importes, operaciones, identificadores, excepciones y actas de revisió
 - **Verificación:** `tests/test_case_preflight.py` usa sólo objetos sintéticos para comprobar el caso
   vacío, evidencia completa sin autorización automática, alertas de alcance/derechos/costos/mercado
   y vigencia o fechas incompatibles. `tests/test_reporting.py` comprueba el aviso en PDF. La suite
-  local completa pasó con **396 pruebas**; `ruff check .` y `git diff --check` pasaron. Se renderizó
+  local completa pasó con **397 pruebas**; `ruff check .` y `git diff --check` pasaron. Una corrida
+  intermedia agotó el límite de tres segundos de un test de arranque de Streamlit; el test aislado
+  pasó y la suite completa siguiente pasó sin carga paralela. Se renderizó
   una muestra sintética de cada PDF y se revisaron título, tablas, márgenes, pies y paginación. Un
   aviso inicial en la portada del PDF metodológico añadió una segunda página; se retiró y se dejó
   el aviso en el pie, conservando el documento compacto de una página.

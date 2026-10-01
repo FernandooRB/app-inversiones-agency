@@ -78,7 +78,7 @@ def evaluate_case_preflight(inputs: CasePreflightInputs, *, today: date | None =
         rows.append(PreflightControl(name, status, detail))
 
     scope = inputs.account_scope
-    if scope is None:
+    if scope is None or not inputs.account_scope_fingerprint:
         add("Alcance de cuenta", "PENDIENTE", "Carga el manifiesto de una cuenta y sus archivos vinculados.")
     elif (scope.tariff_fingerprint != inputs.order_tariff_fingerprint
           or (scope.holdings_fingerprint is not None
@@ -109,7 +109,8 @@ def evaluate_case_preflight(inputs: CasePreflightInputs, *, today: date | None =
         ))
     else:
         add("Identidad de instrumentos", "EVIDENCIA_CARGADA", (
-            f"{_digest(identity.fingerprint)}; verificar fuente oficial y serie exacta."
+            f"{_digest(identity.fingerprint)}; cubre sólo tickers del CSV de precios. "
+            "Verificar fuente oficial, serie exacta y vehículos preparados."
         ))
 
     holdings = inputs.holdings
