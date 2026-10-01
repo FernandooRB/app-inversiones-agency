@@ -1157,8 +1157,8 @@ def create_comparison_pdf_report(
     styles["Title"].leading = 20
     styles["Heading2"].textColor = colors.HexColor("#17365D")
     story = [
-        Paragraph("Comparativo de carteras", styles["Title"]),
-        Paragraph("Análisis histórico para revisión del equipo", styles["Normal"]),
+        Paragraph("Comparativo de carteras | Revisión interna", styles["Title"]),
+        Paragraph("Borrador del equipo; no autorizado para entrega a clientes.", styles["Normal"]),
         Spacer(1, 5 * mm),
         Paragraph(
             f"Generado: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')} | "
@@ -1682,6 +1682,7 @@ def create_pdf_report(
     def footer(canvas, doc):
         canvas.saveState()
         canvas.setFont("Helvetica", 8)
+        canvas.drawString(15 * mm, 12 * mm, "Revisión interna | No entregar a clientes")
         canvas.drawRightString(190 * mm, 12 * mm, f"V2 | Página {doc.page}")
         canvas.restoreState()
 

@@ -47,6 +47,9 @@ def test_pdf_report_is_created():
     report = create_pdf_report(("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1), metrics, risk, 100_000)
     assert report.startswith(b"%PDF")
     assert len(report) > 1_000
+    assert "Revisión interna | No entregar a clientes" in (
+        PdfReader(BytesIO(report)).pages[0].extract_text() or ""
+    )
 
 
 def test_both_pdfs_show_structured_holdings_and_cash_audit():
@@ -118,6 +121,8 @@ def test_both_pdfs_show_structured_holdings_and_cash_audit():
         assert "Cierre ficticio" in text
         assert "Puente de títulos" in text
         assert "no se suman al capital optimizado" in text
+        assert "Revisión interna" in text
+        assert "No entregar a clientes" in text or "no autorizado para entrega a clientes" in text
     with np.testing.assert_raises_regex(ValueError, "capital del reporte"):
         create_pdf_report(
             ("AAA", "BBB"), date(2023, 1, 1), date(2024, 1, 1),

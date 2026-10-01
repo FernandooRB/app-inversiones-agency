@@ -125,12 +125,20 @@ Si una fuente no permite el uso comercial o un dato no puede conciliarse, el cas
 se reduce el universo con una exclusión documentada. Un resultado matemático o un CI aprobado no
 constituyen aprobación del caso real.
 
-## Siguiente trabajo del software
+## Revisión previa por cuenta y siguiente trabajo
 
-El siguiente cambio técnico debe ser una **revisión previa del caso** que reúna en un solo estado
-las evidencias ya calculadas por la app: identidad y derechos de datos, conciliación de cartera,
-efectivo y cantidades, fuente de costos, alertas de precios y pendientes de revisión. Debe marcar
-claramente qué control falta y evitar que un informe destinado a cliente se confunda con los PDF
-internos actuales. Los requisitos exactos de almacenamiento y entrega se implementarán después
-de las decisiones jurídica, laboral y de privacidad; no se presupone que la app actual ya está
-autorizada para alojar expedientes.
+La app reúne en una tabla los controles disponibles para la cuenta: alcance y huellas de archivos,
+derechos declarados de precios, identidad de series, cartera y conciliaciones de detalle, subtotal,
+cobertura, efectivo y cantidades, reglas de costos, contraste de fuentes y alertas de precios. Cada
+fila muestra `EVIDENCIA_CARGADA`, `PENDIENTE` o `ALERTA`. El estado cargado sólo indica que el
+archivo fue aceptado o la comprobación automática pasó; no acredita la autenticidad del documento,
+la integridad de movimientos, la elegibilidad contractual de la tarifa ni los derechos comerciales.
+La revisión de originales, excepciones, impuestos, PDF y firmas, así como el permiso jurídico,
+laboral y de privacidad, permanecen pendientes. La aplicación nunca cambia automáticamente un caso
+a «apto para cliente» y ambos PDF se identifican como borradores internos.
+
+El siguiente trabajo es **cerrar las excepciones de la cuenta propia y verificar fuentes y permisos
+de uso**, guardando actas y documentos sólo en el expediente privado. Después se define el entorno
+de recepción, acceso, almacenamiento y borrado para clientes reales. Los requisitos exactos de
+almacenamiento y entrega se implementarán después de las decisiones jurídica, laboral y de
+privacidad; la app actual no está autorizada para alojar expedientes de clientes.
