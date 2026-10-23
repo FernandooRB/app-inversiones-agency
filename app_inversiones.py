@@ -85,12 +85,23 @@ from stress import (
 from tax_cash_flows import read_tax_cash_flows_csv
 from tax_impact import estimate_tax_reserve, read_tax_basis_csv
 from walk_forward import run_walk_forward_backtest
+from workspace_presentation import render_shell
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOGGER = logging.getLogger(__name__)
 
-st.set_page_config(page_title="Optimizador de Portafolios V2", page_icon="📊", layout="wide")
+st.set_page_config(page_title="SIG | Análisis de portafolios", layout="wide")
 require_access()
+
+work_area = render_shell()
+if work_area in {"Expedientes", "Guía operativa"}:
+    from workspace_ui import render_operations, render_workspace
+
+    if work_area == "Expedientes":
+        render_workspace()
+    else:
+        render_operations()
+    st.stop()
 
 
 @st.cache_data(ttl=3_600, show_spinner=False)
@@ -128,7 +139,7 @@ def render_covariance_comparison(sample, diagonal, calibrated=None):
             overview[column] = overview[column].map(lambda value: f"{value:.2f}")
         else:
             overview[column] = overview[column].map(lambda value: f"{value:.2%}")
-    st.dataframe(overview, use_container_width=True)
+    st.dataframe(overview, width="stretch")
     curves = {
         f"{label} · {name}": result.equity_curves[name]
         for label, result in variants.items() for name in scenarios
@@ -151,12 +162,12 @@ def cached_fx(quotes, base, start, end):
     return download_fx(quotes, base, start, end)
 
 
-st.title("Optimizador de Portafolios V2")
+st.title("Análisis de portafolios")
 st.caption("Análisis histórico educativo · No constituye una recomendación personalizada de inversión")
 
 instrument_catalog = load_catalog()
 with st.expander("Catálogo piloto de instrumentos México y SIC"):
-    st.dataframe(display_catalog(instrument_catalog), hide_index=True, use_container_width=True)
+    st.dataframe(display_catalog(instrument_catalog), hide_index=True, width="stretch")
     available_inputs = analysis_inputs(instrument_catalog)
     examples = ", ".join(
         f"{row.analysis_symbol} ({row.analysis_currency})"
@@ -194,9 +205,14 @@ with st.sidebar:
         / 100
     )
     st.caption(
-        "Supuesto manual: verifica la tasa para la moneda base y el periodo; no se consulta una fuente."
+        'Supuesto manual: verifica la tasa para la moneda base y el periodo; no se consulta una '
+        'fuente.'
     )
     max_weight = st.slider("Peso máximo por activo", 10, 100, 60, 5) / 100
+    report_objective = st.text_input(
+        "Objetivo y alcance del informe (opcional)", max_chars=500,
+        help="Descripción declarada para el resumen del PDF; no sustituye el perfil ni su revisión.",
+    )
     with st.expander("Benchmark histórico"):
         benchmark_ticker_input = st.text_input(
             "Ticker del benchmark (opcional)",
@@ -241,179 +257,180 @@ with st.sidebar:
     portfolio_value = st.number_input(
         f"Valor del portafolio ({base_currency})", min_value=0.0, value=100_000.0, step=10_000.0
     )
-    current_weights_input = st.text_input(
-        "Cartera actual, pesos en % (opcional)",
-        help=(
-            "Un porcentaje por activo, en el mismo orden; CETES, Bono M, liquidez y fondo van al final, "
-            "en ese orden, cuando se cargan. "
-            "Deben sumar 100. "
-            "No se guarda en una base de datos."
-        ),
-    )
-    holdings_upload = st.file_uploader(
-        "Cartera actual valuada en MXN CSV (opcional)",
-        type=["csv"],
-        help=(
-            "FechaCorte, Instrumento y ValorMXN; incluye exactamente todos los activos del análisis, "
-            "también los de valor cero. Máximo 2 MB. No incluyas nombres, cuentas ni identificadores "
-            "del cliente. Esta opción sustituye los pesos y el valor manuales."
-        ),
-    )
-    holdings_source_input = st.text_input(
-        "Fuente declarada de la cartera actual",
-        help="Estado de cuenta o exportación utilizada; máximo 120 caracteres.",
-    )
-    holdings_detail_upload = st.file_uploader(
-        "Detalle del estado de cuenta CSV para contraste (opcional)", type=["csv"],
-        help=(
-            "Misma plantilla de tres columnas que la cartera actual, preparada por separado "
-            "desde el estado de cuenta. Debe incluir cada instrumento, incluso los de valor cero. "
-            "Sin datos personales."
-        ),
-    )
-    holdings_detail_source_input = st.text_input(
-        "Fuente del detalle de referencia",
-        help="Documento y fecha de consulta, sin nombre ni cuenta del cliente; máximo 120 caracteres.",
-    )
-    holdings_control_upload = st.file_uploader(
-        "Subtotal de posiciones analizadas CSV (opcional; requiere cartera actual)",
-        type=["csv"],
-        help=(
-            "Una fila con fecha de corte, subtotal MXN y fuente. Debe excluir efectivo y partidas "
-            "que no estén en el universo importado. Comprueba suma y fecha, no autenticidad."
-        ),
-    )
-    st.download_button(
-        "Descargar plantilla de subtotal analizado CSV",
-        b"FechaCorte,TotalMXN,Fuente\n2026-01-15,100000.00,Estado de cuenta de ejemplo\n",
-        "plantilla_subtotal_posiciones_mxn.csv", "text/csv",
-    )
-    holdings_coverage_upload = st.file_uploader(
-        "Resumen de cobertura de la cuenta CSV (opcional; requiere cartera actual)",
-        type=["csv"],
-        help=(
-            "Concilia la cartera analizada con efectivo fuera del análisis, liquidaciones "
-            "pendientes, otras partidas y el total de la cuenta. No cambia el capital optimizado."
-        ),
-    )
-    st.download_button(
-        "Descargar plantilla de cobertura de cuenta CSV",
-        (
-            b"FechaCorte,ValorCarteraAnalizadaMXN,EfectivoFueraAnalisisMXN,"
-            b"PendienteLiquidacionMXN,OtrosFueraAnalisisMXN,TotalCuentaMXN,Fuente\n"
-            b"2026-01-15,100000.00,5000.00,0.00,0.00,105000.00,"
-            b"Estado de cuenta de ejemplo\n"
-        ),
-        "plantilla_cobertura_cuenta_mxn.csv", "text/csv",
-    )
-    cash_bridge_upload = st.file_uploader(
-        "Movimientos de efectivo liquidado CSV (opcional; requiere cobertura)",
-        type=["csv"],
-        help=(
-            "Saldo inicial, movimientos liquidados en MXN y saldo final. El saldo final debe "
-            "coincidir con el efectivo externo de la cobertura. Sin nombres ni números de cuenta."
-        ),
-    )
-    cash_bridge_source_input = st.text_input(
-        "Fuente de los movimientos de efectivo",
-        help="Documento y periodo, sin identificadores del cliente; máximo 120 caracteres.",
-    )
-    st.download_button(
-        "Descargar plantilla de movimientos de efectivo CSV",
-        (
-            b"Fecha,Tipo,ImporteMXN\n"
-            b"2026-01-01,SALDO_INICIAL,4000.00\n"
-            b"2026-01-10,DEPOSITO,1500.00\n"
-            b"2026-01-15,COMISION_IMPUESTO,500.00\n"
-            b"2026-01-15,SALDO_FINAL,5000.00\n"
-        ),
-        "plantilla_movimientos_efectivo_mxn.csv", "text/csv",
-    )
-    position_ledger_upload = st.file_uploader(
-        "Movimientos de títulos CSV (opcional; requiere cartera actual)", type=["csv"],
-        help=(
-            "Saldo inicial por instrumento y luego compras, ventas, entradas, salidas o ajustes "
-            "en orden cronológico. Usa la misma unidad por instrumento. Sin identificadores del cliente."
-        ),
-    )
-    position_ledger_source_input = st.text_input(
-        "Fuente de los movimientos de títulos",
-        help="Documento y periodo, sin nombre ni cuenta del cliente; máximo 120 caracteres.",
-    )
-    st.download_button(
-        "Descargar plantilla de movimientos de títulos CSV",
-        (b"Fecha,Instrumento,Unidad,Tipo,Cantidad\n"
-         b"2026-01-01,AAPL,TITULOS,SALDO_INICIAL,10\n"
-         b"2026-01-01,MSFT,TITULOS,SALDO_INICIAL,5\n"
-         b"2026-01-10,AAPL,TITULOS,COMPRA,2\n"),
-        "plantilla_movimientos_titulos.csv", "text/csv",
-    )
-    position_closing_upload = st.file_uploader(
-        "Posiciones finales con cantidades CSV (opcional; requiere movimientos de títulos)",
-        type=["csv"],
-        help=(
-            "Transcribe por separado las cantidades y los valores MXN al corte desde el estado. "
-            "Una fila por instrumento del análisis, incluidos los saldos cero."
-        ),
-    )
-    position_closing_source_input = st.text_input(
-        "Fuente de las posiciones finales con cantidades",
-        help="Documento de cierre, sin nombre ni cuenta del cliente; máximo 120 caracteres.",
-    )
-    st.download_button(
-        "Descargar plantilla de posiciones finales con cantidades CSV",
-        (b"FechaCorte,Instrumento,Unidad,CantidadFinal,ValorMXN\n"
-         b"2026-01-15,AAPL,TITULOS,12,60000.00\n"
-         b"2026-01-15,MSFT,TITULOS,5,40000.00\n"),
-        "plantilla_posiciones_finales.csv", "text/csv",
-    )
-    st.download_button(
-        "Descargar plantilla de cartera actual CSV",
-        b"FechaCorte,Instrumento,ValorMXN\n2026-01-15,AAPL,60000\n2026-01-15,MSFT,40000\n",
-        "plantilla_cartera_actual_mxn.csv", "text/csv",
-    )
-    tax_basis_upload = st.file_uploader(
-        "Bases fiscales actualizadas CSV (opcional; requiere cartera actual)",
-        type=["csv"],
-        help=(
-            "Una fila por instrumento con la misma fecha de corte de la cartera. No incluyas RFC, "
-            "cuentas ni otros identificadores. El resultado es una reserva de revisión, no el ISR "
-            "definitivo ni una declaración fiscal."
-        ),
-    )
-    st.download_button(
-        "Descargar plantilla de bases fiscales CSV",
-        (
-            "FechaCorte,Instrumento,CostoFiscalActualizadoMXN,TratamientoFiscal,"
-            "TasaEscenarioPct,Fuente\n"
-            "2026-01-15,AAPL,45000,PF_ACCIONES_BOLSA_ART129,10,"
-            "Constancia o cálculo fiscal revisado\n"
-            "2026-01-15,MSFT,35000,NO_ESTIMADO,,Pendiente de revisión fiscal\n"
-        ).encode("utf-8-sig"),
-        "plantilla_bases_fiscales_mxn.csv", "text/csv",
-    )
-    tax_flows_upload = st.file_uploader(
-        "Flujos fiscales documentados CSV (opcional; MXN)",
-        type=["csv"],
-        help=(
-            "Intereses, dividendos y distribuciones cobrados en un solo ejercicio. "
-            "No incluyas RFC, cuentas ni identificadores. Retenciones y reservas adicionales "
-            "son conceptos distintos; no se determina el ISR anual."
-        ),
-    )
-    st.download_button(
-        "Descargar plantilla de flujos fiscales CSV",
-        (
-            "FechaPago,Instrumento,TipoFlujo,ImporteBrutoMXN,ISRRetenidoMXN,"
-            "ImpuestoExtranjeroRetenidoMXN,TratamientoFiscal,BaseRetencionMXN,"
-            "DiasPeriodo,TasaControlPct,TasaReservaAdicionalPct,Fuente\n"
-            "2026-01-15,AAPL,DIVIDENDO_EXTRANJERO_SIC,1000,0,150,"
-            "NO_ESTIMADO,,,,,Constancia ficticia\n"
-            "2026-01-16,MSFT,DIVIDENDO_EXTRANJERO_SIC,500,0,75,"
-            "RETENCION_DOCUMENTADA,,,,,Constancia ficticia\n"
-        ).encode("utf-8-sig"),
-        "plantilla_flujos_fiscales_mxn.csv", "text/csv",
-    )
+    with st.expander("Cartera, conciliación y fiscalidad"):
+        current_weights_input = st.text_input(
+            "Cartera actual, pesos en % (opcional)",
+            help=(
+                "Un porcentaje por activo, en el mismo orden; CETES, Bono M, liquidez y fondo van al final, "
+                "en ese orden, cuando se cargan. "
+                "Deben sumar 100. "
+                "No se guarda en una base de datos."
+            ),
+        )
+        holdings_upload = st.file_uploader(
+            "Cartera actual valuada en MXN CSV (opcional)",
+            type=["csv"],
+            help=(
+                "FechaCorte, Instrumento y ValorMXN; incluye exactamente todos los activos del análisis, "
+                "también los de valor cero. Máximo 2 MB. No incluyas nombres, cuentas ni identificadores "
+                "del cliente. Esta opción sustituye los pesos y el valor manuales."
+            ),
+        )
+        holdings_source_input = st.text_input(
+            "Fuente declarada de la cartera actual",
+            help="Estado de cuenta o exportación utilizada; máximo 120 caracteres.",
+        )
+        holdings_detail_upload = st.file_uploader(
+            "Detalle del estado de cuenta CSV para contraste (opcional)", type=["csv"],
+            help=(
+                "Misma plantilla de tres columnas que la cartera actual, preparada por separado "
+                "desde el estado de cuenta. Debe incluir cada instrumento, incluso los de valor cero. "
+                "Sin datos personales."
+            ),
+        )
+        holdings_detail_source_input = st.text_input(
+            "Fuente del detalle de referencia",
+            help="Documento y fecha de consulta, sin nombre ni cuenta del cliente; máximo 120 caracteres.",
+        )
+        holdings_control_upload = st.file_uploader(
+            "Subtotal de posiciones analizadas CSV (opcional; requiere cartera actual)",
+            type=["csv"],
+            help=(
+                "Una fila con fecha de corte, subtotal MXN y fuente. Debe excluir efectivo y partidas "
+                "que no estén en el universo importado. Comprueba suma y fecha, no autenticidad."
+            ),
+        )
+        st.download_button(
+            "Descargar plantilla de subtotal analizado CSV",
+            b"FechaCorte,TotalMXN,Fuente\n2026-01-15,100000.00,Estado de cuenta de ejemplo\n",
+            "plantilla_subtotal_posiciones_mxn.csv", "text/csv",
+        )
+        holdings_coverage_upload = st.file_uploader(
+            "Resumen de cobertura de la cuenta CSV (opcional; requiere cartera actual)",
+            type=["csv"],
+            help=(
+                "Concilia la cartera analizada con efectivo fuera del análisis, liquidaciones "
+                "pendientes, otras partidas y el total de la cuenta. No cambia el capital optimizado."
+            ),
+        )
+        st.download_button(
+            "Descargar plantilla de cobertura de cuenta CSV",
+            (
+                b"FechaCorte,ValorCarteraAnalizadaMXN,EfectivoFueraAnalisisMXN,"
+                b"PendienteLiquidacionMXN,OtrosFueraAnalisisMXN,TotalCuentaMXN,Fuente\n"
+                b"2026-01-15,100000.00,5000.00,0.00,0.00,105000.00,"
+                b"Estado de cuenta de ejemplo\n"
+            ),
+            "plantilla_cobertura_cuenta_mxn.csv", "text/csv",
+        )
+        cash_bridge_upload = st.file_uploader(
+            "Movimientos de efectivo liquidado CSV (opcional; requiere cobertura)",
+            type=["csv"],
+            help=(
+                "Saldo inicial, movimientos liquidados en MXN y saldo final. El saldo final debe "
+                "coincidir con el efectivo externo de la cobertura. Sin nombres ni números de cuenta."
+            ),
+        )
+        cash_bridge_source_input = st.text_input(
+            "Fuente de los movimientos de efectivo",
+            help="Documento y periodo, sin identificadores del cliente; máximo 120 caracteres.",
+        )
+        st.download_button(
+            "Descargar plantilla de movimientos de efectivo CSV",
+            (
+                b"Fecha,Tipo,ImporteMXN\n"
+                b"2026-01-01,SALDO_INICIAL,4000.00\n"
+                b"2026-01-10,DEPOSITO,1500.00\n"
+                b"2026-01-15,COMISION_IMPUESTO,500.00\n"
+                b"2026-01-15,SALDO_FINAL,5000.00\n"
+            ),
+            "plantilla_movimientos_efectivo_mxn.csv", "text/csv",
+        )
+        position_ledger_upload = st.file_uploader(
+            "Movimientos de títulos CSV (opcional; requiere cartera actual)", type=["csv"],
+            help=(
+                "Saldo inicial por instrumento y luego compras, ventas, entradas, salidas o ajustes "
+                "en orden cronológico. Usa la misma unidad por instrumento. Sin identificadores del cliente."
+            ),
+        )
+        position_ledger_source_input = st.text_input(
+            "Fuente de los movimientos de títulos",
+            help="Documento y periodo, sin nombre ni cuenta del cliente; máximo 120 caracteres.",
+        )
+        st.download_button(
+            "Descargar plantilla de movimientos de títulos CSV",
+            (b"Fecha,Instrumento,Unidad,Tipo,Cantidad\n"
+             b"2026-01-01,AAPL,TITULOS,SALDO_INICIAL,10\n"
+             b"2026-01-01,MSFT,TITULOS,SALDO_INICIAL,5\n"
+             b"2026-01-10,AAPL,TITULOS,COMPRA,2\n"),
+            "plantilla_movimientos_titulos.csv", "text/csv",
+        )
+        position_closing_upload = st.file_uploader(
+            "Posiciones finales con cantidades CSV (opcional; requiere movimientos de títulos)",
+            type=["csv"],
+            help=(
+                "Transcribe por separado las cantidades y los valores MXN al corte desde el estado. "
+                "Una fila por instrumento del análisis, incluidos los saldos cero."
+            ),
+        )
+        position_closing_source_input = st.text_input(
+            "Fuente de las posiciones finales con cantidades",
+            help="Documento de cierre, sin nombre ni cuenta del cliente; máximo 120 caracteres.",
+        )
+        st.download_button(
+            "Descargar plantilla de posiciones finales con cantidades CSV",
+            (b"FechaCorte,Instrumento,Unidad,CantidadFinal,ValorMXN\n"
+             b"2026-01-15,AAPL,TITULOS,12,60000.00\n"
+             b"2026-01-15,MSFT,TITULOS,5,40000.00\n"),
+            "plantilla_posiciones_finales.csv", "text/csv",
+        )
+        st.download_button(
+            "Descargar plantilla de cartera actual CSV",
+            b"FechaCorte,Instrumento,ValorMXN\n2026-01-15,AAPL,60000\n2026-01-15,MSFT,40000\n",
+            "plantilla_cartera_actual_mxn.csv", "text/csv",
+        )
+        tax_basis_upload = st.file_uploader(
+            "Bases fiscales actualizadas CSV (opcional; requiere cartera actual)",
+            type=["csv"],
+            help=(
+                "Una fila por instrumento con la misma fecha de corte de la cartera. No incluyas RFC, "
+                "cuentas ni otros identificadores. El resultado es una reserva de revisión, no el ISR "
+                "definitivo ni una declaración fiscal."
+            ),
+        )
+        st.download_button(
+            "Descargar plantilla de bases fiscales CSV",
+            (
+                "FechaCorte,Instrumento,CostoFiscalActualizadoMXN,TratamientoFiscal,"
+                "TasaEscenarioPct,Fuente\n"
+                "2026-01-15,AAPL,45000,PF_ACCIONES_BOLSA_ART129,10,"
+                "Constancia o cálculo fiscal revisado\n"
+                "2026-01-15,MSFT,35000,NO_ESTIMADO,,Pendiente de revisión fiscal\n"
+            ).encode("utf-8-sig"),
+            "plantilla_bases_fiscales_mxn.csv", "text/csv",
+        )
+        tax_flows_upload = st.file_uploader(
+            "Flujos fiscales documentados CSV (opcional; MXN)",
+            type=["csv"],
+            help=(
+                "Intereses, dividendos y distribuciones cobrados en un solo ejercicio. "
+                "No incluyas RFC, cuentas ni identificadores. Retenciones y reservas adicionales "
+                "son conceptos distintos; no se determina el ISR anual."
+            ),
+        )
+        st.download_button(
+            "Descargar plantilla de flujos fiscales CSV",
+            (
+                "FechaPago,Instrumento,TipoFlujo,ImporteBrutoMXN,ISRRetenidoMXN,"
+                "ImpuestoExtranjeroRetenidoMXN,TratamientoFiscal,BaseRetencionMXN,"
+                "DiasPeriodo,TasaControlPct,TasaReservaAdicionalPct,Fuente\n"
+                "2026-01-15,AAPL,DIVIDENDO_EXTRANJERO_SIC,1000,0,150,"
+                "NO_ESTIMADO,,,,,Constancia ficticia\n"
+                "2026-01-16,MSFT,DIVIDENDO_EXTRANJERO_SIC,500,0,75,"
+                "RETENCION_DOCUMENTADA,,,,,Constancia ficticia\n"
+            ).encode("utf-8-sig"),
+            "plantilla_flujos_fiscales_mxn.csv", "text/csv",
+        )
     with st.expander("Escenario Black-Litterman"):
         use_black_litterman = st.checkbox("Añadir alternativa Black-Litterman")
         black_litterman_equilibrium_input = st.text_input(
@@ -532,181 +549,184 @@ with st.sidebar:
                 "cuenta ni nombre. La coincidencia de huellas no acredita el convenio."
             ),
         )
-    price_upload = st.file_uploader(
-        "Precios ajustados CSV aportados por el equipo (opcional)",
-        type=["csv"],
-        help=(
-            "Tabla con Fecha y una columna por ticker; UTF-8, YYYY-MM-DD, máximo 5 MB. "
-            "No cargues posiciones ni datos personales. Confirma ajustes, moneda y derechos "
-            "de uso con la fuente antes de interpretar o distribuir resultados."
-        ),
-    )
-    identity_upload = st.file_uploader(
-        "Identidad y mercado de instrumentos CSV (opcional)", type=["csv"],
-        help=(
-            "Una fila por ticker del CSV de precios. Declara ISIN, mercado negociable, mercado "
-            "y moneda de la serie; identifica expresamente cualquier proxy de origen. "
-            "No incluyas datos personales."
-        ),
-    )
-    st.download_button(
-        "Descargar plantilla de identidad de instrumentos CSV",
-        (
-            b"Instrumento,ISIN,MercadoNegociacion,SimboloNegociacion,MercadoSerie,"
-            b"MonedaSerie,TipoSerie,FechaVerificacion,Fuente\n"
-            b"AAPL,US0378331005,SIC,AAPL,ORIGEN_EXTRANJERO,USD,"
-            b"PROXY_ORIGEN_AJUSTADO,2026-09-01,Ficha verificada de ejemplo\n"
-            b"MSFT,US5949181045,SIC,MSFT,ORIGEN_EXTRANJERO,USD,"
-            b"PROXY_ORIGEN_AJUSTADO,2026-09-01,Ficha verificada de ejemplo\n"
-        ),
-        "plantilla_identidad_instrumentos.csv", "text/csv",
-    )
-    price_rights_upload = st.file_uploader(
-        "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)",
-        type=["csv"],
-        help=(
-            "Un registro, máximo 100 KB. Debe confirmar el producto, alcance permitido, "
-            "convención de ajustes, hora de corte y referencia contractual vigente."
-        ),
-    )
-    with st.expander("Contraste independiente de precios"):
-        reference_price_upload = st.file_uploader(
-            "Precios ajustados de referencia CSV (opcional)", type=["csv"],
+    with st.expander("Precios, identidad y derechos de uso"):
+        price_upload = st.file_uploader(
+            "Precios ajustados CSV aportados por el equipo (opcional)",
+            type=["csv"],
             help=(
-                "Mismos tickers y unidades de cotización que el archivo principal, "
-                "desde una fuente independiente con derechos confirmados. Sin datos personales."
+                "Tabla con Fecha y una columna por ticker; UTF-8, YYYY-MM-DD, máximo 5 MB. "
+                "No cargues posiciones ni datos personales. Confirma ajustes, moneda y derechos "
+                "de uso con la fuente antes de interpretar o distribuir resultados."
             ),
         )
-        reference_rights_upload = st.file_uploader(
-            "Manifiesto de derechos de la referencia CSV", type=["csv"],
-        )
-        reference_identity_upload = st.file_uploader(
-            "Identidad de instrumentos de la referencia CSV (opcional)", type=["csv"],
+        identity_upload = st.file_uploader(
+            "Identidad y mercado de instrumentos CSV (opcional)", type=["csv"],
             help=(
-                "Usa la misma plantilla que la fuente principal. Si adjuntas uno de los "
-                "manifiestos de identidad para el contraste, adjunta ambos."
+                "Una fila por ticker del CSV de precios. Declara ISIN, mercado negociable, mercado "
+                "y moneda de la serie; identifica expresamente cualquier proxy de origen. "
+                "No incluyas datos personales."
             ),
         )
-        price_tolerance_pct = st.number_input(
-            "Diferencia máxima declarada entre fuentes (%)",
-            min_value=0.0, max_value=100.0, value=1.0, step=0.1,
+        st.download_button(
+            "Descargar plantilla de identidad de instrumentos CSV",
+            (
+                b"Instrumento,ISIN,MercadoNegociacion,SimboloNegociacion,MercadoSerie,"
+                b"MonedaSerie,TipoSerie,FechaVerificacion,Fuente\n"
+                b"AAPL,US0378331005,SIC,AAPL,ORIGEN_EXTRANJERO,USD,"
+                b"PROXY_ORIGEN_AJUSTADO,2026-09-01,Ficha verificada de ejemplo\n"
+                b"MSFT,US5949181045,SIC,MSFT,ORIGEN_EXTRANJERO,USD,"
+                b"PROXY_ORIGEN_AJUSTADO,2026-09-01,Ficha verificada de ejemplo\n"
+            ),
+            "plantilla_identidad_instrumentos.csv", "text/csv",
         )
-        price_minimum_coverage_pct = st.number_input(
-            "Cobertura mínima de fechas comunes (%)",
-            min_value=0.1, max_value=100.0, value=95.0, step=0.5,
+        price_rights_upload = st.file_uploader(
+            "Manifiesto de derechos de los precios CSV (obligatorio si cargas precios)",
+            type=["csv"],
+            help=(
+                "Un registro, máximo 100 KB. Debe confirmar el producto, alcance permitido, "
+                "convención de ajustes, hora de corte y referencia contractual vigente."
+            ),
         )
-        st.caption(
-            "El contraste genera alertas internas; no certifica moneda, mercado, ajustes "
-            "corporativos ni exactitud de la fuente. No se incluyen precios crudos en el CSV de diferencias."
+        with st.expander("Contraste independiente de precios"):
+            reference_price_upload = st.file_uploader(
+                "Precios ajustados de referencia CSV (opcional)", type=["csv"],
+                help=(
+                    "Mismos tickers y unidades de cotización que el archivo principal, "
+                    "desde una fuente independiente con derechos confirmados. Sin datos personales."
+                ),
+            )
+            reference_rights_upload = st.file_uploader(
+                "Manifiesto de derechos de la referencia CSV", type=["csv"],
+            )
+            reference_identity_upload = st.file_uploader(
+                "Identidad de instrumentos de la referencia CSV (opcional)", type=["csv"],
+                help=(
+                    "Usa la misma plantilla que la fuente principal. Si adjuntas uno de los "
+                    "manifiestos de identidad para el contraste, adjunta ambos."
+                ),
+            )
+            price_tolerance_pct = st.number_input(
+                "Diferencia máxima declarada entre fuentes (%)",
+                min_value=0.0, max_value=100.0, value=1.0, step=0.1,
+            )
+            price_minimum_coverage_pct = st.number_input(
+                "Cobertura mínima de fechas comunes (%)",
+                min_value=0.1, max_value=100.0, value=95.0, step=0.5,
+            )
+            st.caption(
+                "El contraste genera alertas internas; no certifica moneda, mercado, ajustes "
+                'corporativos ni exactitud de la fuente. No se incluyen precios crudos en el CSV de '
+                'diferencias.'
+            )
+        st.download_button(
+            "Descargar plantilla de manifiesto de derechos",
+            (
+                b"Fuente,Producto,Mercados,FechaRevision,VigenciaHasta,EstadoDerechos,"
+                b"AlcanceAutorizado,AjusteCorporativo,HoraCorteZona,ReferenciaContractual\n"
+                b"Proveedor,Precios de cierre,BMV y SIC,2026-09-01,2027-09-01,CONFIRMADO,"
+                b"INVESTIGACION_INTERNA,AJUSTADO,Cierre oficial America/Mexico_City,"
+                b"Contrato o permiso verificable\n"
+            ),
+            "plantilla_derechos_datos.csv", "text/csv",
         )
-    st.download_button(
-        "Descargar plantilla de manifiesto de derechos",
-        (
-            b"Fuente,Producto,Mercados,FechaRevision,VigenciaHasta,EstadoDerechos,"
-            b"AlcanceAutorizado,AjusteCorporativo,HoraCorteZona,ReferenciaContractual\n"
-            b"Proveedor,Precios de cierre,BMV y SIC,2026-09-01,2027-09-01,CONFIRMADO,"
-            b"INVESTIGACION_INTERNA,AJUSTADO,Cierre oficial America/Mexico_City,"
-            b"Contrato o permiso verificable\n"
-        ),
-        "plantilla_derechos_datos.csv", "text/csv",
-    )
-    st.download_button(
-        "Descargar plantilla de precios CSV",
-        b"Fecha,AAPL,MSFT\n",
-        "plantilla_precios_ajustados.csv", "text/csv",
-    )
-    cetes_upload = st.file_uploader(
-        "Serie CETES de Banxico (opcional)",
-        type=["csv"],
-        help=(
-            "CSV con Fecha, Precio, Plazo y Tasa opcional en % anual. Máximo 5 MB; "
-            "sólo para análisis en MXN. Se rechazan cambios anticipados de emisión."
-        ),
-    )
-    cetes_name_input = st.text_input(
-        "Nombre de la serie CETES", "CETES28", help="Etiqueta que aparecerá en tablas y reportes."
-    )
-    st.download_button(
-        "Descargar plantilla CETES CSV",
-        b"Fecha,Precio,Plazo,Tasa\n",
-        "plantilla_cetes.csv",
-        "text/csv",
-    )
-    bond_upload = st.file_uploader(
-        "Serie de Bono M por emisión (opcional)",
-        type=["csv"],
-        help=(
-            "Una sola emisión con Fecha, Emision, Vencimiento, PrecioLimpio, "
-            "InteresDevengado y Cupon por 100 de nominal. Máximo 5 MB; sólo MXN."
-        ),
-    )
-    bond_name_input = st.text_input(
-        "Nombre de la serie Bono M", "BONOM", help="Etiqueta para tablas y reportes."
-    )
-    st.download_button(
-        "Descargar plantilla Bono M CSV",
-        (
-            b"Fecha,Emision,Vencimiento,PrecioLimpio,InteresDevengado,Cupon\n"
-            b"2026-01-02,M 310529,2031-05-29,98.0000,2.8000,0\n"
-            b"2026-01-05,M 310529,2031-05-29,98.0500,2.8500,0\n"
-            b"2026-01-06,M 310529,2031-05-29,98.1000,2.9000,0\n"
-        ),
-        "plantilla_bono_m.csv",
-        "text/csv",
-    )
-    liquidity_upload = st.file_uploader(
-        "Tasas de vehículo de liquidez MXN (opcional)",
-        type=["csv"],
-        help=(
-            "Un solo vehículo con Fecha, Vehiculo, TasaAnualPct, Convencion y Tratamiento. "
-            "Convenciones: nominal_360 o efectiva_365; tratamiento: BRUTA o NETA. Máximo 5 MB."
-        ),
-    )
-    liquidity_name_input = st.text_input(
-        "Nombre de la serie de liquidez", "LIQUIDEZ", help="Etiqueta para tablas y reportes."
-    )
-    liquidity_source_input = st.text_input(
-        "Fuente declarada de la tasa de liquidez",
-        help="Contrato, estado de cuenta o proveedor; aparecerá en el PDF.",
-    )
-    st.download_button(
-        "Descargar plantilla de liquidez CSV",
-        (
-            b"Fecha,Vehiculo,TasaAnualPct,Convencion,Tratamiento\n"
-            b"2026-01-02,Cuenta remunerada de ejemplo,8.50,nominal_360,NETA\n"
-            b"2026-01-05,Cuenta remunerada de ejemplo,8.50,nominal_360,NETA\n"
-            b"2026-01-06,Cuenta remunerada de ejemplo,8.45,nominal_360,NETA\n"
-        ),
-        "plantilla_liquidez_mxn.csv",
-        "text/csv",
-    )
-    fund_upload = st.file_uploader(
-        "Serie de fondo de inversión MXN (opcional)",
-        type=["csv"],
-        help=(
-            "Un solo fondo y serie con Fecha, Fondo, Serie, Moneda, ValorAccion y Distribucion "
-            "por acción. Máximo 5 MB; sólo MXN."
-        ),
-    )
-    fund_name_input = st.text_input(
-        "Nombre de la serie del fondo", "FONDOMXN", help="Etiqueta para tablas y reportes."
-    )
-    fund_source_input = st.text_input(
-        "Fuente declarada del valor del fondo",
-        help="Operadora, distribuidora o estado de cuenta; aparecerá en el PDF.",
-    )
-    st.download_button(
-        "Descargar plantilla de fondo CSV",
-        (
-            b"Fecha,Fondo,Serie,Moneda,ValorAccion,Distribucion\n"
-            b"2026-01-02,Fondo de ejemplo,A1,MXN,10.0000,0\n"
-            b"2026-01-05,Fondo de ejemplo,A1,MXN,10.0100,0\n"
-            b"2026-01-06,Fondo de ejemplo,A1,MXN,10.0150,0\n"
-        ),
-        "plantilla_fondo_mxn.csv",
-        "text/csv",
-    )
-    analyze = st.button("Analizar portafolio", type="primary", use_container_width=True)
+        st.download_button(
+            "Descargar plantilla de precios CSV",
+            b"Fecha,AAPL,MSFT\n",
+            "plantilla_precios_ajustados.csv", "text/csv",
+        )
+    with st.expander("CETES, bonos, fondos y liquidez"):
+        cetes_upload = st.file_uploader(
+            "Serie CETES de Banxico (opcional)",
+            type=["csv"],
+            help=(
+                "CSV con Fecha, Precio, Plazo y Tasa opcional en % anual. Máximo 5 MB; "
+                "sólo para análisis en MXN. Se rechazan cambios anticipados de emisión."
+            ),
+        )
+        cetes_name_input = st.text_input(
+            "Nombre de la serie CETES", "CETES28", help="Etiqueta que aparecerá en tablas y reportes."
+        )
+        st.download_button(
+            "Descargar plantilla CETES CSV",
+            b"Fecha,Precio,Plazo,Tasa\n",
+            "plantilla_cetes.csv",
+            "text/csv",
+        )
+        bond_upload = st.file_uploader(
+            "Serie de Bono M por emisión (opcional)",
+            type=["csv"],
+            help=(
+                "Una sola emisión con Fecha, Emision, Vencimiento, PrecioLimpio, "
+                "InteresDevengado y Cupon por 100 de nominal. Máximo 5 MB; sólo MXN."
+            ),
+        )
+        bond_name_input = st.text_input(
+            "Nombre de la serie Bono M", "BONOM", help="Etiqueta para tablas y reportes."
+        )
+        st.download_button(
+            "Descargar plantilla Bono M CSV",
+            (
+                b"Fecha,Emision,Vencimiento,PrecioLimpio,InteresDevengado,Cupon\n"
+                b"2026-01-02,M 310529,2031-05-29,98.0000,2.8000,0\n"
+                b"2026-01-05,M 310529,2031-05-29,98.0500,2.8500,0\n"
+                b"2026-01-06,M 310529,2031-05-29,98.1000,2.9000,0\n"
+            ),
+            "plantilla_bono_m.csv",
+            "text/csv",
+        )
+        liquidity_upload = st.file_uploader(
+            "Tasas de vehículo de liquidez MXN (opcional)",
+            type=["csv"],
+            help=(
+                "Un solo vehículo con Fecha, Vehiculo, TasaAnualPct, Convencion y Tratamiento. "
+                "Convenciones: nominal_360 o efectiva_365; tratamiento: BRUTA o NETA. Máximo 5 MB."
+            ),
+        )
+        liquidity_name_input = st.text_input(
+            "Nombre de la serie de liquidez", "LIQUIDEZ", help="Etiqueta para tablas y reportes."
+        )
+        liquidity_source_input = st.text_input(
+            "Fuente declarada de la tasa de liquidez",
+            help="Contrato, estado de cuenta o proveedor; aparecerá en el PDF.",
+        )
+        st.download_button(
+            "Descargar plantilla de liquidez CSV",
+            (
+                b"Fecha,Vehiculo,TasaAnualPct,Convencion,Tratamiento\n"
+                b"2026-01-02,Cuenta remunerada de ejemplo,8.50,nominal_360,NETA\n"
+                b"2026-01-05,Cuenta remunerada de ejemplo,8.50,nominal_360,NETA\n"
+                b"2026-01-06,Cuenta remunerada de ejemplo,8.45,nominal_360,NETA\n"
+            ),
+            "plantilla_liquidez_mxn.csv",
+            "text/csv",
+        )
+        fund_upload = st.file_uploader(
+            "Serie de fondo de inversión MXN (opcional)",
+            type=["csv"],
+            help=(
+                "Un solo fondo y serie con Fecha, Fondo, Serie, Moneda, ValorAccion y Distribucion "
+                "por acción. Máximo 5 MB; sólo MXN."
+            ),
+        )
+        fund_name_input = st.text_input(
+            "Nombre de la serie del fondo", "FONDOMXN", help="Etiqueta para tablas y reportes."
+        )
+        fund_source_input = st.text_input(
+            "Fuente declarada del valor del fondo",
+            help="Operadora, distribuidora o estado de cuenta; aparecerá en el PDF.",
+        )
+        st.download_button(
+            "Descargar plantilla de fondo CSV",
+            (
+                b"Fecha,Fondo,Serie,Moneda,ValorAccion,Distribucion\n"
+                b"2026-01-02,Fondo de ejemplo,A1,MXN,10.0000,0\n"
+                b"2026-01-05,Fondo de ejemplo,A1,MXN,10.0100,0\n"
+                b"2026-01-06,Fondo de ejemplo,A1,MXN,10.0150,0\n"
+            ),
+            "plantilla_fondo_mxn.csv",
+            "text/csv",
+        )
+    analyze = st.button("Analizar portafolio", type="primary", width="stretch")
 
 price_contents = price_upload.getvalue() if price_upload is not None else b""
 price_fingerprint = sha256(price_contents).hexdigest() if price_contents else None
@@ -1453,239 +1473,245 @@ try:
         f"Análisis realizado con {len(returns):,} observaciones, del "
         f"{prices.index.min().date()} al {prices.index.max().date()}. Moneda: {base_currency}."
     )
-    if allocation_policy_table is not None:
-        with st.expander("Política aplicada por clase de activo", expanded=True):
-            policy_view = allocation_policy_table.copy()
-            policy_view["Mínimo"] = policy_view["Mínimo"].map(lambda value: f"{value:.1%}")
-            policy_view["Máximo"] = policy_view["Máximo"].map(lambda value: f"{value:.1%}")
-            st.dataframe(policy_view, hide_index=True, use_container_width=True)
-            st.caption(
-                "La clasificación fue declarada por el usuario y no se verificó contra una "
-                "fuente externa. Máximo Sharpe, mínima volatilidad, frontera, nube y "
-                "validaciones usan estos mismos límites."
-            )
-    if price_contents:
-        st.info(
-            f"Precios CSV aportados por el equipo · {price_rights.source} / "
-            f"{price_rights.product} · Alcance {price_rights.authorized_scope} · "
-            f"Revisión {price_rights.reviewed_on.isoformat()} · "
-            f"SHA-256 datos {price_fingerprint[:12]} y manifiesto "
-            f"{price_rights.fingerprint[:12]}. La app valida la declaración, pero no sustituye "
-            "la revisión del contrato ni verifica por sí misma los datos del proveedor."
-        )
-        if not price_rights.allows_client_deliverables:
-            st.warning(
-                "Este manifiesto autoriza sólo investigación interna. No entregues a clientes "
-                "el PDF ni resultados derivados de estos precios."
-            )
-        if price_source_comparison is not None:
-            with st.expander("Contraste independiente de precios", expanded=True):
-                result = price_source_comparison
+    data_alert = bool(price_quality_issues or (
+        price_source_comparison and price_source_comparison.review_reasons
+    ))
+    with st.expander("Datos y comprobaciones de la cuenta", expanded=data_alert):
+        if allocation_policy_table is not None:
+            with st.expander("Política aplicada por clase de activo", expanded=True):
+                policy_view = allocation_policy_table.copy()
+                policy_view["Mínimo"] = policy_view["Mínimo"].map(lambda value: f"{value:.1%}")
+                policy_view["Máximo"] = policy_view["Máximo"].map(lambda value: f"{value:.1%}")
+                st.dataframe(policy_view, hide_index=True, width="stretch")
                 st.caption(
-                    f"{result.primary_source} frente a {result.reference_source} · "
-                    f"datos SHA-256 {result.primary_fingerprint[:12]} / "
-                    f"{result.reference_fingerprint[:12]} · manifiestos SHA-256 "
-                    f"{result.primary_rights_fingerprint[:12]} / "
-                    f"{result.reference_rights_fingerprint[:12]}. "
-                    "Comparación interna de cotizaciones declaradas en la misma unidad; "
-                    "no certifica exactitud ni autoriza la entrega a clientes."
+                    "La clasificación fue declarada por el usuario y no se verificó contra una "
+                    "fuente externa. Máximo Sharpe, mínima volatilidad, frontera, nube y "
+                    "validaciones usan estos mismos límites."
                 )
-                st.info(
-                    f"Estado: {result.status} · {result.common_sessions} fechas comunes · "
-                    f"cobertura {result.coverage_ratio:.1%} · umbral {result.tolerance:.2%}."
+        if price_contents:
+            st.info(
+                f"Precios CSV aportados por el equipo · {price_rights.source} / "
+                f"{price_rights.product} · Alcance {price_rights.authorized_scope} · "
+                f"Revisión {price_rights.reviewed_on.isoformat()} · "
+                f"SHA-256 datos {price_fingerprint[:12]} y manifiesto "
+                f"{price_rights.fingerprint[:12]}. La app valida la declaración, pero no sustituye "
+                "la revisión del contrato ni verifica por sí misma los datos del proveedor."
+            )
+            if not price_rights.allows_client_deliverables:
+                st.warning(
+                    "Este manifiesto autoriza sólo investigación interna. No entregues a clientes "
+                    "el PDF ni resultados derivados de estos precios."
                 )
-                if result.identity_fingerprints:
+            if price_source_comparison is not None:
+                with st.expander("Contraste independiente de precios",
+                                 expanded=bool(price_source_comparison.review_reasons)):
+                    result = price_source_comparison
                     st.caption(
-                        "Identidad y serie declaradas coinciden entre fuentes · SHA-256 "
-                        f"{result.identity_fingerprints[0][:12]} / "
-                        f"{result.identity_fingerprints[1][:12]}. "
-                        "La coincidencia no verifica los registros externos."
+                        f"{result.primary_source} frente a {result.reference_source} · "
+                        f"datos SHA-256 {result.primary_fingerprint[:12]} / "
+                        f"{result.reference_fingerprint[:12]} · manifiestos SHA-256 "
+                        f"{result.primary_rights_fingerprint[:12]} / "
+                        f"{result.reference_rights_fingerprint[:12]}. "
+                        "Comparación interna de cotizaciones declaradas en la misma unidad; "
+                        "no certifica exactitud ni autoriza la entrega a clientes."
                     )
-                else:
-                    st.warning(
-                        "No se contrastó identidad por ISIN y tipo de serie entre fuentes. "
-                        "Un resultado sin alertas de precio no confirma que sean el mismo valor."
+                    st.info(
+                        f"Estado: {result.status} · {result.common_sessions} fechas comunes · "
+                        f"cobertura {result.coverage_ratio:.1%} · umbral {result.tolerance:.2%}."
                     )
-                for reason in result.review_reasons:
-                    st.warning(reason)
-                st.dataframe(
-                    result.summary.style.format({
-                        "Diferencia mediana absoluta": "{:.2%}",
-                        "Diferencia máxima absoluta": "{:.2%}",
-                    }), hide_index=True, use_container_width=True,
-                )
-                st.caption(
-                    f"Fechas sólo en referencia: {len(result.missing_in_primary)}; "
-                    f"sólo en fuente principal: {len(result.missing_in_reference)}."
-                )
-                if not result.discrepancies.empty:
-                    st.dataframe(result.discrepancies, hide_index=True, use_container_width=True)
-                    st.download_button(
-                        "Descargar diferencias entre fuentes CSV",
-                        result.discrepancies.to_csv(index=False).encode("utf-8-sig"),
-                        "diferencias_precios_fuentes.csv", "text/csv",
+                    if result.identity_fingerprints:
+                        st.caption(
+                            "Identidad y serie declaradas coinciden entre fuentes · SHA-256 "
+                            f"{result.identity_fingerprints[0][:12]} / "
+                            f"{result.identity_fingerprints[1][:12]}. "
+                            "La coincidencia no verifica los registros externos."
+                        )
+                    else:
+                        st.warning(
+                            "No se contrastó identidad por ISIN y tipo de serie entre fuentes. "
+                            "Un resultado sin alertas de precio no confirma que sean el mismo valor."
+                        )
+                    for reason in result.review_reasons:
+                        st.warning(reason)
+                    st.dataframe(
+                        result.summary.style.format({
+                            "Diferencia mediana absoluta": "{:.2%}",
+                            "Diferencia máxima absoluta": "{:.2%}",
+                        }), hide_index=True, width="stretch",
                     )
-    else:
-        st.warning(
-            "Los precios descargados mediante Yahoo/yfinance se reservan para investigación "
-            "interna y pruebas. No uses el PDF como entregable para clientes."
-        )
-    if identity_profile is not None:
-        with st.expander("Identidad de instrumentos y series", expanded=True):
-            st.caption(
-                f"Manifiesto SHA-256 {identity_profile.fingerprint[:12]}. ISIN y estructura "
-                "verificados formalmente; la clave, cotización y disponibilidad deben confirmarse "
-                "contra una fuente autorizada. El archivo cubre sólo los tickers de precios, "
-                "no las series preparadas de deuda, liquidez o fondos."
-            )
-            st.dataframe(identity_profile.detail, hide_index=True, use_container_width=True)
-            if identity_profile.proxy_assets:
-                st.warning(
-                    "Series de origen usadas como proxy, no como cierre local ejecutable del SIC: "
-                    + ", ".join(identity_profile.proxy_assets) + "."
-                )
-    if holdings_result is not None:
-        st.info(
-            f"Cartera actual conciliada al {holdings_result.as_of.date()} · "
-            f"{holdings_result.total_value:,.2f} MXN · {len(holdings_result.values)} instrumentos · "
-            f"Fuente declarada: {holdings_source} · SHA-256 {holdings_fingerprint[:12]}. "
-            "El total cargado sustituye el valor manual durante este análisis; el archivo no se persiste."
-        )
-        if holdings_detail_result is not None:
-            st.success(
-                f"Fecha y {holdings_detail_result.asset_count} importes por instrumento "
-                f"coinciden al centavo con el detalle declarado · "
-                f"SHA-256 {holdings_detail_result.fingerprint[:12]}. "
-                "Verifica el documento original y sus movimientos antes de usar datos reales."
-            )
-        if holdings_control_result is not None:
-            st.success(
-                f"Subtotal y fecha conciliados con el control declarado: "
-                f"{holdings_control_result.statement_total:,.2f} MXN al "
-                f"{holdings_control_result.as_of.isoformat()} · "
-                f"SHA-256 {holdings_control_result.fingerprint[:12]}. "
-                "Esto no verifica la autenticidad ni la cobertura total de la cuenta."
-            )
-        if holdings_coverage_result is not None:
-            st.success(
-                f"Cobertura aritmética conciliada: cartera analizada "
-                f"{holdings_coverage_result.analyzed_value:,.2f} MXN + componentes externos "
-                f"{holdings_coverage_result.outside_analysis_total:,.2f} MXN = total de cuenta "
-                f"{holdings_coverage_result.account_total:,.2f} MXN · "
-                f"SHA-256 {holdings_coverage_result.fingerprint[:12]}."
-            )
-            if holdings_coverage_result.outside_analysis_total != 0:
-                st.warning(
-                    "El efectivo y las demás partidas fuera del análisis no forman parte del capital "
-                    "optimizado. Para modelar efectivo invertible, incorpóralo como un vehículo de "
-                    "liquidez identificado y evita duplicarlo en este resumen."
-                )
-        if cash_bridge_result is not None:
-            st.success(
-                f"Efectivo liquidado conciliado del {cash_bridge_result.start_date} al "
-                f"{cash_bridge_result.end_date}: {cash_bridge_result.opening_cash:,.2f} MXN "
-                f"con movimientos netos de {cash_bridge_result.net_movements:,.2f} MXN = "
-                f"{cash_bridge_result.closing_cash:,.2f} MXN · "
-                f"SHA-256 {cash_bridge_result.fingerprint[:12]}."
-            )
-            if cash_bridge_result.other_movement_count:
-                st.warning(
-                    f"Hay {cash_bridge_result.other_movement_count} movimiento(s) en OTRA_ENTRADA "
-                    "u OTRA_SALIDA; revisa su clasificación contra el estado original."
-                )
-        if position_bridge_result is not None:
-            st.success(
-                f"Cantidades conciliadas del {position_bridge_result.start_date} al "
-                f"{position_bridge_result.end_date}: {len(position_bridge_result.lines)} instrumentos, "
-                f"{position_bridge_result.movement_count} "
-                f"{'movimiento' if position_bridge_result.movement_count == 1 else 'movimientos'} · "
-                f"SHA-256 movimientos {position_bridge_result.ledger_fingerprint[:12]} y "
-                f"cierre {position_bridge_result.closing_fingerprint[:12]}."
-            )
-            if position_bridge_result.adjustment_count:
-                st.warning(
-                    f"Hay {position_bridge_result.adjustment_count} ajuste(s) de cantidad; "
-                    "revisa su causa y el soporte original."
-                )
-            st.dataframe(pd.DataFrame([
-                {"Instrumento": line.asset, "Unidad": line.unit,
-                 "Cantidad inicial": str(line.opening),
-                 "Movimientos netos": str(line.net_movements),
-                 "Cantidad final": str(line.closing),
-                 "Valor final MXN": str(line.closing_value)}
-                for line in position_bridge_result.lines
-            ]), hide_index=True, use_container_width=True)
-        holdings_audit = pd.DataFrame({
-            "Instrumento": holdings_result.values.index,
-            "ValorMXN": holdings_result.values.to_numpy(),
-            "Peso": holdings_result.weights.to_numpy(),
-            "FechaCorte": holdings_result.as_of.date().isoformat(),
-        })
-        st.download_button(
-            "Descargar conciliación de cartera actual CSV",
-            holdings_audit.to_csv(index=False).encode("utf-8-sig"),
-            "conciliacion_cartera_actual.csv", "text/csv",
-        )
-    with st.expander("Revisión heurística de precios originales", expanded=bool(price_quality_issues)):
-        st.caption(
-            "Se revisan cierres en su moneda de cotización antes del FX: cambios de al menos "
-            "30% entre sesiones y cinco sesiones consecutivas sin variación. "
-            "Revisa eventos corporativos, calendario y fuente; una alerta no prueba un error "
-            "y su ausencia no verifica los ajustes."
-        )
-        if price_quality_issues:
-            st.warning(f"Se detectaron {len(price_quality_issues)} alerta(s) para revisión humana.")
-            quality_rows = pd.DataFrame([
-                {
-                    "Activo": issue.ticker, "Tipo": issue.kind,
-                    "Desde": issue.first_date, "Hasta": issue.last_date,
-                    "Detalle": issue.detail,
-                }
-                for issue in price_quality_issues
-            ])
-            st.dataframe(quality_rows.head(100), hide_index=True, use_container_width=True)
-            st.download_button(
-                "Descargar todas las alertas CSV", quality_rows.to_csv(index=False).encode("utf-8-sig"),
-                "revision_precios.csv", "text/csv",
-            )
+                    st.caption(
+                        f"Fechas sólo en referencia: {len(result.missing_in_primary)}; "
+                        f"sólo en fuente principal: {len(result.missing_in_reference)}."
+                    )
+                    if not result.discrepancies.empty:
+                        st.dataframe(result.discrepancies, hide_index=True, width="stretch")
+                        st.download_button(
+                            "Descargar diferencias entre fuentes CSV",
+                            result.discrepancies.to_csv(index=False).encode("utf-8-sig"),
+                            "diferencias_precios_fuentes.csv", "text/csv",
+                        )
         else:
-            st.info("No se detectaron alertas con estos umbrales.")
-    if cetes_result is not None:
-        relevant_rolls = [
-            item for item in cetes_result.roll_dates if prices.index.min() <= item <= prices.index.max()
-        ]
-        relevant_maturities = [
-            item
-            for item in cetes_result.maturity_dates
-            if prices.index.min() <= item <= prices.index.max()
-        ]
-        st.info(
-            f"Serie {cetes_name} integrada desde archivo: {len(relevant_rolls)} renovación(es) "
-            "por vencimiento, "
-            f"{len(relevant_maturities)} vencimiento(s) reconocido(s). Revisa las fechas antes de "
-            "usar los resultados."
-        )
-    if bond_result is not None:
-        coupon_count = int((bond_result.coupons > 0).sum())
-        st.info(
-            f"Serie {bond_name} integrada para la emisión {bond_result.issue_id}, con vencimiento "
-            f"{bond_result.maturity_date.date()} y {coupon_count} cupón(es) reconocido(s) en el "
-            "archivo. Verifica emisión, precios, devengado y flujos con la fuente."
-        )
-    if liquidity_result is not None:
-        st.info(
-            f"Serie {liquidity_name} integrada para {liquidity_result.vehicle}: tasa "
-            f"{liquidity_result.treatment.lower()}, convención {liquidity_result.convention}. "
-            "La tasa de cada fecha se aplica al intervalo siguiente. Verifica fuente, liquidez, "
-            "comisiones, impuestos y protección aplicable al vehículo."
-        )
-    if fund_result is not None:
-        distribution_count = int((fund_result.distributions > 0).sum())
-        st.info(
-            f"Serie {fund_name} integrada para {fund_result.fund_id}, serie "
-            f"{fund_result.series_id}, con {distribution_count} distribución(es) reconocida(s). "
-            "Verifica valores, distribuciones, comisiones, liquidez y derechos de la serie."
-        )
+            st.warning(
+                "Los precios descargados mediante Yahoo/yfinance se reservan para investigación "
+                "interna y pruebas. No uses el PDF como entregable para clientes."
+            )
+        if identity_profile is not None:
+            with st.expander("Identidad de instrumentos y series",
+                             expanded=bool(identity_profile.proxy_assets)):
+                st.caption(
+                    f"Manifiesto SHA-256 {identity_profile.fingerprint[:12]}. ISIN y estructura "
+                    "verificados formalmente; la clave, cotización y disponibilidad deben confirmarse "
+                    "contra una fuente autorizada. El archivo cubre sólo los tickers de precios, "
+                    "no las series preparadas de deuda, liquidez o fondos."
+                )
+                st.dataframe(identity_profile.detail, hide_index=True, width="stretch")
+                if identity_profile.proxy_assets:
+                    st.warning(
+                        "Series de origen usadas como proxy, no como cierre local ejecutable del SIC: "
+                        + ", ".join(identity_profile.proxy_assets) + "."
+                    )
+        if holdings_result is not None:
+            st.info(
+                f"Cartera actual conciliada al {holdings_result.as_of.date()} · "
+                f"{holdings_result.total_value:,.2f} MXN · {len(holdings_result.values)} instrumentos · "
+                f"Fuente declarada: {holdings_source} · SHA-256 {holdings_fingerprint[:12]}. "
+                "El total cargado sustituye el valor manual durante este análisis; el archivo no se persiste."
+            )
+            if holdings_detail_result is not None:
+                st.success(
+                    f"Fecha y {holdings_detail_result.asset_count} importes por instrumento "
+                    f"coinciden al centavo con el detalle declarado · "
+                    f"SHA-256 {holdings_detail_result.fingerprint[:12]}. "
+                    "Verifica el documento original y sus movimientos antes de usar datos reales."
+                )
+            if holdings_control_result is not None:
+                st.success(
+                    f"Subtotal y fecha conciliados con el control declarado: "
+                    f"{holdings_control_result.statement_total:,.2f} MXN al "
+                    f"{holdings_control_result.as_of.isoformat()} · "
+                    f"SHA-256 {holdings_control_result.fingerprint[:12]}. "
+                    "Esto no verifica la autenticidad ni la cobertura total de la cuenta."
+                )
+            if holdings_coverage_result is not None:
+                st.success(
+                    f"Cobertura aritmética conciliada: cartera analizada "
+                    f"{holdings_coverage_result.analyzed_value:,.2f} MXN + componentes externos "
+                    f"{holdings_coverage_result.outside_analysis_total:,.2f} MXN = total de cuenta "
+                    f"{holdings_coverage_result.account_total:,.2f} MXN · "
+                    f"SHA-256 {holdings_coverage_result.fingerprint[:12]}."
+                )
+                if holdings_coverage_result.outside_analysis_total != 0:
+                    st.warning(
+                        "El efectivo y las demás partidas fuera del análisis no forman parte del capital "
+                        "optimizado. Para modelar efectivo invertible, incorpóralo como un vehículo de "
+                        "liquidez identificado y evita duplicarlo en este resumen."
+                    )
+            if cash_bridge_result is not None:
+                st.success(
+                    f"Efectivo liquidado conciliado del {cash_bridge_result.start_date} al "
+                    f"{cash_bridge_result.end_date}: {cash_bridge_result.opening_cash:,.2f} MXN "
+                    f"con movimientos netos de {cash_bridge_result.net_movements:,.2f} MXN = "
+                    f"{cash_bridge_result.closing_cash:,.2f} MXN · "
+                    f"SHA-256 {cash_bridge_result.fingerprint[:12]}."
+                )
+                if cash_bridge_result.other_movement_count:
+                    st.warning(
+                        f"Hay {cash_bridge_result.other_movement_count} movimiento(s) en OTRA_ENTRADA "
+                        "u OTRA_SALIDA; revisa su clasificación contra el estado original."
+                    )
+            if position_bridge_result is not None:
+                st.success(
+                    f"Cantidades conciliadas del {position_bridge_result.start_date} al "
+                    f"{position_bridge_result.end_date}: {len(position_bridge_result.lines)} instrumentos, "
+                    f"{position_bridge_result.movement_count} "
+                    f"{'movimiento' if position_bridge_result.movement_count == 1 else 'movimientos'} · "
+                    f"SHA-256 movimientos {position_bridge_result.ledger_fingerprint[:12]} y "
+                    f"cierre {position_bridge_result.closing_fingerprint[:12]}."
+                )
+                if position_bridge_result.adjustment_count:
+                    st.warning(
+                        f"Hay {position_bridge_result.adjustment_count} ajuste(s) de cantidad; "
+                        "revisa su causa y el soporte original."
+                    )
+                st.dataframe(pd.DataFrame([
+                    {"Instrumento": line.asset, "Unidad": line.unit,
+                     "Cantidad inicial": str(line.opening),
+                     "Movimientos netos": str(line.net_movements),
+                     "Cantidad final": str(line.closing),
+                     "Valor final MXN": str(line.closing_value)}
+                    for line in position_bridge_result.lines
+                ]), hide_index=True, width="stretch")
+            holdings_audit = pd.DataFrame({
+                "Instrumento": holdings_result.values.index,
+                "ValorMXN": holdings_result.values.to_numpy(),
+                "Peso": holdings_result.weights.to_numpy(),
+                "FechaCorte": holdings_result.as_of.date().isoformat(),
+            })
+            st.download_button(
+                "Descargar conciliación de cartera actual CSV",
+                holdings_audit.to_csv(index=False).encode("utf-8-sig"),
+                "conciliacion_cartera_actual.csv", "text/csv",
+            )
+        with st.expander("Revisión heurística de precios originales", expanded=bool(price_quality_issues)):
+            st.caption(
+                "Se revisan cierres en su moneda de cotización antes del FX: cambios de al menos "
+                "30% entre sesiones y cinco sesiones consecutivas sin variación. "
+                "Revisa eventos corporativos, calendario y fuente; una alerta no prueba un error "
+                "y su ausencia no verifica los ajustes."
+            )
+            if price_quality_issues:
+                st.warning(f"Se detectaron {len(price_quality_issues)} alerta(s) para revisión humana.")
+                quality_rows = pd.DataFrame([
+                    {
+                        "Activo": issue.ticker, "Tipo": issue.kind,
+                        "Desde": issue.first_date, "Hasta": issue.last_date,
+                        "Detalle": issue.detail,
+                    }
+                    for issue in price_quality_issues
+                ])
+                st.dataframe(quality_rows.head(100), hide_index=True, width="stretch")
+                st.download_button(
+                    "Descargar todas las alertas CSV", quality_rows.to_csv(index=False).encode("utf-8-sig"),
+                    "revision_precios.csv", "text/csv",
+                )
+            else:
+                st.info("No se detectaron alertas con estos umbrales.")
+        if cetes_result is not None:
+            relevant_rolls = [
+                item for item in cetes_result.roll_dates if prices.index.min() <= item <= prices.index.max()
+            ]
+            relevant_maturities = [
+                item
+                for item in cetes_result.maturity_dates
+                if prices.index.min() <= item <= prices.index.max()
+            ]
+            st.info(
+                f"Serie {cetes_name} integrada desde archivo: {len(relevant_rolls)} renovación(es) "
+                "por vencimiento, "
+                f"{len(relevant_maturities)} vencimiento(s) reconocido(s). Revisa las fechas antes de "
+                "usar los resultados."
+            )
+        if bond_result is not None:
+            coupon_count = int((bond_result.coupons > 0).sum())
+            st.info(
+                f"Serie {bond_name} integrada para la emisión {bond_result.issue_id}, con vencimiento "
+                f"{bond_result.maturity_date.date()} y {coupon_count} cupón(es) reconocido(s) en el "
+                "archivo. Verifica emisión, precios, devengado y flujos con la fuente."
+            )
+        if liquidity_result is not None:
+            st.info(
+                f"Serie {liquidity_name} integrada para {liquidity_result.vehicle}: tasa "
+                f"{liquidity_result.treatment.lower()}, convención {liquidity_result.convention}. "
+                "La tasa de cada fecha se aplica al intervalo siguiente. Verifica fuente, liquidez, "
+                "comisiones, impuestos y protección aplicable al vehículo."
+            )
+        if fund_result is not None:
+            distribution_count = int((fund_result.distributions > 0).sum())
+            st.info(
+                f"Serie {fund_name} integrada para {fund_result.fund_id}, serie "
+                f"{fund_result.series_id}, con {distribution_count} distribución(es) reconocida(s). "
+                "Verifica valores, distribuciones, comisiones, liquidez y derechos de la serie."
+            )
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Media histórica anualizada", percent(max_sharpe.annual_return))
@@ -1724,7 +1750,7 @@ try:
                 formatted_benchmark[column] = formatted_benchmark[column].map(
                     lambda value: "N/D" if not np.isfinite(value) else f"{value:.2f}"
                 )
-            st.dataframe(formatted_benchmark, hide_index=True, use_container_width=True)
+            st.dataframe(formatted_benchmark, hide_index=True, width="stretch")
             selected_benchmark = st.selectbox(
                 "Alternativa para la trayectoria relativa",
                 [item.portfolio_name for item in benchmark_analyses],
@@ -1751,6 +1777,7 @@ try:
         x="Volatilidad",
         y="Retorno",
         color="Sharpe",
+        color_continuous_scale=["#E5EBF2", "#1d5fbf"],
         opacity=0.35,
         title="Conjunto de oportunidades y frontera eficiente",
         labels={"Retorno": "Media histórica anualizada", "Volatilidad": "Volatilidad anualizada"},
@@ -1761,7 +1788,7 @@ try:
             y=frontier["Retorno"],
             mode="markers" if len(frontier) == 1 else "lines",
             name="Punto eficiente" if len(frontier) == 1 else "Frontera eficiente",
-            line={"width": 4, "color": "#00CC96"},
+            line={"width": 3, "color": "#1d5fbf"},
         )
     )
     figure.add_trace(
@@ -1770,7 +1797,7 @@ try:
             y=[max_sharpe.annual_return],
             mode="markers",
             name="Máximo Sharpe",
-            marker={"symbol": "star", "size": 18, "color": "#EF553B"},
+            marker={"symbol": "star", "size": 16, "color": "#141414"},
         )
     )
     figure.add_trace(
@@ -1779,19 +1806,21 @@ try:
             y=[min_volatility.annual_return],
             mode="markers",
             name="Mínima volatilidad",
-            marker={"symbol": "diamond", "size": 13, "color": "#636EFA"},
+            marker={"symbol": "diamond", "size": 12, "color": "#666666"},
         )
     )
     figure.update_layout(
+        height=390,
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "left", "x": 0},
         margin={"t": 110, "r": 100, "b": 60},
         coloraxis_colorbar={"title": "Sharpe", "x": 1.02, "y": 0.5, "len": 0.7},
     )
     figure.update_xaxes(tickformat=".1%")
     figure.update_yaxes(tickformat=".1%")
-    st.plotly_chart(figure, use_container_width=True)
+    st.plotly_chart(figure, width="stretch")
     st.caption(
-        "Los puntos coloreados son asignaciones aleatorias factibles; pueden incluir carteras dominadas. "
+        'Los puntos coloreados son asignaciones aleatorias factibles; pueden incluir carteras '
+        'dominadas. '
         "No representan simulaciones de precios futuros."
     )
     if len(frontier) == 1:
@@ -1880,11 +1909,11 @@ try:
                 "Contribución al retorno": "{:.2%}",
             }
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
-    with st.expander("Atribución de riesgo y diversificación", expanded=True):
+    with st.expander("Atribución de riesgo y diversificación"):
         risk_summary = pd.DataFrame([
             {
                 "Alternativa": item.alternative_name,
@@ -1906,7 +1935,7 @@ try:
             "Razón de diversificación", "Posiciones efectivas", "Contribuyentes efectivos",
         ):
             formatted_risk[column] = formatted_risk[column].map(lambda value: f"{value:.2f}")
-        st.dataframe(formatted_risk, hide_index=True, use_container_width=True)
+        st.dataframe(formatted_risk, hide_index=True, width="stretch")
         selected_risk_name = st.selectbox(
             "Alternativa para ver contribuciones de riesgo",
             [item.alternative_name for item in risk_attributions],
@@ -1923,7 +1952,7 @@ try:
         st.dataframe(
             detail_view.style.format({column: "{:.2%}" for column in percentage_columns}),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
         st.caption(
             "Las contribuciones con signo suman la volatilidad de la cartera; una contribución "
@@ -1963,7 +1992,7 @@ try:
                 black_litterman_view[column] = black_litterman_view[column].map(
                     lambda value: "N/D" if pd.isna(value) else f"{value:.2%}"
                 )
-            st.dataframe(black_litterman_view, hide_index=True, use_container_width=True)
+            st.dataframe(black_litterman_view, hide_index=True, width="stretch")
             st.caption(
                 "La alternativa maximiza Sharpe con los retornos posteriores y la misma "
                 "covarianza histórica de las demás carteras. Una confianza mayor acerca el "
@@ -2056,7 +2085,7 @@ try:
                 "Costo recurrente anual": "{:,.2f}",
                 "Costo estimado primer año": "{:,.2f}",
                 "Primer año / capital": "{:.3%}",
-            }), use_container_width=True, hide_index=True,
+            }), width="stretch", hide_index=True,
         )
         detail_parts = []
         for item in implementation_estimates:
@@ -2070,7 +2099,7 @@ try:
             )
             st.dataframe(
                 cost_detail[cost_detail["Alternativa"] == selected_cost_alternative],
-                hide_index=True, use_container_width=True,
+                hide_index=True, width="stretch",
             )
             st.download_button(
                 "Descargar detalle de costos CSV",
@@ -2103,7 +2132,7 @@ try:
                     "Ventas": "{:,.2f}", "Ganancia bruta estimada": "{:,.2f}",
                     "Pérdida estimada": "{:,.2f}", "Reserva fiscal estimada": "{:,.2f}",
                     "Ventas sin estimación": "{:,.2f}",
-                }), hide_index=True, use_container_width=True,
+                }), hide_index=True, width="stretch",
             )
             tax_details = []
             for item in tax_reserve_estimates:
@@ -2119,7 +2148,7 @@ try:
                 selected_tax_detail = tax_detail[
                     tax_detail["Alternativa"].eq(selected_tax_alternative)
                 ]
-                st.dataframe(selected_tax_detail, hide_index=True, use_container_width=True)
+                st.dataframe(selected_tax_detail, hide_index=True, width="stretch")
                 st.download_button(
                     "Descargar reserva fiscal CSV",
                     tax_detail.to_csv(index=False).encode("utf-8-sig"),
@@ -2141,11 +2170,11 @@ try:
                     "Impuesto extranjero retenido": "{:,.2f}",
                     "Reserva adicional": "{:,.2f}",
                 }),
-                hide_index=True, use_container_width=True,
+                hide_index=True, width="stretch",
             )
             st.metric("Flujos sin estimación fiscal (MXN)",
                       f"{tax_cash_flow_ledger.unestimated_gross_income:,.2f}")
-            st.dataframe(tax_cash_flow_ledger.detail, hide_index=True, use_container_width=True)
+            st.dataframe(tax_cash_flow_ledger.detail, hide_index=True, width="stretch")
             st.download_button(
                 "Descargar detalle de flujos fiscales CSV",
                 tax_cash_flow_ledger.detail.to_csv(index=False).encode("utf-8-sig"),
@@ -2170,11 +2199,11 @@ try:
             overview["Cambio de pesos vs. muestra completa"] = overview[
                 "Cambio de pesos vs. muestra completa"
             ].map(lambda value: f"{value:.2%}")
-            st.dataframe(overview, hide_index=True, use_container_width=True)
+            st.dataframe(overview, hide_index=True, width="stretch")
             with st.expander("Pesos de cada activo por ventana"):
                 st.dataframe(
                     sensitivity.weights.style.format({"Peso": "{:.2%}"}),
-                    use_container_width=True,
+                    width="stretch",
                 )
             st.download_button(
                 "Descargar sensibilidad de pesos CSV",
@@ -2326,7 +2355,7 @@ try:
                     xaxis_title="Mes", yaxis_title=f"Valor nominal ({base_currency})",
                     title="Distribución simulada del patrimonio",
                 )
-                st.plotly_chart(sim_chart, use_container_width=True)
+                st.plotly_chart(sim_chart, width="stretch")
                 st.download_button(
                     "Descargar percentiles mensuales CSV", bands.to_csv(index=False).encode("utf-8"),
                     "montecarlo_percentiles.csv", "text/csv",
@@ -2367,7 +2396,7 @@ try:
                 lambda value: f"{value:.2%}"
             )
             st.write("Peores ventanas históricas con rebalanceo diario:")
-            st.dataframe(display_history, hide_index=True, use_container_width=True)
+            st.dataframe(display_history, hide_index=True, width="stretch")
 
             shocks = None
             class_shocks = None
@@ -2439,14 +2468,14 @@ try:
                     class_view = class_shocks.rename("Cambio hipotético").to_frame()
                     st.write("Shocks definidos por clase:")
                     st.dataframe(
-                        class_view.style.format("{:.2%}"), use_container_width=True
+                        class_view.style.format("{:.2%}"), width="stretch"
                     )
-                st.dataframe(shock_table, hide_index=True, use_container_width=True)
+                st.dataframe(shock_table, hide_index=True, width="stretch")
                 contributions = pd.DataFrame({
                     name: result.contributions for name, result in shock_results.items()
                 })
                 st.write("Contribución de cada activo al cambio total:")
-                st.dataframe(contributions.style.format("{:.2%}"), use_container_width=True)
+                st.dataframe(contributions.style.format("{:.2%}"), width="stretch")
                 shock_export = pd.DataFrame({
                     "Activo": analysis_tickers,
                     "Clase": (
@@ -2514,7 +2543,7 @@ try:
                 display["Sharpe realizado"] = display["Sharpe realizado"].map(
                     lambda value: f"{value:.2f}"
                 )
-                st.dataframe(display, use_container_width=True)
+                st.dataframe(display, width="stretch")
                 st.line_chart(backtest.equity_curves, y_label="Capital relativo (1 = inicio)")
                 if st.checkbox("Comparar estimadores de covarianza (corte único)"):
                     diagonal = run_holdout_backtest(
@@ -2552,7 +2581,7 @@ try:
                             with st.expander("Bloques y errores de calibración"):
                                 st.dataframe(
                                     calibration.fold_scores, hide_index=True,
-                                    use_container_width=True,
+                                    width="stretch",
                                 )
                                 st.caption(
                                     "Menor error cuadrático de covarianza = mejor "
@@ -2569,7 +2598,7 @@ try:
                 with st.expander("Pesos estimados antes de la evaluación"):
                     st.dataframe(
                         backtest.allocations.style.format("{:.2%}"),
-                        use_container_width=True,
+                        width="stretch",
                     )
                 st.download_button(
                     "Descargar resultados fuera de muestra CSV",
@@ -2643,7 +2672,7 @@ try:
                     overview["Sharpe realizado"] = overview["Sharpe realizado"].map(
                         lambda value: f"{value:.2f}"
                     )
-                    st.dataframe(overview, hide_index=True, use_container_width=True)
+                    st.dataframe(overview, hide_index=True, width="stretch")
                     selected_cut = st.selectbox(
                         "Corte para ver la trayectoria", tuple(multi.results)
                     )
@@ -2712,7 +2741,7 @@ try:
                 display["Sharpe realizado"] = display["Sharpe realizado"].map(
                     lambda value: f"{value:.2f}"
                 )
-                st.dataframe(display, use_container_width=True)
+                st.dataframe(display, width="stretch")
                 st.line_chart(walk.equity_curves, y_label="Capital relativo (1 = inicio)")
                 if st.checkbox("Comparar estimadores de covarianza (revisiones)"):
                     diagonal_walk = run_walk_forward_backtest(
@@ -2750,7 +2779,7 @@ try:
                         "revisiones_covarianza_diagonal.csv", "text/csv",
                     )
                 with st.expander("Fechas, ventanas y pesos de cada revisión"):
-                    st.dataframe(walk.allocation_history, use_container_width=True)
+                    st.dataframe(walk.allocation_history, width="stretch")
                 st.download_button(
                     "Descargar historial de revisiones CSV",
                     walk.allocation_history.to_csv().encode("utf-8-sig"),
@@ -2796,7 +2825,7 @@ try:
     st.dataframe(pd.DataFrame([
         {"Control": item.name, "Estado": item.status, "Evidencia o pendiente": item.detail}
         for item in preflight.controls
-    ]), hide_index=True, use_container_width=True)
+    ]), hide_index=True, width="stretch")
     st.caption(
         "EVIDENCIA_CARGADA indica una comprobación automática o una declaración importada, "
         "no autenticidad, cobertura documental ni aprobación. Las excepciones y firmas "
@@ -2864,6 +2893,8 @@ try:
         risk_attributions=risk_attributions,
         black_litterman=black_litterman_result,
         black_litterman_source=black_litterman_source,
+        executive_summary=True,
+        objective=report_objective.strip() or None,
     )
     st.download_button(
         (
@@ -2879,6 +2910,19 @@ try:
         "optimizadas no descuentan esos costos, impuestos, liquidez ni situación personal. "
         "La conversión cambiaria no constituye una cobertura."
     )
+    from workspace_ui import render_archive_report
+
+    render_archive_report(comparison_pdf, {
+        "analysis_settings": settings,
+        "assets": analysis_tickers,
+        "effective_start": prices.index.min().date().isoformat(),
+        "effective_end": prices.index.max().date().isoformat(),
+        "weights": weights.to_dict(orient="records"),
+        "objective": report_objective,
+        "capital": portfolio_value,
+        "currency": base_currency,
+        "notes": "Internal research; model metrics exclude implementation costs and taxes.",
+    })
 except PortfolioError as exc:
     st.error(str(exc))
 except Exception as exc:

@@ -3,6 +3,7 @@
 import json
 import math
 import time
+from collections.abc import Mapping
 
 import streamlit as st
 
@@ -10,20 +11,26 @@ import streamlit as st
 def session_valid(claims, now=None):
     now = time.time() if now is None else now
     expiry = claims.get("exp")
-    if not isinstance(expiry, (int, float)) or not math.isfinite(expiry) or expiry <= now:
+    if type(expiry) not in (int, float) or not math.isfinite(expiry) or expiry <= now:
         return False
     return True
 
 
 def authorized(claims, policy, now=None):
+    if not isinstance(claims, Mapping) or not isinstance(policy, Mapping):
+        return False
     if not session_valid(claims, now):
+        return False
+    entries = policy.get("identities", [])
+    if not isinstance(entries, (list, tuple)):
         return False
     return any(
         entry.get("issuer") == claims.get("iss")
         and entry.get("subject") == claims.get("sub")
         and bool(entry.get("issuer"))
         and bool(entry.get("subject"))
-        for entry in policy.get("identities", [])
+        for entry in entries
+        if isinstance(entry, Mapping)
     )
 
 
@@ -49,9 +56,7 @@ def require_access():
             issuer, subject = claims.get("iss"), claims.get("sub")
             if isinstance(issuer, str) and isinstance(subject, str) and issuer and subject:
                 identity = (
-                    "[[access.identities]]\n"
-                    f"issuer = {json.dumps(issuer)}\n"
-                    f"subject = {json.dumps(subject)}"
+                    f"[[access.identities]]\nissuer = {json.dumps(issuer)}\nsubject = {json.dumps(subject)}"
                 )
                 st.error(
                     "Si administras esta aplicación, añade este bloque al final de Settings > Secrets "

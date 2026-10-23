@@ -18,7 +18,91 @@ cuentas, importes, operaciones, identificadores, excepciones y actas de revisió
 | Costos, impuestos y flujos | [Costos](implementation_costs.md), [tarifas](broker_tariffs.md), [flujos](tax_cash_flows.md) | `tests/test_implementation_costs.py`, `tests/test_broker_tariffs.py`, `tests/test_order_tariffs.py`, `tests/test_tax_cash_flows.py` | Contrato y revisión fiscal del caso pendientes |
 | Comparativo y PDF | [Piloto](first_real_client_pilot.md) | `tests/test_reporting.py`, `tests/test_ui.py` | Documento interno; revisión final y permiso de entrega pendientes |
 | Revisión previa por cuenta | [Piloto](first_real_client_pilot.md#revisión-previa-por-cuenta-y-siguiente-trabajo) | `tests/test_case_preflight.py`, `tests/test_ui.py` | Inventario en memoria; no firma ni habilita entrega |
-| Acceso, expedientes y operación | [Matriz del piloto](real_data_pilot.md) | Aún no hay prueba integral del dominio y del ciclo de expediente | No apto para datos de clientes en producción |
+| Ejecución local de cartera al corte | [Ejecución del piloto](snapshot_pilot.md) | `tests/test_snapshot_pilot.py` | Investigación retrospectiva bruta; costos fechados opcionales por separado; sin idoneidad ni liquidación fiscal |
+| Acceso, expedientes y operación | [Operación interna](workspace_operations.md) | `tests/test_case_workspace.py`, `tests/test_workspace_ui.py`, `tests/test_workspace_operations.py` | Falta aceptación integral del entorno final; no habilita clientes en producción |
+
+## Paquete operativo interno: expedientes, validación y reportes (2026-10-23)
+
+- **Cambio:** navegación por áreas y controles agrupados; registro SQLite opcional con contenido
+  cifrado por expediente, permisos por identidad/asignación, perfil declarado y jerarquía
+  intermediario/producto/cartera. Archivos y evidencia crean versiones; las ediciones obsoletas
+  se rechazan. Las revisiones técnica/financiera exigen personas distintas y versión vigente;
+  cambiar permisos no sustituye al autor del contenido. Ningún control habilita entrega a clientes.
+- **Trazabilidad y operación:** guardado explícito por cuenta de PDF y manifiesto en un paquete
+  cifrado, historial con cadena de integridad, revocación, archivo, respaldo consistente,
+  recuperación a ruta nueva y baja con confirmación. La comprobación de respaldo incluye archivos,
+  no sólo estructura SQL. La clave maestra, ACL y copias externas siguen requiriendo custodia y
+  validación del operador. No se migraron documentos reales ni se activó el registro de producción.
+- **Análisis y reportes:** resumen legible previo al comparativo técnico; suplementos de costos
+  fechados, sensibilidad, estrés y evaluación temporal del piloto. Una historia insuficiente
+  conserva su estado; los costos faltantes no se infieren como cero. Las métricas y Monte Carlo
+  siguen siendo brutos. Consolidación MXN de valuaciones al mismo corte, con efectivo externo
+  separado y salida JSON/PDF; no agrega rendimiento, optimización conjunta o tramos de comisión.
+- **Verificación:** la suite completa aprobó **437 pruebas** fuera de la restricción de temporales
+  del sandbox. Después se comprobaron las 32 pruebas afectadas por la disposición visual y se
+  añadieron controles del límite de universo y de autorrevisión tras un cambio de acceso. Las
+  35 pruebas del registro y del piloto, incluidos esos controles, pasaron; la suite final de ambos
+  sistemas operativos se registra en el PR. `ruff check .`, `git diff --check` y `pip check` pasaron.
+  Los fixtures son sintéticos y no se publican bases, claves, originales ni exportaciones privadas.
+- **Inspección visual:** se revisaron seis capturas en navegador, con anchos 1440, 768 y 390,
+  sin excepciones visibles ni desplazamiento horizontal del documento. Tras corregir cabecera,
+  contraste y distribución de cuentas/perfil, los módulos de medición y reglas de la guía de
+  diseño no produjeron hallazgos en esos anchos. Su lanzador CDP no inició en Windows; se ejecutaron
+  los mismos módulos mediante Playwright. El CSS extraído pasó el comprobador estático sin avisos.
+  Se renderizaron y revisaron las cinco páginas del comparativo sintético y una del consolidado.
+  Poppler sustituyó fuentes sin defectos visibles en las páginas inspeccionadas.
+- **Piloto real y límites:** el control actualizado del caso privado devolvió dos insumos cargados,
+  seis faltantes y `model_executed=false`. Un arranque concurrente mostró falta de memoria de
+  OpenBLAS antes del control; al limitar sus hilos a uno se obtuvo el estado pendiente esperado.
+  No se generó un resultado financiero real ni se cerraron excepciones históricas. El titular
+  confirmó Netlify para su página; conectarla al expediente es opcional, y no se implementó cobro
+  ni contratación electrónica. Datos autorizados, cotejo, revisiones del servicio y entorno final
+  permanecen pendientes según el [estado del plan](delivery_status_2026-10-23.md).
+
+## Vista del estado actual para el equipo (2026-10-23)
+
+- Se capturó la interfaz actual en un navegador local con tres instrumentos, precios e importes
+  sintéticos. Se comprobó el análisis, la frontera y la activación de Monte Carlo mediante teclado:
+  aparecieron dos gráficos Plotly y no hubo excepciones visibles de Streamlit. Esta comprobación
+  no sustituye las pruebas automatizadas ni valida un caso real.
+- La vista temporal se limitó a localhost, sin descargar precios ni cargar documentos de cuenta;
+  no se modificó el acceso de la aplicación de producción. El navegador y el servidor de la vista
+  se cerraron al terminar. Los auxiliares permanecen fuera de Git.
+- Se copiaron el comparativo sintético del ejecutor local y sus tres páginas renderizadas a la
+  carpeta local de visualizaciones, junto con las capturas y una lista de pendientes por responsable.
+  Se revisaron visualmente los gráficos, tablas, notas y pies de página. Las capturas de la interfaz
+  y el PDF usan configuraciones distintas y no se presentan como una misma ejecución financiera.
+- La revisión visual confirma que la navegación sigue siendo técnica y extensa. Simplificar el
+  flujo del equipo y añadir un resumen comprensible al PDF siguen pendientes. Los avisos de
+  actualización de componentes de Streamlit se registran para mantenimiento. No hubo despliegue,
+  cambios en los motores ni una nueva ejecución de la suite completa en esta comprobación.
+
+## Entrada de trabajo: ejecución local de cartera al corte (2026-10-23)
+
+- **Cambio:** `snapshot_pilot.py` y `scripts/run_snapshot_pilot.py` reúnen los importadores
+  existentes de posiciones, cobertura, precios, derechos e identidad; exigen una referencia
+  comparable y calculan cartera al corte, pesos iguales, mínima volatilidad y máximo Sharpe.
+  La estimación y la calibración usan sólo observaciones hasta el corte. El efectivo externo
+  queda fuera del capital simulado. Se conservan huellas, parámetros y semilla en JSON y puede
+  generarse el comparativo interno existente. El estudio es nominal bruto sin costos ni impuestos.
+- **Verificación:** 12 pruebas sintéticas nuevas comprobaron ejecución conjunta, topes de
+  propuestas sin alterar la cartera real, ambas simulaciones, exclusión de datos futuros,
+  identidad, estado formal de derechos, precios discrepantes y antigüedad de ambas fuentes.
+  También cubren entradas pendientes sin resultados inventados, rutas fuera del caso, errores
+  que no imprimen importes privados y protección frente a sobrescritura. La suite local completa
+  pasó con **409 pruebas**; después de completar la nota de parámetros del PDF se repitieron las
+  12 pruebas afectadas y pasaron. `ruff check .` pasó. Se renderizó el comparativo sintético de
+  tres páginas y se revisaron tablas, gráfico, notas, márgenes y pies; la primera página final
+  muestra la contracción aplicada y el tope de pesos. Las huellas completas permanecen en JSON
+  y el PDF utiliza abreviaturas de 12 caracteres.
+- **Entorno:** al cerrar la suite completa, Python emitió un aviso de acceso denegado al limpiar
+  un directorio temporal del sandbox; pytest terminó con código cero y ninguna prueba fallida.
+  Poppler emitió avisos de fuentes sustituidas; las tres páginas renderizadas resultaron legibles.
+- **Límite:** las identidades y licencias son declaraciones que deben cotejarse fuera del comando.
+  Las alertas heurísticas se conservan para revisión. No calcula idoneidad, ejecución, costos por
+  orden, fiscalidad, rendimiento realizado ni validación fuera de muestra. No firma originales ni
+  habilita entrega a clientes. Las pruebas sólo usan valores sintéticos; ningún documento real o
+  resultado privado integra este cambio. No se ha desplegado ni ejecutado CI remoto para él.
 
 ## Entrada de trabajo: revisión previa por cuenta (2026-09-30)
 

@@ -9,3 +9,10 @@ gatherUsageStats = false
 
 [logger]
 level = "info"
+
+[theme]
+base = "light"
+primaryColor = "#141414"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f8f8f8"
+textColor = "#141414"
