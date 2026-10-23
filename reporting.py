@@ -1078,6 +1078,76 @@ def _simulation_chart(result: SimulationResult, withdrawal_mode: bool) -> Drawin
     return drawing
 
 
+def _executive_summary_story(
+    alternatives, portfolio_value, currency, start_date, end_date,
+    implementation_costs, objective, styles,
+):
+    """A plain-language cover derived from the same alternatives as the annex."""
+    elements = [
+        Paragraph("Stochastics Investment Group", styles["Title"]),
+        Paragraph("Resumen para revisión del equipo", styles["Heading2"]),
+        Paragraph("Documento interno; entrega a clientes pendiente de habilitación.", styles["Normal"]),
+        Spacer(1, 4 * mm),
+        Paragraph(f"Capital analizado: <b>{portfolio_value:,.2f} {escape(currency)}</b>", styles["Normal"]),
+        Paragraph(f"Muestra: {start_date.isoformat()} a {end_date.isoformat()}", styles["Normal"]),
+        Paragraph("Objetivo declarado: " + escape(objective or "Pendiente de documentar."), styles["Normal"]),
+        Spacer(1, 3 * mm),
+        Paragraph("Qué estamos comparando", styles["Heading2"]),
+        Paragraph(
+            "Distintas formas de repartir el mismo capital entre los instrumentos del estudio. "
+            "Mínima volatilidad busca reducir la variación estimada; máximo Sharpe busca una mejor "
+            "relación entre media histórica y riesgo. Ninguna alternativa es la mejor "
+            "para todas las personas.",
+            styles["Normal"],
+        ),
+    ]
+    cost_map = {item.alternative_name: item.total_cost for item in implementation_costs}
+    rows = [["Alternativa", "Volatilidad anual", "VaR histórico", "Costo inicial supuesto"]]
+    for item in alternatives:
+        rows.append([
+            Paragraph(escape(item.name), styles["Normal"]),
+            f"{item.metrics.annual_volatility:.2%}",
+            f"{portfolio_value * item.risk.historical_var:,.0f} {currency}",
+            f"{cost_map[item.name]:,.2f} {currency}" if item.name in cost_map else "Pendiente",
+        ])
+    table = Table(rows, colWidths=[62 * mm, 38 * mm, 42 * mm, 43 * mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.6, colors.HexColor("#D1D5DB")),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.3, colors.HexColor("#E5E7EB")),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]))
+    elements.extend([
+        Spacer(1, 3 * mm), table, Spacer(1, 3 * mm),
+        Paragraph("Cómo interpretar el riesgo", styles["Heading2"]),
+        Paragraph(
+            f"La volatilidad describe la variación histórica anualizada. El VaR mostrado usa "
+            f"{alternatives[0].risk.confidence_level:.1%} de confianza y "
+            f"{alternatives[0].risk.horizon_days} sesión(es); pueden ocurrir pérdidas mayores. "
+            "Las cifras de retorno del anexo son medias de la muestra, no rendimientos prometidos.",
+            styles["Normal"],
+        ),
+        Paragraph("Qué debe revisar una persona antes de decidir", styles["Heading2"]),
+        Paragraph(
+            "Objetivos, horizonte, capacidad y tolerancia a pérdidas, necesidades de liquidez, "
+            "restricciones, negociación de instrumentos, costos y situación fiscal. Los costos "
+            "iniciales, cuando se aportan, son estimaciones separadas y no se descuentan de las "
+            "métricas de asignación. No equivalen a órdenes ejecutables.", styles["Normal"],
+        ),
+        Paragraph(
+            "Las simulaciones del anexo son escenarios hipotéticos sujetos a sus supuestos. "
+            "Fuentes, conciliaciones y limitaciones se detallan después. La aprobación humana "
+            "y los permisos de uso de datos no se obtienen por generar este documento.", styles["Normal"],
+        ),
+        PageBreak(),
+    ])
+    return elements
+
+
 def create_comparison_pdf_report(
     tickers: tuple[str, ...],
     start_date: date,
@@ -1108,6 +1178,8 @@ def create_comparison_pdf_report(
     risk_attributions: tuple[RiskAttribution, ...] = (),
     black_litterman: BlackLittermanResult | None = None,
     black_litterman_source: str | None = None,
+    executive_summary: bool = False,
+    objective: str | None = None,
 ) -> bytes:
     """Compare historical portfolio alternatives on one sample and set of assumptions."""
     if not 2 <= len(alternatives) <= 5 or len({item.name for item in alternatives}) != len(alternatives):
@@ -1126,6 +1198,11 @@ def create_comparison_pdf_report(
         raise ValueError("El escenario Black-Litterman no coincide con las alternativas.")
     if any(item.alternative_name not in alternative_names for item in implementation_costs):
         raise ValueError("El costo de implementación no pertenece al comparativo.")
+    if objective is not None and (
+        not isinstance(objective, str) or len(objective) > 500
+        or any(ord(char) < 32 for char in objective)
+    ):
+        raise ValueError("El objetivo declarado debe ser texto de hasta 500 caracteres.")
     if risk_attributions and {
         item.alternative_name for item in risk_attributions
     } != alternative_names:
@@ -1156,7 +1233,13 @@ def create_comparison_pdf_report(
     styles["Title"].fontSize = 17
     styles["Title"].leading = 20
     styles["Heading2"].textColor = colors.HexColor("#17365D")
-    story = [
+    story = _executive_summary_story(
+        alternatives, portfolio_value, base_currency, start_date, end_date,
+        (implementation_costs if implementation_cost_source
+         and implementation_cost_source != "Sin tarifario; supuestos de costo en cero" else ()),
+        objective, styles,
+    ) if executive_summary else []
+    story.extend([
         Paragraph("Comparativo de carteras | Revisión interna", styles["Title"]),
         Paragraph("Borrador del equipo; no autorizado para entrega a clientes.", styles["Normal"]),
         Spacer(1, 5 * mm),
@@ -1173,7 +1256,7 @@ def create_comparison_pdf_report(
             styles["Normal"],
         ),
         Spacer(1, 5 * mm),
-    ]
+    ])
     story.extend(_allocation_policy_story(allocation_policy, styles))
     story.extend([
         Paragraph("Resultados comparables", styles["Heading2"]),

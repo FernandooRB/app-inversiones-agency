@@ -10,6 +10,15 @@ El [procedimiento local de revisión de estados GBM](docs/gbm_own_account_intake
 clasificación técnica de los resultados privados del caso.
 La [guía y registro de verificación](docs/verification_log.md) relaciona las funciones del producto
 con sus pruebas y las condiciones pendientes antes de una entrega a clientes.
+El [registro interno de expedientes](docs/workspace_operations.md) añade perfiles declarados,
+cuentas, archivos cifrados, historial, revisiones por versión y respaldo/recuperación. Está
+desactivado por defecto; no se han migrado documentos reales ni habilitado recepción de clientes.
+La navegación separa Análisis, Expedientes y Guía operativa. El comparativo de la interfaz incluye
+un resumen legible antes del anexo técnico. El [paquete de decisiones del servicio](docs/service_readiness_packet.md)
+documenta los pendientes externos de contratación, privacidad, actividad externa e integración del sitio.
+La [ejecución local de una cartera al corte](docs/snapshot_pilot.md) reúne archivos autorizados,
+identidad, contraste, Markowitz y Monte Carlo en un estudio interno reproducible, sin utilizar
+operaciones históricas para atribuir rendimiento realizado a la cuenta.
 La aplicación incluye [escenarios Monte Carlo](docs/monte_carlo.md) para investigación interna,
 con métodos histórico por bloques y lognormal correlacionado, y
 [pruebas de estrés](docs/stress_testing.md) históricas e hipotéticas con shocks documentados
@@ -157,7 +166,8 @@ pytest
   se muestran por separado y no se descuentan de las métricas optimizadas. La reserva fiscal de
   ventas también es separada y parcial; no modelan la declaración anual, profundidad ni ejecución real.
 - La media histórica no es un pronóstico.
-- No existe gestión de clientes ni persistencia de información personal.
+- Existe un registro interno cifrado y opcional, pendiente de validar en el entorno definitivo.
+  No es todavía un portal público de clientes ni una integración de contratación con el sitio externo.
 - Antes de un uso comercial deben revisarse licenciamiento de datos, privacidad y cumplimiento aplicable.
 
 ## Estructura

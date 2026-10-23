@@ -13,3 +13,7 @@ data/private/
 output/private/
 tmp/private/
 Estados_de_Cuenta/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
