@@ -44,6 +44,11 @@ cuentas, importes, operaciones, identificadores, excepciones y actas de revisió
   35 pruebas del registro y del piloto, incluidos esos controles, pasaron; la suite final de ambos
   sistemas operativos se registra en el PR. `ruff check .`, `git diff --check` y `pip check` pasaron.
   Los fixtures son sintéticos y no se publican bases, claves, originales ni exportaciones privadas.
+- **CI y aislamiento:** la primera ejecución del PR completó las 439 pruebas en Ubuntu, pero el
+  trabajo de Windows falló en `pip check`: el `pipx` preinstalado del runner exigía una versión de
+  `platformdirs` distinta de la fijada para la aplicación. Se cambió CI para crear un entorno virtual
+  aislado en cada plataforma y comprobar expresamente su uso, conservando las dependencias fijadas.
+  La aprobación del commit corregido se comprueba en ambos trabajos antes de integrar.
 - **Inspección visual:** se revisaron seis capturas en navegador, con anchos 1440, 768 y 390,
   sin excepciones visibles ni desplazamiento horizontal del documento. Tras corregir cabecera,
   contraste y distribución de cuentas/perfil, los módulos de medición y reglas de la guía de
