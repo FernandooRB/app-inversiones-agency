@@ -90,7 +90,7 @@ from workspace_presentation import render_shell
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOGGER = logging.getLogger(__name__)
 
-st.set_page_config(page_title="SIG | Análisis de portafolios", layout="wide")
+st.set_page_config(page_title="SIG | Análisis y seguimiento de portafolios", layout="wide")
 require_access()
 
 work_area = render_shell()

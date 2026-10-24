@@ -38,5 +38,5 @@ def render_shell(areas: tuple[str, ...] = ("Análisis", "Seguimiento", "Expedien
         areas,
         default=areas[0],
         key="workspace_area",
-        label_visibility="collapsed",
+        label_visibility="visible",
     )
