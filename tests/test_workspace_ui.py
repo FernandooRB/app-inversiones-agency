@@ -24,6 +24,8 @@ def test_navigation_explains_unconfigured_storage_without_access_to_real_secrets
 
     monkeypatch.setattr(workspace_ui, "configured_workspace", missing)
     app = AppTest.from_file(APP, default_timeout=15).run()
+    assert app.pills[0].label == "Área de trabajo"
+    assert "Seguimiento" in app.pills[0].options
     app.session_state["workspace_area"] = "Expedientes"
     app.run()
     assert not app.exception
