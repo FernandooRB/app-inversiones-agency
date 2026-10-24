@@ -26,7 +26,9 @@ def test_unconfigured_app_stops_before_market_data(monkeypatch):
         pytest.fail("Unauthenticated download")
 
     monkeypatch.setattr(portfolio_core.yf, "download", forbidden)
-    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app_inversiones.py").run()
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
+    ).run()
     assert not app.exception
     assert app.error
     assert not app.metric

@@ -94,6 +94,12 @@ st.set_page_config(page_title="SIG | Análisis de portafolios", layout="wide")
 require_access()
 
 work_area = render_shell()
+if work_area == "Seguimiento":
+    from technical_ui import render_technical
+
+    render_technical()
+    st.stop()
+
 if work_area in {"Expedientes", "Guía operativa"}:
     from workspace_ui import render_operations, render_workspace
 
@@ -190,7 +196,11 @@ with st.expander("Catálogo piloto de instrumentos México y SIC"):
 
 with st.sidebar:
     st.header("Configuración")
-    tickers_input = st.text_input("Tickers", "AAPL, MSFT, GOOG, TSLA", help="Máximo 25; separados por comas.")
+    tickers_input = st.text_input(
+        "Tickers", st.session_state.get("_optimizer_tickers", "AAPL, MSFT, GOOG, TSLA"),
+        help="Máximo 25; separados por comas.", key="optimizer_tickers_widget",
+    )
+    st.session_state["_optimizer_tickers"] = tickers_input
     quote_input = st.text_input("Monedas de cotización, en el mismo orden", "USD, USD, USD, USD")
     base_currency = st.selectbox(
         "Moneda base del análisis", ["USD", "MXN", "EUR", "GBP", "CAD", "JPY", "CHF"]

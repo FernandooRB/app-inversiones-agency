@@ -20,6 +20,20 @@ cuentas, importes, operaciones, identificadores, excepciones y actas de revisió
 | Revisión previa por cuenta | [Piloto](first_real_client_pilot.md#revisión-previa-por-cuenta-y-siguiente-trabajo) | `tests/test_case_preflight.py`, `tests/test_ui.py` | Inventario en memoria; no firma ni habilita entrega |
 | Ejecución local de cartera al corte | [Ejecución del piloto](snapshot_pilot.md) | `tests/test_snapshot_pilot.py` | Investigación retrospectiva bruta; costos fechados opcionales por separado; sin idoneidad ni liquidación fiscal |
 | Acceso, expedientes y operación | [Operación interna](workspace_operations.md) | `tests/test_case_workspace.py`, `tests/test_workspace_ui.py`, `tests/test_workspace_operations.py` | Falta aceptación integral del entorno final; no habilita clientes en producción |
+| Seguimiento, indicadores y simulación técnica | [Metodología](technical_signals.md), [auditoría](audit_2026-10-23.md) | `tests/test_technical_analysis.py`, `tests/test_technical_market_data.py`, `tests/test_technical_backtesting.py`, `tests/test_watchlist_store.py`, `tests/test_technical_ui.py` | Precio y volumen de origen; falta contraste completo de datos reales y aceptación del alojamiento |
+
+## Seguimiento y auditoría de coherencia (2026-10-23)
+
+- Se añadió Seguimiento con listas por identidad OIDC, gráficos de precio/volumen/RSI/MACD,
+  condiciones explícitas y simulación de dos años con costos comparables.
+- La auditoría corrigió calentamiento insuficiente, ordenación numérica, reselección de filas,
+  persistencia y navegación de la demostración y contraste de pies de texto. La demostración
+  sólo genera precios para sus instrumentos SIM; no fabrica cotizaciones bajo tickers reales.
+- La ejecución completa aprobó **485 pruebas**, con Ruff, `pip check` y revisión de diferencias
+  correctos. Edge/Playwright verificó recorridos y anchos 1440, 768 y 390 sin errores JavaScript
+  ni desbordamiento de página. La evidencia y límites están en el [informe](audit_2026-10-23.md).
+- La validación de datos reales, OIDC y persistencia del alojamiento sigue pendiente. El informe
+  no aprueba entrega a clientes ni supone que un push actualice el despliegue.
 
 ## Paquete operativo interno: expedientes, validación y reportes (2026-10-23)
 
