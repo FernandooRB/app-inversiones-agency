@@ -38,4 +38,7 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-dev.txt
       - run: python -m pip check
       - run: python -m ruff check .
-      - run: python -m pytest --cov=portfolio_core --cov=reporting --cov-report=term-missing
+      - run: >-
+          python -m pytest --cov=portfolio_core --cov=reporting
+          --cov=technical_analysis --cov=technical_market_data --cov=technical_backtesting
+          --cov=watchlist_store --cov=technical_ui --cov-report=term-missing

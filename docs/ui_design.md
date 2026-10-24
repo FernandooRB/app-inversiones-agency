@@ -13,6 +13,9 @@ Las preguntas de cada área son:
 
 - Análisis: qué alternativas matemáticas produce el mismo universo bajo los mismos supuestos.
   Los resultados preceden a los detalles de evidencia, que se abren cuando hay alertas de precios.
+- Seguimiento: qué acciones tienen confirmación de precio, volumen e impulso y qué condiciones
+  faltan. La lista conduce al gráfico de cuatro paneles, las reglas y el plan de referencia.
+  Conserva `achromatic-ledger` y sus colores; el motivo propio es la evidencia junto a cada señal.
 - Expedientes: qué cuenta se está estudiando y qué falta revisar. Cuentas y perfil comparten
   la primera vista; los formularios de actualización se abren cuando corresponde.
 - Evidencia: qué documentos se declararon, con su alcance y pendientes, sin llamarlos auténticos

@@ -13,7 +13,10 @@ con sus pruebas y las condiciones pendientes antes de una entrega a clientes.
 El [registro interno de expedientes](docs/workspace_operations.md) añade perfiles declarados,
 cuentas, archivos cifrados, historial, revisiones por versión y respaldo/recuperación. Está
 desactivado por defecto; no se han migrado documentos reales ni habilitado recepción de clientes.
-La navegación separa Análisis, Expedientes y Guía operativa. El comparativo de la interfaz incluye
+La navegación separa Análisis, Seguimiento, Expedientes y Guía operativa. El
+[seguimiento técnico](docs/technical_signals.md) guarda una lista por usuario y combina volumen,
+RSI, tendencia y MACD con gráficos, niveles de referencia y simulación histórica con costos.
+El comparativo de la interfaz incluye
 un resumen legible antes del anexo técnico. El [paquete de decisiones del servicio](docs/service_readiness_packet.md)
 documenta los pendientes externos de contratación, privacidad, actividad externa e integración del sitio.
 La [ejecución local de una cartera al corte](docs/snapshot_pilot.md) reúne archivos autorizados,
@@ -212,12 +215,12 @@ tests/               Pruebas unitarias
 - Cobertura cambiaria y validación de metadatos de instrumentos.
 - Validar perfiles contractuales y constancias fiscales reales; ampliar pérdidas, fondos y reglas por
   régimen sin confundir retenciones provisionales con impuesto definitivo.
-- Expediente de cliente y audit trail.
+- Validar los expedientes y su registro de auditoría con usuarios y almacenamiento del despliegue.
 
 ## Licencia
 
-No se ha definido una licencia. Conserva el repositorio privado o añade una licencia apropiada antes de
-autorizar reutilización por terceros.
+No se ha definido una licencia de reutilización. La disponibilidad pública del código no concede por sí
+sola una licencia para reutilizarlo; define una antes de autorizar su reutilización por terceros.
 
 ## Acceso OIDC (obligatorio)
 
