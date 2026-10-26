@@ -98,11 +98,13 @@ def test_user_change_does_not_keep_previous_list_or_quotes(monkeypatch, tmp_path
     app, store = open_tracking(monkeypatch, tmp_path, ["AAPL"])
     monkeypatch.setattr(technical_ui, "cached_market_history", lambda *_: technical_history)
     button(app, "Actualizar señales").click().run()
+    app.session_state["technical_sic_symbol_AAPL"] = "SERIE-ANTERIOR"
     store.save("test-issuer", "second-user", ["MSFT"])
     monkeypatch.setattr(technical_ui, "configured_watchlist", lambda: (store, "test-issuer", "second-user"))
     app.run()
     assert app.text_area[0].value == "MSFT"
     assert not app.session_state.filtered_state.get("_technical_histories", {})
+    assert "technical_sic_symbol_AAPL" not in app.session_state.filtered_state
     assert not app.exception
 
 

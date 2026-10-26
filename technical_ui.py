@@ -416,19 +416,28 @@ def _render_sic_trial(snapshot: TechnicalSnapshot):
         return
     with st.form(f"technical_sic_draft_{snapshot.symbol}"):
         st.caption("Transcribe el instrumento exacto y una cotización reciente de Trading MX/SIC en GBM.")
-        local_symbol = st.text_input("Serie local en GBM", key=f"sic_symbol_{snapshot.symbol}")
-        isin = st.text_input("ISIN en GBM", key=f"sic_isin_{snapshot.symbol}")
-        day = st.date_input("Fecha de la cotización · Ciudad de México")
-        hour = st.time_input("Hora de la cotización · Ciudad de México")
-        bid = st.number_input("Mejor compra (bid) · MXN", min_value=0.0, step=0.01)
-        ask = st.number_input("Mejor venta (ask) · MXN", min_value=0.0, step=0.01)
-        local_volume = st.number_input("Volumen local observado · títulos", min_value=0, step=1)
-        stop = st.number_input("Stop de referencia local · MXN", min_value=0.0, step=0.01)
-        target = st.number_input("Objetivo de referencia local · MXN", min_value=0.0, step=0.01)
-        capital = st.number_input("Capital máximo de la prueba · MXN", min_value=0.0, step=100.0)
-        loss = st.number_input("Pérdida máxima planeada · MXN", min_value=0.0, step=100.0)
+        local_symbol = st.text_input("Serie local en GBM", key=f"technical_sic_symbol_{snapshot.symbol}")
+        isin = st.text_input("ISIN en GBM", key=f"technical_sic_isin_{snapshot.symbol}")
+        day = st.date_input("Fecha de la cotización · Ciudad de México",
+                            key=f"technical_sic_quote_day_{snapshot.symbol}")
+        hour = st.time_input("Hora de la cotización · Ciudad de México",
+                             key=f"technical_sic_quote_time_{snapshot.symbol}")
+        bid = st.number_input("Mejor compra (bid) · MXN", min_value=0.0, step=0.01,
+                              key=f"technical_sic_bid_{snapshot.symbol}")
+        ask = st.number_input("Mejor venta (ask) · MXN", min_value=0.0, step=0.01,
+                              key=f"technical_sic_ask_{snapshot.symbol}")
+        local_volume = st.number_input("Volumen local observado · títulos", min_value=0, step=1,
+                                       key=f"technical_sic_volume_{snapshot.symbol}")
+        stop = st.number_input("Stop de referencia local · MXN", min_value=0.0, step=0.01,
+                               key=f"technical_sic_stop_{snapshot.symbol}")
+        target = st.number_input("Objetivo de referencia local · MXN", min_value=0.0, step=0.01,
+                                 key=f"technical_sic_target_{snapshot.symbol}")
+        capital = st.number_input("Capital máximo de la prueba · MXN", min_value=0.0, step=100.0,
+                                  key=f"technical_sic_capital_{snapshot.symbol}")
+        loss = st.number_input("Pérdida máxima planeada · MXN", min_value=0.0, step=100.0,
+                               key=f"technical_sic_loss_{snapshot.symbol}")
         fee = st.number_input("Costo estimado por lado (%)", min_value=0.0, max_value=99.0,
-                              value=0.35, step=0.05)
+                              value=0.35, step=0.05, key=f"technical_sic_fee_{snapshot.symbol}")
         submitted = st.form_submit_button("Calcular borrador manual")
     if not submitted:
         return
