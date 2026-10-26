@@ -1,6 +1,7 @@
 -c constraints-tested.txt
 streamlit[auth]>=1.40,<2
 yfinance>=0.2.54,<1
+httpx>=0.28,<1
 pandas>=2.2,<4
 numpy>=2.0,<3
 scipy>=1.14,<2
