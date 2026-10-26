@@ -161,8 +161,37 @@ Tras guardar AAPL en Supabase, el usuario confirmó que la lista permaneció al 
 datos publicados por [Yahoo Finance](https://finance.yahoo.com/quote/AAPL/history/) y por el
 [reporte de Nasdaq Dorsey Wright del 23 de octubre](https://dorseywright.nasdaq.com/reports/database/menu/stocktype/1/date/2026-10-23/new_all//rpt/56/allprice/1/all_scales/1/sourcerpt/).
 
-El reporte Nasdaq Dorsey Wright y Yahoo publican cifras de volumen ligeramente distintas para esa
-sesión. Esta revisión puntual confirma fecha, moneda, cierre y sentido del cambio; **no** concilia
-el volumen diario ni reproduce las 20 sesiones usadas como denominador del volumen relativo, el RSI
-o el MACD con una segunda fuente. La pantalla ahora expone volumen y promedio previo junto a la
-razón para facilitar ese cotejo antes de decidir una operación.
+### Conciliación posterior de AAPL · 25 de octubre de 2026 (Ciudad de México)
+
+Se descargaron las barras diarias de Yahoo mediante el adaptador de la app (cinco años, 1255
+sesiones) y las del [histórico público de Nasdaq](https://www.nasdaq.com/market-activity/stocks/aapl/historical)
+(desde octubre de 2021, 1271 sesiones). La consulta de Nasdaq utilizó su
+[respuesta JSON pública](https://api.nasdaq.com/api/quote/AAPL/historical?assetclass=stocks&fromdate=2021-10-01&todate=2026-10-23&limit=2000),
+que puede cambiar de disponibilidad o formato; **no** es una dependencia de producción. Se
+normalizaron las fechas a la sesión de Nueva York, se ordenaron las barras y se compararon
+las 502 sesiones comunes del 23 de octubre de 2024 al 23 de octubre de 2026. Ambas series
+terminaban el 23 de octubre. Los cálculos se hicieron con las reglas de la app y, para la última
+sesión, con implementaciones separadas de la media de 20 volúmenes anteriores, la recurrencia RSI
+de Wilder y las EMA recursivas del MACD.
+
+| AAPL, sesión 2026-10-23 | Yahoo/yfinance | Nasdaq |
+|---|---:|---:|
+| Cierre | USD 347.7300 | USD 347.7250 |
+| Volumen de la sesión | 39,496,500 | 39,539,690 |
+| Media de las 20 sesiones anteriores | 38,034,150 | 38,034,146 |
+| Volumen relativo | 1.03845× | 1.03958× |
+| RSI 14 | 63.9185 | 63.9101 |
+| Histograma MACD | 0.31621 | 0.31589 |
+| Señal | Esperar | Esperar |
+
+Las fórmulas separadas reprodujeron los tres indicadores de la app a precisión numérica. En esa
+sesión sólo se cumplieron la condición de tendencia y el histograma MACD positivo para Compra;
+ninguna condición de Venta se cumplió. El volumen de Nasdaq fue 0.109 % mayor que el de Yahoo,
+pero ambos quedaron lejos del umbral de 1.5×. En las 502 sesiones comunes no hubo diferencias en
+ninguna de las nueve condiciones evaluadas ni en las señales finales: ambas series produjeron tres
+sesiones de Compra y diez de Venta / revisar reducción. La mayor diferencia de cierre fue USD
+0.00501 y la mayor diferencia relativa de volumen diario, 0.224 %.
+
+Este cotejo respalda **las reglas y la señal de AAPL en el periodo revisado**; no garantiza que
+otros símbolos o futuras revisiones de los proveedores coincidan. Tampoco valida el rendimiento
+futuro ni reemplaza la revisión del precio y la liquidez de la plaza donde se operaría.
