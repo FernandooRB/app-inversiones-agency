@@ -9,6 +9,7 @@ from hashlib import sha256
 from inspect import signature
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -17,6 +18,7 @@ from plotly.subplots import make_subplots
 
 from access import authorized
 from safe_logging import log_unexpected_analysis_error
+from sic_trial import SicTrialError, prepare_sic_draft
 from supabase_watchlist import SupabaseWatchlistStore
 from technical_analysis import (
     BUY,
@@ -32,6 +34,8 @@ from technical_analysis import (
 )
 from technical_backtesting import run_technical_backtest
 from technical_market_data import download_market_history
+from technical_validation import run_chronological_validation
+from watchlist_backup import export_watchlist, import_watchlist
 from watchlist_store import WatchlistError, WatchlistStore, identity_key
 
 LOGGER = logging.getLogger(__name__)
@@ -80,6 +84,9 @@ def _remember_draft():
 
 
 def _render_list_editor(store: WatchlistStore | SupabaseWatchlistStore, issuer: str, subject: str):
+    pending = st.session_state.pop("_technical_pending_restore", None)
+    if pending is not None:
+        st.session_state["technical_list_widget"] = ", ".join(pending)
     with st.sidebar:
         st.header("Mi seguimiento")
         if st.button("Copiar desde Análisis", width="stretch"):
@@ -113,6 +120,32 @@ def _render_list_editor(store: WatchlistStore | SupabaseWatchlistStore, issuer: 
             st.caption("Lista guardada en Supabase para tu usuario.")
         else:
             st.caption("Lista local: en Streamlit Cloud puede perderse al reiniciar. Configura Supabase.")
+        with st.expander("Respaldo de mi lista"):
+            st.caption(
+                "Descarga un JSON de los tickers guardados. Guárdalo fuera de la app; "
+                "no incluye tu identidad ni claves."
+            )
+            st.download_button(
+                "Descargar respaldo JSON",
+                export_watchlist(st.session_state.get("_technical_symbols", [])),
+                "seguimiento_tickers.json", "application/json", width="stretch",
+            )
+            uploaded = st.file_uploader(
+                "Restaurar respaldo JSON", type=["json"], key="technical_backup_upload"
+            )
+            if uploaded is not None:
+                try:
+                    restored = import_watchlist(uploaded.getvalue())
+                    st.caption("Lista del respaldo: " + (", ".join(restored) or "vacía"))
+                    if st.button("Restaurar y sustituir lista", width="stretch"):
+                        saved = store.save(issuer, subject, restored)
+                        st.session_state["_technical_symbols"] = saved
+                        st.session_state["_technical_draft"] = ", ".join(saved)
+                        st.session_state["_technical_pending_restore"] = saved
+                        st.session_state["_technical_histories"] = {}
+                        st.rerun()
+                except WatchlistError as exc:
+                    st.error(str(exc))
         with st.expander("Supuestos de operación"):
             cost = st.number_input(
                 "Costo total por lado (%)", min_value=0.0, max_value=10.0,
@@ -312,6 +345,135 @@ def _render_backtest(snapshot: TechnicalSnapshot, currency: str, cost: float, sl
                       f"curvas_{snapshot.symbol}.csv", "text/csv")
 
 
+def _render_chronological_validation(snapshot: TechnicalSnapshot, cost: float, slippage: float):
+    st.subheader("Robustez por periodos")
+    st.caption(
+        "Tres bloques consecutivos de 252 sesiones, sin solapamiento y con 252 sesiones previas "
+        "de calentamiento. Son reproducciones históricas de reglas fijas, no resultados futuros."
+    )
+    stress_cost = min(0.1, max(cost * 2, cost + 0.0025))
+    stress_slippage = min(500.0, max(slippage * 2, slippage + 10))
+    signature = (
+        snapshot.symbol, str(snapshot.as_of), cost, slippage, stress_cost, stress_slippage,
+        st.session_state.get("_technical_refresh_id"), STRATEGY_VERSION,
+    )
+    if st.button("Validar por periodos", key=f"technical_periods_{snapshot.symbol}"):
+        try:
+            with st.spinner("Comparando tres periodos sin usar datos posteriores…"):
+                result = run_chronological_validation(
+                    snapshot.indicators, cost_rate=cost, slippage_bps=slippage,
+                    stress_cost_rate=stress_cost, stress_slippage_bps=stress_slippage,
+                )
+            st.session_state["_technical_period_validation"] = (signature, result)
+        except TechnicalError as exc:
+            st.session_state.pop("_technical_period_validation", None)
+            st.info(str(exc))
+    saved = st.session_state.get("_technical_period_validation")
+    if saved is None or saved[0] != signature:
+        return
+    result = saved[1]
+    st.caption(
+        f"Costos base: {result.base_cost_rate:.2%} + {result.base_slippage_bps:g} pb por lado · "
+        f"estrés: {result.stress_cost_rate:.2%} + {result.stress_slippage_bps:g} pb por lado."
+    )
+    table = result.windows.copy()
+    st.dataframe(table.style.format({
+        "Ganadoras netas": lambda value: "—" if pd.isna(value) else f"{value:.1%}",
+        "Estrategia neta": "{:.2%}",
+        "Comprar y mantener neto": "{:.2%}",
+        "Caída máxima neta": "{:.2%}",
+        "Estrategia neta con estrés": "{:.2%}",
+    }), width="stretch")
+    total_trades = int(table["Operaciones"].sum())
+    st.caption(
+        f"{total_trades} operaciones entre los tres periodos. Una muestra pequeña limita la "
+        "interpretación; estos periodos retrospectivos no son una prueba prospectiva fuera de muestra."
+    )
+    st.download_button(
+        "Validación por periodos CSV", table.to_csv().encode("utf-8-sig"),
+        f"validacion_periodos_{snapshot.symbol}.csv", "text/csv",
+    )
+
+
+def _render_sic_trial(snapshot: TechnicalSnapshot):
+    st.subheader("Preparar prueba en SIC · GBM")
+    st.caption(
+        "Los indicadores anteriores usan USD y volumen del mercado de origen. "
+        "Esta ficha usa únicamente precios MXN capturados desde GBM y no envía órdenes."
+    )
+    mode = st.radio(
+        "Forma de operación", ["Manual en GBM", "Conectar bróker"], horizontal=True,
+        key=f"technical_sic_mode_{snapshot.symbol}",
+    )
+    if mode == "Conectar bróker":
+        st.info(
+            "Conexión de órdenes no disponible: falta verificar una API de negociación "
+            "para esta cuenta GBM, sus permisos y un entorno de prueba. No ingreses credenciales aquí."
+        )
+        return
+    if snapshot.signal != BUY:
+        st.info("La estrategia no tiene señal de Compra. La ficha de operación se habilita con esa señal.")
+        return
+    with st.form(f"technical_sic_draft_{snapshot.symbol}"):
+        st.caption("Transcribe el instrumento exacto y una cotización reciente de Trading MX/SIC en GBM.")
+        local_symbol = st.text_input("Serie local en GBM", key=f"technical_sic_symbol_{snapshot.symbol}")
+        isin = st.text_input("ISIN en GBM", key=f"technical_sic_isin_{snapshot.symbol}")
+        day = st.date_input("Fecha de la cotización · Ciudad de México",
+                            key=f"technical_sic_quote_day_{snapshot.symbol}")
+        hour = st.time_input("Hora de la cotización · Ciudad de México",
+                             key=f"technical_sic_quote_time_{snapshot.symbol}")
+        bid = st.number_input("Mejor compra (bid) · MXN", min_value=0.0, step=0.01,
+                              key=f"technical_sic_bid_{snapshot.symbol}")
+        ask = st.number_input("Mejor venta (ask) · MXN", min_value=0.0, step=0.01,
+                              key=f"technical_sic_ask_{snapshot.symbol}")
+        local_volume = st.number_input("Volumen local observado · títulos", min_value=0, step=1,
+                                       key=f"technical_sic_volume_{snapshot.symbol}")
+        stop = st.number_input("Stop de referencia local · MXN", min_value=0.0, step=0.01,
+                               key=f"technical_sic_stop_{snapshot.symbol}")
+        target = st.number_input("Objetivo de referencia local · MXN", min_value=0.0, step=0.01,
+                                 key=f"technical_sic_target_{snapshot.symbol}")
+        capital = st.number_input("Capital máximo de la prueba · MXN", min_value=0.0, step=100.0,
+                                  key=f"technical_sic_capital_{snapshot.symbol}")
+        loss = st.number_input("Pérdida máxima planeada · MXN", min_value=0.0, step=100.0,
+                               key=f"technical_sic_loss_{snapshot.symbol}")
+        fee = st.number_input("Costo estimado por lado (%)", min_value=0.0, max_value=99.0,
+                              value=0.35, step=0.05, key=f"technical_sic_fee_{snapshot.symbol}")
+        submitted = st.form_submit_button("Calcular borrador manual")
+    if not submitted:
+        return
+    quote_time = datetime.combine(day, hour, tzinfo=ZoneInfo("America/Mexico_City"))
+    quote_age = datetime.now(UTC) - quote_time.astimezone(UTC)
+    if not local_symbol.strip() or not isin.strip():
+        st.warning("Confirma la serie local y el ISIN en GBM antes de calcular.")
+        return
+    if quote_age.total_seconds() < 0 or quote_age.total_seconds() > 15 * 60:
+        st.warning("La cotización local debe tener 15 minutos o menos. Actualiza los datos en GBM.")
+        return
+    if bid <= 0 or ask <= 0 or ask < bid or local_volume <= 0:
+        st.warning("Revisa bid, ask y volumen local positivo; el ask no puede ser menor al bid.")
+        return
+    try:
+        draft = prepare_sic_draft(
+            ask_mxn=ask, stop_mxn=stop, target_mxn=target,
+            capital_mxn=capital, max_loss_mxn=loss, cost_rate=fee / 100,
+        )
+    except SicTrialError as exc:
+        st.warning(str(exc))
+        return
+    st.write(f"**Borrador de {local_symbol.strip().upper()} · {isin.strip().upper()}**")
+    st.write(
+        f"Hasta {draft.quantity} títulos · desembolso estimado MXN {draft.estimated_entry_mxn:,.2f} "
+        f"· pérdida planeada al stop MXN {draft.planned_loss_mxn:,.2f} "
+        f"· ganancia al objetivo MXN {draft.estimated_target_profit_mxn:,.2f} "
+        f"· beneficio/riesgo estimado {draft.estimated_risk_reward:.2f}:1."
+    )
+    st.warning(
+        "Borrador para revisión manual, sin orden. El stop puede ejecutarse peor por un salto "
+        "o falta de liquidez; la pérdida real puede superar el límite planeado. "
+        "Verifica serie, ISIN, horario, liquidez, tarifas y disponibilidad en GBM antes de decidir."
+    )
+
+
 def render_technical_detail(
     history: MarketHistory, snapshot: TechnicalSnapshot, cost: float, slippage: float,
 ):
@@ -355,6 +517,8 @@ def render_technical_detail(
             "Se respetan los ajustes de splits ya incorporados por el proveedor."
         )
     _render_backtest(snapshot, history.currency, cost, slippage)
+    _render_chronological_validation(snapshot, cost, slippage)
+    _render_sic_trial(snapshot)
 
 
 def render_technical(

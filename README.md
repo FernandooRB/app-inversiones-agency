@@ -16,6 +16,9 @@ desactivado por defecto; no se han migrado documentos reales ni habilitado recep
 La navegación separa Análisis, Seguimiento, Expedientes y Guía operativa. El
 [seguimiento técnico](docs/technical_signals.md) guarda una lista por usuario y combina volumen,
 RSI, tendencia y MACD con gráficos, niveles de referencia y simulación histórica con costos.
+La [revisión de robustez y preparación SIC/GBM](docs/technical_readiness_2026-10-26.md)
+documenta el contraste de fuentes, la muestra escasa de operaciones, el respaldo de listas
+y los requisitos pendientes antes de una prueba con dinero real.
 El comparativo de la interfaz incluye
 un resumen legible antes del anexo técnico. El [paquete de decisiones del servicio](docs/service_readiness_packet.md)
 documenta los pendientes externos de contratación, privacidad, actividad externa e integración del sitio.
