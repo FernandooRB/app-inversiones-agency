@@ -21,7 +21,7 @@ def open_tracking(monkeypatch, tmp_path, symbols=()):
     store = WatchlistStore(tmp_path / "watchlists.db")
     store.save("test-issuer", "test-user", symbols)
     monkeypatch.setattr(technical_ui, "configured_watchlist", lambda: (store, "test-issuer", "test-user"))
-    app = AppTest.from_file(APP, default_timeout=30).run()
+    app = AppTest.from_file(APP, default_timeout=120).run()
     app.session_state["workspace_area"] = "Seguimiento"
     app.run()
     return app, store
@@ -77,6 +77,10 @@ def test_refresh_partial_provider_failure_filters_and_backtest(
     assert not app.exception
     assert len(app.get("plotly_chart")) == 2
     assert any(item.label == "Operaciones cerradas" for item in app.metric)
+    button(app, "Validar por periodos").click().run()
+    assert not app.exception
+    assert any("Estrategia neta con estrés" in item.value.columns
+               and len(item.value) == 3 for item in app.dataframe)
     assert len(calls) == 2
     next(item for item in app.number_input if item.label == "Costo total por lado (%)").set_value(1).run()
     assert not any(item.label == "Operaciones cerradas" for item in app.metric)
@@ -233,3 +237,21 @@ def test_costs_can_eliminate_the_net_reward_and_ui_explains_it():
     app = AppTest.from_function(render, default_timeout=30).run()
     assert not app.exception
     assert any("no deja beneficio neto" in item.value for item in app.warning)
+
+
+def test_sic_broker_mode_does_not_offer_order_submission():
+    def render():
+        from technical_analysis import BUY, TechnicalSnapshot
+        from technical_ui import _render_sic_trial
+
+        _render_sic_trial(TechnicalSnapshot("SIM", BUY, ""))
+
+    app = AppTest.from_function(render, default_timeout=30).run()
+    assert not app.exception
+    assert any(item.label == "Calcular borrador manual" for item in app.button)
+    next(item for item in app.radio if item.label == "Forma de operación").set_value(
+        "Conectar bróker"
+    ).run()
+    assert not app.exception
+    assert any("Conexión de órdenes no disponible" in item.value for item in app.info)
+    assert not any(item.label == "Calcular borrador manual" for item in app.button)

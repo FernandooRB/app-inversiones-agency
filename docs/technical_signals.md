@@ -147,6 +147,12 @@ El [informe de auditoría del 23 de octubre de 2026](audit_2026-10-23.md) regist
 correcciones y limitaciones. La tabla mantiene cifras numéricas para ordenar por valor; un dato
 ausente conserva su valor nulo y nunca se convierte en cero para simular una cotización.
 
+La [revisión ampliada del 26 de octubre](technical_readiness_2026-10-26.md) contrasta seis
+símbolos con otra fuente, reproduce tres periodos por símbolo, documenta el respaldo de listas
+y explica la ficha manual SIC/GBM. La muestra produjo sólo 12 operaciones y la estrategia
+quedó por debajo de comprar y mantener en 17 de 18 periodos-símbolo; las señales permanecen
+como investigación y no justifican por sí solas una orden real.
+
 La consulta real de AAPL devolvió 1255 observaciones y metadatos de NasdaqGS/USD, pero el
 proveedor entregó el cierre de 2026-10-23 como ausente. El control lo clasificó como No evaluable;
 no se sustituyó por otro campo ni se inventó una señal. La interfaz identifica campo y fecha
