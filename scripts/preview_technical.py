@@ -44,6 +44,9 @@ def synthetic_history(symbol: str, buy: bool = False) -> MarketHistory:
         signals = historical_signals(calculate_indicators(bars))
         last_buy = np.flatnonzero(signals.Buy.to_numpy())[-1]
         bars = bars.iloc[:last_buy + 1].copy()
+    else:
+        # Keep one stable "Esperar" example for reviewing missing confirmations.
+        bars.loc[bars.index[-1], "Volume"] = bars.Volume.iloc[-21:-1].mean()
     yesterday = datetime.now(ZoneInfo("America/New_York")).date() - timedelta(days=1)
     bars.index = pd.bdate_range(end=yesterday, periods=len(bars))
     return MarketHistory(symbol, bars, "USD", "Mercado ficticio", "America/New_York",
@@ -69,6 +72,7 @@ symbols = store.load("synthetic-preview", "synthetic-user")
 if "_technical_owner" not in st.session_state:
     st.session_state.update({
         "_technical_owner": identity_key("synthetic-preview", "synthetic-user"),
+        "_technical_store": str(store.path),
         "_technical_symbols": symbols, "_technical_draft": ", ".join(symbols),
         "_optimizer_tickers": "SIM-ALFA, SIM-BETA",
         "_technical_histories": {

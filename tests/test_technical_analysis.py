@@ -7,6 +7,7 @@ import pytest
 
 from technical_analysis import (
     UNAVAILABLE,
+    WAIT,
     TechnicalError,
     analyze_history,
     calculate_indicators,
@@ -109,6 +110,24 @@ def test_sell_needs_volume_price_and_bearish_momentum(technical_bars):
     assert historical_signals(data).Sell.iloc[-1]
     data.loc[data.index[-1], "RelativeVolume"] = 1.4
     assert not historical_signals(data).Sell.iloc[-1]
+
+
+def test_wait_explains_each_missing_confirmation_and_reconciles_volume(technical_history):
+    bars = technical_history.bars.copy()
+    bars.loc[bars.index[-1], "Volume"] = bars.Volume.iloc[-21:-1].mean()
+    snapshot = analyze_history(replace(technical_history, bars=bars))
+    assert snapshot.signal == WAIT
+    assert "Para compra faltan:" in snapshot.reason
+    assert "Para venta o reducción faltan:" in snapshot.reason
+    for condition in (*snapshot.buy_conditions, *snapshot.sell_conditions):
+        if not condition.met:
+            assert condition.label in snapshot.reason
+    volume = snapshot.buy_conditions[2].reading
+    current = snapshot.indicators.iloc[-1]
+    assert f"{current.Volume:,.0f}" in volume
+    assert f"{current.VolumeMean20:,.0f}" in volume
+    assert f"= {current.RelativeVolume:.2f}×" in volume
+    assert snapshot.sell_conditions[1].reading == volume
 
 
 @pytest.mark.parametrize("column, value", [("Volume", 0), ("Volume", np.nan),
