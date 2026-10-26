@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from hashlib import sha256
+from inspect import signature
 from pathlib import Path
 from uuid import uuid4
 
@@ -433,10 +434,12 @@ def render_technical(
         display[column] = pd.to_numeric(display[column], errors="coerce")
     display["Moneda"] = display["Moneda"].fillna("—")
     display["Sesión"] = display["Sesión"].map(lambda value: "—" if pd.isna(value) else str(value))
+    # Show a dash where the installed Streamlit supports a missing-value placeholder.
+    missing_value = {"placeholder": "—"} if "placeholder" in signature(st.dataframe).parameters else {}
     selection = st.dataframe(
         display,
         hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
-        key=table_key, height=min(290, 38 + len(visible) * 36),
+        key=table_key, height=min(290, 38 + len(visible) * 36), **missing_value,
         column_config={
             "Acción": st.column_config.TextColumn("Acción", pinned=True),
             **{name: st.column_config.NumberColumn(name, format=number_format)

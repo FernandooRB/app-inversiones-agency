@@ -218,7 +218,8 @@ def analyze_history(history: MarketHistory, now: datetime | None = None) -> Tech
         buy_readings = (
             f"Cierre {current.Close:,.2f}; resistencia {current.Resistance20:,.2f}",
             f"{current.Close:,.2f} / {current.SMA50:,.2f} / {current.SMA200:,.2f}",
-            f"{current.RelativeVolume:.2f} veces las 20 sesiones anteriores",
+            f"{current.Volume:,.0f} títulos / media de 20 previas "
+            f"{current.VolumeMean20:,.0f} = {current.RelativeVolume:.2f}×",
             f"RSI {current.RSI14:.2f}; anterior {previous.RSI14:.2f}",
             f"{current.MACDHistogram:,.4f}",
         )
@@ -227,11 +228,17 @@ def analyze_history(history: MarketHistory, now: datetime | None = None) -> Tech
             buy_readings[2], buy_readings[3], buy_readings[4],
         )
         signal = BUY if buy.iloc[-1].all() else SELL if sell.iloc[-1].all() else WAIT
-        reason = {
-            BUY: "La ruptura tiene confirmación de tendencia, volumen e impulso.",
-            SELL: "La pérdida de soporte tiene confirmación de volumen e impulso bajista.",
-            WAIT: "Faltan confirmaciones para una entrada o una salida por esta estrategia.",
-        }[signal]
+        if signal == BUY:
+            reason = "La ruptura tiene confirmación de tendencia, volumen e impulso."
+        elif signal == SELL:
+            reason = "La pérdida de soporte tiene confirmación de volumen e impulso bajista."
+        else:
+            missing_buy = ", ".join(label for label in buy.columns if not buy.iloc[-1][label])
+            missing_sell = ", ".join(label for label in sell.columns if not sell.iloc[-1][label])
+            reason = (
+                f"Para compra faltan: {missing_buy}. "
+                f"Para venta o reducción faltan: {missing_sell}."
+            )
         return TechnicalSnapshot(
             history.symbol, signal, reason, bars.index[-1].date(), float(current.Close),
             float(current.Close / previous.Close - 1), float(current.RelativeVolume),

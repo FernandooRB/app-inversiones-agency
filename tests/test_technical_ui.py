@@ -202,6 +202,9 @@ def test_demo_preserves_saved_list_and_never_invents_real_ticker_prices(monkeypa
     app = AppTest.from_file(preview, default_timeout=30).run()
     assert not app.exception
     assert app.text_area[0].value == "SIM-BETA, AAPL"
+    assert len(app.get("plotly_chart")) == 1
+    assert any("SIM-BETA · Esperar" in item.value for item in app.subheader)
+    assert any("Para compra faltan:" in item.value for item in app.markdown)
     button(app, "Actualizar señales").click().run()
     table = app.dataframe[0].value
     real = table.loc[table["Acción"] == "AAPL"].iloc[0]

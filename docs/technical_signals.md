@@ -87,6 +87,10 @@ media 200; volumen relativo ≥ 1.5; RSI entre 50 y 70 inclusive y superior al a
 MACD > 0. **Venta / revisar reducción** exige cierre por debajo del soporte, volumen relativo
 ≥ 1.5, RSI < 45 e histograma MACD < 0. Las demás combinaciones son **Esperar**. Cada condición
 se presenta como Cumple o Pendiente con la lectura observada. No hay puntaje de confianza.
+En **Esperar**, la conclusión enumera por separado las condiciones que faltan para compra y para
+venta. La lectura de volumen muestra títulos, promedio de las 20 sesiones previas y cociente para
+que la razón sea comprobable. Los datos ausentes aparecen como guiones en la tabla sin convertirse
+en ceros ni en texto numérico.
 
 En Compra, el plan toma como entrada inicial el último cierre: stop = entrada − 2 ATR y objetivo =
 entrada + 4 ATR. Cambiar la entrada recalcula ambos. Se exige ATR positivo y stop positivo.
@@ -133,8 +137,9 @@ AppTest para navegación, edición, actualización, filtros, selección y simula
 La vista previa local `scripts/preview_technical.py` utiliza exclusivamente series e identidades
 sintéticas, escucha en localhost y permite revisar escritorio, tableta y móvil. No modifica el
 acceso del punto de entrada de producción. Únicamente SIM-ALFA y SIM-BETA tienen precios de ejemplo;
-los tickers reales no reciben cotizaciones ficticias. Conserva su lista al recargar, incluso vacía,
-y sólo muestra la navegación disponible en la demostración.
+SIM-ALFA muestra Compra y SIM-BETA muestra Esperar con volumen insuficiente. Los tickers reales no
+reciben cotizaciones ficticias. Conserva su lista al recargar, incluso vacía, y sólo muestra la
+navegación disponible en la demostración.
 
 ### Verificación local
 
@@ -146,3 +151,18 @@ La consulta real de AAPL devolvió 1255 observaciones y metadatos de NasdaqGS/US
 proveedor entregó el cierre de 2026-10-23 como ausente. El control lo clasificó como No evaluable;
 no se sustituyó por otro campo ni se inventó una señal. La interfaz identifica campo y fecha
 de los datos inválidos para permitir una revisión o actualización posterior.
+
+### Comprobación de la app pública · 25 de octubre de 2026 (Ciudad de México)
+
+Tras guardar AAPL en Supabase, el usuario confirmó que la lista permaneció al recargar. Al pulsar
+**Actualizar señales**, la app evaluó la sesión del 23 de octubre: cierre USD 347.73, cambio diario
+−0.14 %, volumen relativo 1.04×, RSI 63.92 y señal **Esperar**. El volumen no alcanza el umbral
+1.5× de Compra, independientemente de las demás condiciones. El cierre USD 347.73 coincide con los
+datos publicados por [Yahoo Finance](https://finance.yahoo.com/quote/AAPL/history/) y por el
+[reporte de Nasdaq Dorsey Wright del 23 de octubre](https://dorseywright.nasdaq.com/reports/database/menu/stocktype/1/date/2026-10-23/new_all//rpt/56/allprice/1/all_scales/1/sourcerpt/).
+
+El reporte Nasdaq Dorsey Wright y Yahoo publican cifras de volumen ligeramente distintas para esa
+sesión. Esta revisión puntual confirma fecha, moneda, cierre y sentido del cambio; **no** concilia
+el volumen diario ni reproduce las 20 sesiones usadas como denominador del volumen relativo, el RSI
+o el MACD con una segunda fuente. La pantalla ahora expone volumen y promedio previo junto a la
+razón para facilitar ese cotejo antes de decidir una operación.
