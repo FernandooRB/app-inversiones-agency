@@ -16,6 +16,7 @@ from plotly.subplots import make_subplots
 
 from access import authorized
 from safe_logging import log_unexpected_analysis_error
+from supabase_watchlist import SupabaseWatchlistStore
 from technical_analysis import (
     BUY,
     SELL,
@@ -45,7 +46,7 @@ def cached_market_history(symbol: str, refresh_id: str) -> MarketHistory:
     return download_market_history(symbol)
 
 
-def configured_watchlist() -> tuple[WatchlistStore, str, str]:
+def configured_watchlist() -> tuple[WatchlistStore | SupabaseWatchlistStore, str, str]:
     try:
         policy = st.secrets.get("access", {})
         configuration = st.secrets.get("technical_watchlist", {})
@@ -58,6 +59,18 @@ def configured_watchlist() -> tuple[WatchlistStore, str, str]:
     location = configuration.get("database_path", str(default))
     if not isinstance(location, str):
         raise WatchlistError("Configura una ruta absoluta para el almacenamiento privado de seguimiento.")
+    if configuration.get("backend", "sqlite") == "supabase":
+        return (
+            SupabaseWatchlistStore(
+                configuration.get("url", ""),
+                configuration.get("secret_key", ""),
+                legacy_path=Path(location),
+            ),
+            claims["iss"],
+            claims["sub"],
+        )
+    if configuration.get("backend", "sqlite") != "sqlite":
+        raise WatchlistError("El almacenamiento de Seguimiento debe ser sqlite o supabase.")
     return WatchlistStore(Path(location)), claims["iss"], claims["sub"]
 
 
@@ -65,7 +78,7 @@ def _remember_draft():
     st.session_state["_technical_draft"] = st.session_state["technical_list_widget"]
 
 
-def _render_list_editor(store: WatchlistStore, issuer: str, subject: str):
+def _render_list_editor(store: WatchlistStore | SupabaseWatchlistStore, issuer: str, subject: str):
     with st.sidebar:
         st.header("Mi seguimiento")
         if st.button("Copiar desde Análisis", width="stretch"):
@@ -95,7 +108,10 @@ def _render_list_editor(store: WatchlistStore, issuer: str, subject: str):
                 st.success("Lista guardada para tu usuario.")
             except WatchlistError as exc:
                 st.error(str(exc))
-        st.caption("Tu lista se conserva al volver a iniciar sesión en este servidor.")
+        if isinstance(store, SupabaseWatchlistStore):
+            st.caption("Lista guardada en Supabase para tu usuario.")
+        else:
+            st.caption("Lista local: en Streamlit Cloud puede perderse al reiniciar. Configura Supabase.")
         with st.expander("Supuestos de operación"):
             cost = st.number_input(
                 "Costo total por lado (%)", min_value=0.0, max_value=10.0,
@@ -341,7 +357,9 @@ def render_technical_detail(
 
 
 def render_technical(
-    *, watchlist_factory: Callable[[], tuple[WatchlistStore, str, str]] | None = None,
+    *, watchlist_factory: Callable[
+        [], tuple[WatchlistStore | SupabaseWatchlistStore, str, str]
+    ] | None = None,
     history_loader: Callable[[str, str], MarketHistory | TechnicalSnapshot] | None = None,
 ):
     st.title("Seguimiento y señales")
@@ -349,13 +367,18 @@ def render_technical(
     try:
         store, issuer, subject = (watchlist_factory or configured_watchlist)()
         owner = identity_key(issuer, subject)
-        if st.session_state.get("_technical_owner") != owner:
+        store_id = store.endpoint if isinstance(store, SupabaseWatchlistStore) else str(store.path)
+        if (
+            st.session_state.get("_technical_owner") != owner
+            or st.session_state.get("_technical_store") != store_id
+        ):
             # Keep no previous user's lists, quotes or simulated positions in a new identity's UI.
             for key in list(st.session_state):
                 if key.startswith(("_technical_", "technical_")):
                     del st.session_state[key]
             symbols = store.load(issuer, subject)
             st.session_state["_technical_owner"] = owner
+            st.session_state["_technical_store"] = store_id
             st.session_state["_technical_symbols"] = symbols
             st.session_state["_technical_draft"] = ", ".join(symbols)
     except WatchlistError as exc:

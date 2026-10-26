@@ -102,6 +102,21 @@ def test_user_change_does_not_keep_previous_list_or_quotes(monkeypatch, tmp_path
     assert not app.exception
 
 
+def test_storage_change_reloads_the_list_in_same_session(monkeypatch, tmp_path):
+    import technical_ui
+
+    app, _ = open_tracking(monkeypatch, tmp_path, ["AAPL"])
+    second_store = WatchlistStore(tmp_path / "second.db")
+    second_store.save("test-issuer", "test-user", ["MSFT"])
+    monkeypatch.setattr(
+        technical_ui, "configured_watchlist",
+        lambda: (second_store, "test-issuer", "test-user"),
+    )
+    app.run()
+    assert not app.exception
+    assert app.text_area[0].value == "MSFT"
+
+
 def test_chart_has_four_aligned_panes_and_full_history_indicators(technical_history):
     snapshot = analyze_history(technical_history)
     figure = build_technical_chart(snapshot, currency="USD", months=3)

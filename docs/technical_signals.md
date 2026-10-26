@@ -13,12 +13,38 @@ lleva sus tickers al editor, para revisarlos antes de guardar. Una lista vacía 
 seguimiento. **Actualizar señales** consulta los símbolos guardados; seleccionar una fila o el
 selector de acción abre el detalle. El filtro se aplica a las señales de la consulta actual.
 
-El archivo SQLite predeterminado es `data/private/technical_watchlists.db`, excluido de Git.
-Su ubicación puede configurarse con `[technical_watchlist].database_path` en los secretos de
-Streamlit; debe ser una ruta absoluta en almacenamiento privado persistente. No depende del
-registro cifrado de expedientes ni requiere activarlo. Se guardan únicamente tickers y fecha de
-actualización, asociados al hash de la pareja OIDC issuer/subject verificada. No se identifica
-al usuario por correo. El acceso requiere la autorización OIDC existente en cada ejecución.
+En local, el archivo SQLite predeterminado es `data/private/technical_watchlists.db`, excluido de
+Git. Su ubicación puede configurarse con `[technical_watchlist].database_path` en los secretos de
+Streamlit y debe ser absoluta. En Streamlit Community Cloud este archivo **no es persistente**.
+Para conservar la lista, crear un proyecto Supabase y ejecutar
+[`supabase/technical_watchlists.sql`](../supabase/technical_watchlists.sql) en su SQL Editor.
+Después, en **Settings > Secrets** de la app de Streamlit Cloud, añadir sin borrar los secretos OIDC:
+
+```toml
+[technical_watchlist]
+backend = "supabase"
+url = "https://TU_PROJECT_REF.supabase.co"
+secret_key = "sb_secret_TU_CLAVE_REAL"
+```
+
+Obtener la URL del proyecto y una clave **secret** `sb_secret_` en Supabase Settings > API Keys.
+Escribir la clave sólo en los secretos del servidor, nunca en Git, el navegador o el chat.
+El backend usa la API REST de Supabase con HTTPS y no incorpora Supabase Auth: mantiene la
+autorización Google OIDC de la app. El acceso a la tabla con clave secret omite RLS, por lo que
+el servidor verifica la identidad antes de calcular la clave del usuario y consultar su fila.
+La tabla no concede acceso a `anon` ni a `authenticated`.
+
+El primer acceso a Supabase intenta copiar la lista del usuario desde el SQLite local si todavía
+existe; una fila remota vacía no vuelve a importar datos antiguos. Como Community Cloud puede
+haber eliminado el archivo antes de ese momento, conviene comprobar las listas y volver a añadir
+los tickers faltantes. Un error de Supabase se muestra sin guardar silenciosamente en SQLite.
+El plan gratuito puede pausar proyectos por baja actividad y no incluye copias automáticas;
+programar exportaciones periódicas de la tabla. Esta migración **no** cambia la persistencia de
+Expedientes, que usa un SQLite distinto.
+
+Las listas guardan únicamente tickers y fecha de actualización, asociados al hash de la pareja
+OIDC issuer/subject verificada. No se identifica al usuario por correo. El acceso requiere la
+autorización OIDC existente en cada ejecución.
 Los datos de mercado cacheados son públicos; la lista y los resultados de sesión son propios
 del usuario. El cambio de identidad elimina el estado de seguimiento anterior.
 
