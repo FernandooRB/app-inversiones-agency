@@ -33,12 +33,13 @@ def configured_alpaca_paper(issuer: str, subject: str) -> AlpacaPaperClient:
 
 
 def _clear_snapshot():
-    for key in ("_technical_alpaca_snapshot", "_technical_alpaca_signature"):
-        st.session_state.pop(key, None)
+    for key in list(st.session_state):
+        if key.startswith(("_technical_alpaca_", "technical_alpaca_order_")):
+            st.session_state.pop(key, None)
 
 
 def render_alpaca_paper(
-    issuer: str, subject: str, *, client_factory: Callable | None = None,
+    issuer: str, subject: str, *, client_factory: Callable | None = None, watchlist_store=None,
 ):
     st.subheader("Alpaca Paper")
     st.caption("Cuenta de simulación · mercado estadounidense · USD · consulta manual")
@@ -69,6 +70,21 @@ def render_alpaca_paper(
     if snapshot is None:
         st.info("Pulsa Conectar y consultar para verificar tus credenciales Paper y recuperar la cuenta.")
         return
+    if watchlist_store is None:
+        _render_account(snapshot)
+        return
+    account_tab, order_tab = st.tabs(["Cuenta y órdenes", "Orden limitada de prueba"])
+    with account_tab:
+        _render_account(snapshot)
+    with order_tab:
+        from alpaca_orders_ui import render_paper_orders
+
+        render_paper_orders(client, watchlist_store, issuer, subject,
+                            client_loader=lambda: (client_factory or configured_alpaca_paper)(
+                                issuer, subject))
+
+
+def _render_account(snapshot):
     account = snapshot.account
     st.write(f"**Cuenta …{account.number[-4:]} · estado {account.status}**")
     st.caption(f"Última consulta correcta: {snapshot.fetched_at:%Y-%m-%d %H:%M:%S} UTC.")
@@ -119,8 +135,8 @@ def render_alpaca_paper(
     with st.expander("Identificación y alcance de esta conexión"):
         st.text(f"Identificador de cuenta Paper: {account.id}")
         st.caption(
-            "Esta entrega consulta cuenta, posiciones y órdenes. El envío y cancelación de órdenes "
-            "se habilitarán en una fase posterior. Los datos de esta cuenta no forman parte de la "
+            "Las órdenes de prueba se preparan y confirman manualmente en su pestaña. "
+            "Los datos de esta cuenta no forman parte de la "
             "bitácora manual SIC/GBM ni sustituyen su precio, moneda o volumen."
         )
         st.caption(

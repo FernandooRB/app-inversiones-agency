@@ -4,7 +4,8 @@ En **Seguimiento → Alpaca Paper**, la primera entrega consulta una cuenta de s
 sus posiciones abiertas y hasta las 50 órdenes más recientes de todos los estados. El botón
 **Conectar y consultar** comprueba las credenciales y carga la cuenta. **Actualizar cuenta**
 repite la consulta. La hora UTC identifica la última respuesta completa; la pantalla no es un
-monitor continuo y no envía ni cancela órdenes en esta fase.
+monitor continuo. La pestaña **Orden limitada de prueba** permite preparar y confirmar una
+solicitud Paper y consultar después su ejecución. La cancelación se realiza en el panel de Alpaca.
 
 La cuenta corresponde al mercado de origen y a importes USD. Esta vista es independiente de
 la bitácora manual SIC/GBM en MXN y no cambia la fuente Yahoo/yfinance de las señales.
@@ -42,8 +43,9 @@ a muchos usuarios hará falta una integración de autorización por usuario.
 
 ## Controles y errores
 
-- El adaptador sólo usa GET contra `https://paper-api.alpaca.markets`, con redirecciones
-  deshabilitadas. No tiene un selector de servidor live ni métodos de órdenes.
+- El adaptador consulta `https://paper-api.alpaca.markets` y sólo permite POST de órdenes
+  limitadas DAY, simples y sin horario extendido. Las redirecciones están deshabilitadas y
+  no existe un selector de servidor live. No permite ventas en corto ni órdenes fraccionarias.
 - La app comprueba autorización OIDC, expiración y propietario antes de construir el cliente.
 - Las claves reales de inversión y las claves Paper son diferentes. Si el servidor rechaza
   las credenciales, la vista muestra un error sin imprimir claves ni el cuerpo del proveedor.
@@ -63,9 +65,53 @@ credenciales, rechazo de redirecciones, errores, valores faltantes, límites de 
 aislamiento entre usuarios, rotación de claves y navegación. El acceso efectivo a la cuenta
 del usuario se valida al configurar Secrets y comparar el resultado con el panel de Alpaca.
 
-El envío de una orden Paper confirmada manualmente será una fase posterior, con identificación
-única del intento y conciliación del estado devuelto por el intermediario. Una simulación de
-ejecución no establece que la estrategia tenga una ventaja ni reproduce la liquidez SIC.
+## Preparar, confirmar y seguir una orden Paper
+
+1. Conecta y compara tu cuenta con el panel de Alpaca. Abre **Orden limitada de prueba**.
+2. Escribe el símbolo, Compra o Venta, títulos enteros y precio límite USD. Pulsa
+   **Preparar propuesta Paper**. Esta acción consulta datos; todavía no envía la orden.
+3. Revisa cuenta, símbolo, lado, cantidad, límite, importe y horario. La revisión vence en
+   cinco minutos y se descarta si cambias sus entradas o las credenciales.
+4. Marca la confirmación que describe esa propuesta y pulsa **Confirmar y enviar a Paper**.
+   La app vuelve a comprobar disponibilidad, restricciones, instrumento y horario. Las compras
+   se limitan al menor entre efectivo, poder de compra y poder disponible sin margen
+   (`non_marginable_buying_power`), incluyendo reservas comunicadas por Alpaca; las ventas requieren títulos
+   largos disponibles (`qty_available`), descontadas las reservas informadas por Alpaca.
+5. El estado inicial puede ser aceptada o pendiente. Revisa **Seguimiento de los envíos de esta
+   app** y pulsa **Consultar estado del intento** para obtener su última situación, cantidad
+   ejecutada y precio medio. Una ejecución parcial se distingue de una ejecución completa.
+6. Si quieres cancelar, hazlo en el panel Paper de Alpaca y consulta de nuevo el estado aquí.
+   Usa **Actualizar cuenta** para recuperar saldos y posiciones posteriores al envío.
+
+Son pruebas técnicas manuales y no entradas automáticas derivadas de una señal Compra. Una
+orden DAY enviada después del cierre puede quedar en cola para la siguiente sesión regular;
+la propuesta muestra el horario comunicado por Alpaca en zona de Ciudad de México. El precio
+límite no garantiza ejecución. Una simulación no establece que la estrategia tenga una ventaja
+ni reproduce precios, moneda o liquidez del SIC.
+
+## Registro, duplicados y respuestas inciertas
+
+Cada propuesta tiene un `client_order_id` único. Antes del POST se reclama ese intento de
+forma atómica en `public.alpaca_paper_order_events`; un segundo clic o sesión que use la misma
+propuesta encuentra el intento registrado y no repite el envío. La tabla separa propietario
+OIDC y UUID de cuenta Paper, prohíbe cambios y borrados con la clave del servidor, y exige que
+cada observación se refiera al intento del mismo propietario y cuenta. Las claves no se guardan.
+En local utiliza un SQLite privado distinto; en producción reutiliza la configuración Supabase
+de Seguimiento, sin cambios adicionales de Secrets. El SQL está en
+[`supabase/alpaca_paper_order_events.sql`](../supabase/alpaca_paper_order_events.sql).
+
+Los timeouts, respuestas ilegibles y duplicados del proveedor se concilian por el identificador
+original mediante GET. No hay reintentos de POST. Si no se puede confirmar el resultado, el
+intento permanece **Sin confirmar** y bloquea otras propuestas de la cuenta. Se puede volver
+a consultar; si el estado persiste y no hay una orden en Alpaca, requiere revisión administrativa
+del intento antes de permitir uno nuevo. Así un fallo no se interpreta silenciosamente como
+ausencia de orden. Una observación atrasada no reduce la cantidad ejecutada ni deshace un estado
+terminal ya confirmado. Los rechazos explícitos quedan cerrados y no bloquean una nueva propuesta.
+
+Si el registro no está disponible, el envío se detiene. Si falla al guardar la respuesta después
+del POST, el intento previo permanece para poder conciliarlo. El registro puede exportarse a CSV;
+su lectura tiene un límite visible de 5,000 eventos por propietario y cuenta, sin truncamiento
+silencioso. La consulta de estados es manual y no promete vigilancia continua de la cuenta.
 
 La cuenta gratuita sólo proporciona datos IEX en tiempo real, que no representan el volumen
 total del mercado de EE. UU. Esta conexión no utiliza ese volumen para recalcular indicadores.
@@ -77,9 +123,28 @@ Se conservó la identidad SIG; la dirección de referencia fue `achromatic-ledge
 1942259728, con paleta y tipografía de la app existente. El shell se conserva para mantener
 la navegación compartida. Los importes de las capturas son ejemplos locales, no datos de cuenta.
 
+La validación local incluyó una suite completa de **584 pruebas**, pruebas focalizadas de
+recuperación y revisión, Ruff y comprobación del parche. La revisión visual a 1440, 768 y 390 px
+confirmó una propuesta visible, ausencia de
+desbordamiento horizontal y el botón de envío deshabilitado hasta marcar la confirmación.
+Se verificaron preparación sin POST, caducidad, cambio de cuenta/autorización, disponibilidad,
+reclamos simultáneos, timeout con y sin aceptación, respuestas incoherentes, rechazo, ejecución
+parcial y completa, observaciones atrasadas y persistencia por usuario. La tabla Supabase quedó
+vacía después de una prueba transaccional revertida que verificó unicidad, relación de propietario,
+RLS y permisos de sólo SELECT/INSERT. El envío efectivo a la cuenta Paper del usuario se prueba
+desde la app, después de revisar y confirmar una propuesta concreta.
+El asesor de seguridad no reportó hallazgos. El índice que cubre la relación entre observación
+e intento permanece mientras la tabla está vacía; el aviso informativo de
+[índice todavía sin uso](https://supabase.com/docs/guides/database/database-linter?lint=0005_unused_index)
+es esperable al crearlo antes de registrar órdenes.
+
 Fuentes oficiales consultadas: [autenticación](https://docs.alpaca.markets/us/docs/authentication),
 [cuenta](https://docs.alpaca.markets/us/reference/getaccount-1),
 [posiciones](https://docs.alpaca.markets/us/reference/getallopenpositions),
 [órdenes](https://docs.alpaca.markets/us/reference/getallorders-1),
+[envío de órdenes](https://docs.alpaca.markets/us/reference/postorder),
+[consulta por ID del cliente](https://docs.alpaca.markets/us/reference/getorderbyclientorderid),
+[instrumentos](https://docs.alpaca.markets/us/reference/get-v2-assets-symbol_or_asset_id),
+[horario de EE. UU.](https://docs.alpaca.markets/us/reference/legacyclock),
 [Paper Trading](https://docs.alpaca.markets/us/docs/paper-trading) y
 [diferencias entre IEX y SIP](https://docs.alpaca.markets/us/docs/market-data-faq).

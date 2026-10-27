@@ -556,7 +556,7 @@ def render_technical(
     view = st.radio("Vista de Seguimiento", ["Señales", "Prueba en papel", "Alpaca Paper"],
                     horizontal=True, key="technical_view")
     if view == "Alpaca Paper":
-        render_alpaca_paper(issuer, subject)
+        render_alpaca_paper(issuer, subject, watchlist_store=store)
         return
     if view == "Prueba en papel":
         if symbols and st.button("Actualizar señales para la bitácora", width="stretch"):
