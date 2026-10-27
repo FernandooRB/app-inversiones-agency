@@ -17,6 +17,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from access import authorized
+from alpaca_paper_ui import render_alpaca_paper
 from safe_logging import log_unexpected_analysis_error
 from sic_trial import SicTrialError, prepare_sic_draft
 from supabase_watchlist import SupabaseWatchlistStore
@@ -552,8 +553,11 @@ def render_technical(
         return
     cost, slippage = _render_list_editor(store, issuer, subject)
     symbols = st.session_state.get("_technical_symbols", [])
-    view = st.radio("Vista de Seguimiento", ["Señales", "Prueba en papel"],
+    view = st.radio("Vista de Seguimiento", ["Señales", "Prueba en papel", "Alpaca Paper"],
                     horizontal=True, key="technical_view")
+    if view == "Alpaca Paper":
+        render_alpaca_paper(issuer, subject)
+        return
     if view == "Prueba en papel":
         if symbols and st.button("Actualizar señales para la bitácora", width="stretch"):
             _refresh_histories(symbols, history_loader)

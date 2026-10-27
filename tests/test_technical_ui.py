@@ -292,6 +292,22 @@ def test_paper_view_records_one_observation_without_altering_signals(
     assert len(app.get("plotly_chart")) == 1
 
 
+def test_alpaca_view_is_reachable_without_querying_provider(monkeypatch, tmp_path):
+    import alpaca_paper_ui
+    from alpaca_paper import AlpacaPaperError
+
+    def pending(*args):
+        raise AlpacaPaperError("Conexión pendiente: configura Alpaca Paper en Secrets.")
+
+    monkeypatch.setattr(alpaca_paper_ui, "configured_alpaca_paper", pending)
+    app, _ = open_tracking(monkeypatch, tmp_path, ["AAPL"])
+    app.radio(key="technical_view").set_value("Alpaca Paper").run()
+    assert not app.exception
+    assert any(item.value == "Alpaca Paper" for item in app.subheader)
+    assert any("Conexión pendiente" in item.value for item in app.info)
+    assert not app.dataframe
+
+
 def test_paper_lifecycle_updates_forms_and_persists_closed_result(monkeypatch, tmp_path, technical_history):
     from dataclasses import replace
 
