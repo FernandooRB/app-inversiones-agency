@@ -153,6 +153,10 @@ y explica la ficha manual SIC/GBM. La muestra produjo sólo 12 operaciones y la 
 quedó por debajo de comprar y mantener en 17 de 18 periodos-símbolo; las señales permanecen
 como investigación y no justifican por sí solas una orden real.
 
+La [bitácora prospectiva en papel](technical_paper_trial.md) permite congelar señales nuevas,
+anotar entradas y salidas SIC hipotéticas con bid/ask MXN y contrastar por intervalo una serie
+de referencia local opcional. Sus eventos son por usuario y no admiten edición desde la app.
+
 La consulta real de AAPL devolvió 1255 observaciones y metadatos de NasdaqGS/USD, pero el
 proveedor entregó el cierre de 2026-10-23 como ausente. El control lo clasificó como No evaluable;
 no se sustituyó por otro campo ni se inventó una señal. La interfaz identifica campo y fecha

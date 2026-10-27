@@ -99,12 +99,14 @@ def test_user_change_does_not_keep_previous_list_or_quotes(monkeypatch, tmp_path
     monkeypatch.setattr(technical_ui, "cached_market_history", lambda *_: technical_history)
     button(app, "Actualizar señales").click().run()
     app.session_state["technical_sic_symbol_AAPL"] = "SERIE-ANTERIOR"
+    app.session_state["technical_paper_local_symbol"] = "PAPEL-ANTERIOR"
     store.save("test-issuer", "second-user", ["MSFT"])
     monkeypatch.setattr(technical_ui, "configured_watchlist", lambda: (store, "test-issuer", "second-user"))
     app.run()
     assert app.text_area[0].value == "MSFT"
     assert not app.session_state.filtered_state.get("_technical_histories", {})
     assert "technical_sic_symbol_AAPL" not in app.session_state.filtered_state
+    assert "technical_paper_local_symbol" not in app.session_state.filtered_state
     assert not app.exception
 
 
@@ -257,3 +259,58 @@ def test_sic_broker_mode_does_not_offer_order_submission():
     assert not app.exception
     assert any("Conexión de órdenes no disponible" in item.value for item in app.info)
     assert not any(item.label == "Calcular borrador manual" for item in app.button)
+
+
+def test_paper_view_records_one_observation_without_altering_signals(
+    monkeypatch, tmp_path, technical_history,
+):
+    import technical_ui
+    from technical_paper_store import SQLitePaperStore
+
+    app, watchlist = open_tracking(monkeypatch, tmp_path, ["AAPL"])
+    monkeypatch.setattr(technical_ui, "cached_market_history", lambda *_: technical_history)
+    button(app, "Actualizar señales").click().run()
+    next(item for item in app.radio if item.label == "Vista de Seguimiento").set_value(
+        "Prueba en papel"
+    ).run()
+    assert not app.exception
+    assert any("Prueba prospectiva en papel" in item.value for item in app.subheader)
+    button(app, "Registrar señal observada").click().run()
+    assert not app.exception
+    paper = SQLitePaperStore(watchlist.path.with_suffix(".paper.db"))
+    saved = paper.load("test-issuer", "test-user")
+    assert len(saved) == 1 and saved[0].ticker == "AAPL", (
+        [item.value for item in app.error], [item.value for item in app.warning]
+    )
+    assert paper.load("test-issuer", "other-user") == []
+    app.run()
+    assert any("Señal registrada" in item.value for item in app.info)
+    next(item for item in app.radio if item.label == "Vista de Seguimiento").set_value(
+        "Señales"
+    ).run()
+    assert not app.exception
+    assert len(app.get("plotly_chart")) == 1
+
+
+def test_paper_view_opens_manual_entry_only_after_saved_buy(monkeypatch, tmp_path, technical_history):
+    from dataclasses import replace
+
+    import technical_paper_ui
+    import technical_ui
+    from technical_analysis import BUY, analyze_history
+
+    app, _ = open_tracking(monkeypatch, tmp_path, ["AAPL"])
+    monkeypatch.setattr(technical_ui, "cached_market_history", lambda *_: technical_history)
+    real_snapshot = analyze_history(technical_history)
+    monkeypatch.setattr(technical_paper_ui, "analyze_history",
+                        lambda *_: replace(real_snapshot, signal=BUY))
+    button(app, "Actualizar señales").click().run()
+    next(item for item in app.radio if item.label == "Vista de Seguimiento").set_value(
+        "Prueba en papel"
+    ).run()
+    assert not any(item.label == "Guardar entrada en papel" for item in app.button)
+    button(app, "Registrar señal observada").click().run()
+    app.run()
+    assert not app.exception
+    assert any(item.label == "Guardar entrada en papel" for item in app.button)
+    assert any("No hay entradas simuladas abiertas" in item.value for item in app.info)

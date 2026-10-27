@@ -34,6 +34,7 @@ from technical_analysis import (
 )
 from technical_backtesting import run_technical_backtest
 from technical_market_data import download_market_history
+from technical_paper_ui import render_paper_journal
 from technical_validation import run_chronological_validation
 from watchlist_backup import export_watchlist, import_watchlist
 from watchlist_store import WatchlistError, WatchlistStore, identity_key
@@ -551,6 +552,14 @@ def render_technical(
         return
     cost, slippage = _render_list_editor(store, issuer, subject)
     symbols = st.session_state.get("_technical_symbols", [])
+    view = st.radio("Vista de Seguimiento", ["Señales", "Prueba en papel"],
+                    horizontal=True, key="technical_view")
+    if view == "Prueba en papel":
+        if symbols and st.button("Actualizar señales para la bitácora", width="stretch"):
+            _refresh_histories(symbols, history_loader)
+        render_paper_journal(store, issuer, subject, symbols,
+                             st.session_state.get("_technical_histories", {}))
+        return
     actions, filters, detail_control = st.columns([1, 1, 1], vertical_alignment="bottom")
     refresh = actions.button("Actualizar señales", type="primary", disabled=not symbols, width="stretch")
     signal_filter = filters.selectbox("Mostrar señales", ["Todas", BUY, WAIT, SELL, UNAVAILABLE])
