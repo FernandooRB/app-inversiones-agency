@@ -1,8 +1,9 @@
-"""Read-only Alpaca Trading API adapter, fixed to the paper server."""
+"""Alpaca Trading API adapter fixed to Paper; explicit, validated limit orders only."""
 
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -19,6 +20,18 @@ class AlpacaPaperError(ValueError):
     """A configuration/provider error safe to display without credentials."""
 
 
+class PaperOrderRejected(AlpacaPaperError):
+    """Alpaca explicitly rejected the submission, without returning an order."""
+
+    def __init__(self, message, *, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class PaperOrderUncertain(AlpacaPaperError):
+    """The submission result must be looked up by its original client order ID."""
+
+
 @dataclass(frozen=True)
 class PaperAccount:
     id: str
@@ -30,6 +43,8 @@ class PaperAccount:
     buying_power: Decimal
     account_blocked: bool
     trading_blocked: bool
+    trade_suspended: bool | None = None
+    cash_buying_power: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +57,7 @@ class PaperPosition:
     current_price: Decimal | None
     market_value: Decimal | None
     unrealized_pl: Decimal | None
+    available_quantity: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -131,13 +147,27 @@ class AlpacaPaperClient:
         return sha256("\0".join((self._api_key, self._secret_key,
                                  self._expected_account_id)).encode()).hexdigest()
 
-    def _get(self, client: httpx.Client, path: str, *, params: dict | None = None):
-        # No configurable URL, redirects, mutation methods or credential-bearing query strings.
+    @contextmanager
+    def _session(self):
+        if self._client is not None:
+            yield self._client
+        else:
+            with httpx.Client(timeout=10, follow_redirects=False, trust_env=False) as client:
+                yield client
+
+    def _headers(self):
+        return {"APCA-API-KEY-ID": self._api_key, "APCA-API-SECRET-KEY": self._secret_key,
+                "Accept": "application/json"}
+
+    def _get(self, client: httpx.Client, path: str, *, params: dict | None = None,
+             missing_ok: bool = False):
+        # No configurable URL, redirects or credential-bearing query strings.
         response = client.get(
             PAPER_URL + path, params=params, follow_redirects=False, timeout=10,
-            headers={"APCA-API-KEY-ID": self._api_key,
-                     "APCA-API-SECRET-KEY": self._secret_key, "Accept": "application/json"},
+            headers=self._headers(),
         )
+        if response.status_code == 404 and missing_ok:
+            return None
         if response.status_code in (401, 403):
             raise AlpacaPaperError("Alpaca rechazó el acceso. Revisa que ambas claves sean de Paper Trading.")
         if response.status_code == 429:
@@ -151,9 +181,7 @@ class AlpacaPaperClient:
 
     def fetch_snapshot(self) -> PaperAccountSnapshot:
         try:
-            if self._client is not None:
-                return self._fetch(self._client)
-            with httpx.Client(timeout=10, follow_redirects=False, trust_env=False) as client:
+            with self._session() as client:
                 return self._fetch(client)
         except httpx.HTTPError:
             # Never expose a request/response repr, headers or raw provider error bodies.
@@ -182,6 +210,8 @@ class AlpacaPaperClient:
             account_id, _text(row["account_number"]), _text(row["status"]), currency,
             _number(row, "equity"), _number(row, "cash"), _number(row, "buying_power"),
             _flag(row, "account_blocked"), _flag(row, "trading_blocked"),
+            _flag(row, "trade_suspended_by_user") if "trade_suspended_by_user" in row else None,
+            _number(row, "non_marginable_buying_power", optional=True),
         )
         positions = self._get(client, "/v2/positions")
         orders = self._get(client, "/v2/orders", params={
@@ -195,6 +225,7 @@ class AlpacaPaperClient:
             _number(p, "qty"), _number(p, "avg_entry_price"),
             _number(p, "current_price", optional=True), _number(p, "market_value", optional=True),
             _number(p, "unrealized_pl", optional=True),
+            _number(p, "qty_available", optional=True),
         ) for p in positions)
         parsed_orders = tuple(PaperOrder(
             _text(o["id"]), _text(o["symbol"]), _text(o["side"]),
@@ -204,3 +235,59 @@ class AlpacaPaperClient:
             _timestamp(o.get("created_at")),
         ) for o in orders)
         return PaperAccountSnapshot(account, parsed_positions, parsed_orders, datetime.now(UTC))
+
+    def order_resource(self, kind: str, identifier: str = ""):
+        from alpaca_order_models import CLIENT_ID
+
+        if kind == "asset" and re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", identifier):
+            path, params, missing = "/v2/assets/" + identifier, None, True
+        elif kind == "clock" and not identifier:
+            path, params, missing = "/v2/clock", None, False
+        elif kind == "order" and CLIENT_ID.fullmatch(identifier):
+            path, params, missing = "/v2/orders:by_client_order_id", {"client_order_id": identifier}, True
+        else:
+            raise AlpacaPaperError("La consulta de la orden Paper no es válida.")
+        try:
+            with self._session() as client:
+                return self._get(client, path, params=params, missing_ok=missing)
+        except httpx.HTTPError:
+            raise AlpacaPaperError(
+                "No se pudo consultar la orden, el instrumento o el horario de Alpaca."
+            ) from None
+
+    def submit_limit_order(self, draft):
+        from alpaca_order_models import LimitDraft
+
+        if not isinstance(draft, LimitDraft):
+            raise AlpacaPaperError("El envío exige una propuesta limitada Paper validada.")
+        if self._expected_account_id and draft.account_id != self._expected_account_id:
+            raise AlpacaPaperError("La propuesta no corresponde a la cuenta Paper configurada.")
+        payload = draft.payload()
+        try:
+            with self._session() as client:
+                response = client.post(PAPER_URL + "/v2/orders", json=payload, headers=self._headers(),
+                                       follow_redirects=False, timeout=10)
+        except httpx.HTTPError:
+            raise PaperOrderUncertain(
+                "La conexión se interrumpió durante el envío; consulta su estado."
+            ) from None
+        if response.status_code in (200, 201):
+            try:
+                return response.json()
+            except ValueError:
+                raise PaperOrderUncertain(
+                    "Alpaca respondió sin una confirmación legible de la orden."
+                ) from None
+        duplicate = False
+        try:
+            body = response.json()
+            message = body.get("message", "") if isinstance(body, dict) else ""
+            if isinstance(message, str):
+                duplicate = "client_order_id" in message and any(
+                    word in message.lower() for word in ("unique", "duplicate"))
+        except ValueError:
+            pass
+        if 400 <= response.status_code < 500 and not duplicate and response.status_code != 408:
+            raise PaperOrderRejected(f"Alpaca rechazó la solicitud Paper (HTTP {response.status_code}).",
+                                     status_code=response.status_code)
+        raise PaperOrderUncertain("El envío no quedó confirmado; consulta el identificador original.")
