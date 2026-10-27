@@ -292,14 +292,15 @@ def test_paper_view_records_one_observation_without_altering_signals(
     assert len(app.get("plotly_chart")) == 1
 
 
-def test_paper_view_opens_manual_entry_only_after_saved_buy(monkeypatch, tmp_path, technical_history):
+def test_paper_lifecycle_updates_forms_and_persists_closed_result(monkeypatch, tmp_path, technical_history):
     from dataclasses import replace
 
     import technical_paper_ui
     import technical_ui
     from technical_analysis import BUY, analyze_history
+    from technical_paper_store import SQLitePaperStore
 
-    app, _ = open_tracking(monkeypatch, tmp_path, ["AAPL"])
+    app, watchlist = open_tracking(monkeypatch, tmp_path, ["AAPL"])
     monkeypatch.setattr(technical_ui, "cached_market_history", lambda *_: technical_history)
     real_snapshot = analyze_history(technical_history)
     monkeypatch.setattr(technical_paper_ui, "analyze_history",
@@ -310,7 +311,52 @@ def test_paper_view_opens_manual_entry_only_after_saved_buy(monkeypatch, tmp_pat
     ).run()
     assert not any(item.label == "Guardar entrada en papel" for item in app.button)
     button(app, "Registrar señal observada").click().run()
-    app.run()
     assert not app.exception
+    assert not any(item.label == "Registrar señal observada" for item in app.button)
+    assert any("Señal guardada" in item.value for item in app.success)
     assert any(item.label == "Guardar entrada en papel" for item in app.button)
     assert any("No hay entradas simuladas abiertas" in item.value for item in app.info)
+
+    # All prices and the reference below are synthetic and stay in the test's private SQLite.
+    app.checkbox(key="technical_paper_next_session").check()
+    app.text_input(key="technical_paper_local_symbol").set_value("AAPL *")
+    app.text_input(key="technical_paper_local_isin").set_value("US0378331005")
+    for key, value in {"bid": 99.0, "ask": 100.0, "volume": 100,
+                       "stop": 90.0, "target": 120.0}.items():
+        app.number_input(key=f"technical_paper_entry_{key}").set_value(value)
+    app.checkbox(key="technical_paper_use_reference").check()
+    app.text_input(key="technical_paper_reference_symbol").set_value("SPY *")
+    app.text_input(key="technical_paper_reference_isin").set_value("US78462F1030")
+    for key, value in {"bid": 49.0, "ask": 50.0, "volume": 100}.items():
+        app.number_input(key=f"technical_paper_reference_{key}").set_value(value)
+    button(app, "Guardar entrada en papel").click().run()
+    assert not app.exception and not app.error
+    assert any("Entrada simulada guardada" in item.value for item in app.success)
+    assert not any(item.label == "Guardar entrada en papel" for item in app.button)
+    assert any(item.label == "Guardar salida en papel" for item in app.button)
+
+    app.number_input(key="technical_paper_exit_bid").set_value(120.0)
+    app.number_input(key="technical_paper_exit_volume").set_value(100)
+    app.selectbox(key="technical_paper_exit_reason").set_value("Objetivo")
+    app.number_input(key="technical_paper_exit_reference_bid").set_value(55.0)
+    app.number_input(key="technical_paper_exit_reference_volume").set_value(100)
+    button(app, "Guardar salida en papel").click().run()
+    assert not app.exception and not app.error
+    assert any("Salida simulada guardada" in item.value for item in app.success)
+    assert not any(item.label == "Guardar salida en papel" for item in app.button)
+    table = app.dataframe[0].value
+    assert table.loc[0, "Estado"] == "Cerrada"
+    assert table.loc[0, "Retorno neto (%)"] == pytest.approx((1.2 * 0.9965 / 1.0035 - 1) * 100)
+    assert table.loc[0, "Referencia neta (%)"] == pytest.approx((1.1 * 0.9965 / 1.0035 - 1) * 100)
+    paper = SQLitePaperStore(watchlist.path.with_suffix(".paper.db"))
+    assert [event.kind for event in paper.load("test-issuer", "test-user")] == [
+        "signal", "entry", "exit"
+    ]
+
+    reopened = AppTest.from_file(APP, default_timeout=120).run()
+    reopened.session_state["workspace_area"] = "Seguimiento"
+    reopened.run()
+    reopened.radio(key="technical_view").set_value("Prueba en papel").run()
+    assert not reopened.exception
+    pd.testing.assert_frame_equal(reopened.dataframe[0].value, table)
+    assert paper.load("test-issuer", "other-user") == []
