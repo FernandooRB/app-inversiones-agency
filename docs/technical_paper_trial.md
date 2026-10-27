@@ -25,6 +25,10 @@ retrospectiva anterior produjo sólo 12 operaciones y no estableció una ventaja
    Si se anotó una referencia al entrar, captura también su bid y volumen de salida. La bitácora
    conserva señal, entrada y salida como eventos separados sin opciones de edición o borrado.
 
+Después de cada guardado, los contadores, formularios e historial se actualizan automáticamente.
+La confirmación aparece en español con la hora UTC del registro. No hace falta recargar para
+pasar de una señal Compra guardada a su entrada, ni de una entrada guardada a su salida.
+
 El cálculo por acción es:
 
 ```text

@@ -41,7 +41,11 @@ def _load_events(store, issuer: str, subject: str, *, refresh: bool = False) -> 
 def _save_event(store, issuer: str, subject: str, event: PaperEvent):
     stored = store.append(issuer, subject, event)
     st.session_state["_technical_paper_events"] = store.load(issuer, subject)
-    st.success(f"{stored.kind.capitalize()} guardada a las {stored.recorded_at:%Y-%m-%d %H:%M} UTC.")
+    label = {"signal": "Señal", "entry": "Entrada simulada", "exit": "Salida simulada"}[stored.kind]
+    st.session_state["_technical_paper_notice"] = (
+        f"{label} guardada a las {stored.recorded_at:%Y-%m-%d %H:%M} UTC."
+    )
+    st.rerun()
 
 
 def _quote_widgets(prefix: str):
@@ -264,6 +268,9 @@ def render_paper_journal(
     except PaperError as exc:
         st.error(str(exc))
         return
+    notice = st.session_state.pop("_technical_paper_notice", None)
+    if notice:
+        st.success(notice)
     st.caption(
         f"{sum(item.kind == 'signal' for item in events)} señales · "
         f"{sum(item.kind == 'entry' for item in events)} entradas · "
