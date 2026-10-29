@@ -1,10 +1,11 @@
 # Conexión privada con Alpaca Paper
 
-En **Seguimiento → Alpaca Paper**, la primera entrega consulta una cuenta de simulación,
+En **Seguimiento → Alpaca Paper** se consulta una cuenta de simulación,
 sus posiciones abiertas y hasta las 50 órdenes más recientes de todos los estados. El botón
 **Conectar y consultar** comprueba las credenciales y carga la cuenta. **Actualizar cuenta**
 repite la consulta. La hora UTC identifica la última respuesta completa; la pantalla no es un
-monitor continuo. La pestaña **Orden limitada de prueba** permite preparar y confirmar una
+monitor continuo. **Control de la prueba** guarda límites, planes de salida y alertas. La pestaña
+**Orden limitada de prueba** permite preparar y confirmar una
 solicitud Paper y consultar después su ejecución. La cancelación se realiza en el panel de Alpaca.
 
 La cuenta corresponde al mercado de origen y a importes USD. Esta vista es independiente de
@@ -22,9 +23,11 @@ Para una nueva prueba:
 1. Añade el ticker en Seguimiento y actualiza sus señales.
 2. En **Prueba en papel**, congela la observación. Esto guarda sus condiciones y, cuando está
    disponible, el ATR14. La captura no abre una posición SIC ni una orden Alpaca.
-3. En **Alpaca Paper → Orden limitada de prueba**, elige ese ticker y la señal congelada de
+3. En **Control de la prueba**, configura capital, pérdida prevista, límite por acción,
+   pérdida por orden y planes de salida. Los montos quedan sin activar hasta que el usuario los guarde.
+4. En **Alpaca Paper → Orden limitada de prueba**, elige ese ticker y la señal congelada de
    referencia. Prepara la propuesta y revisa su clasificación antes de confirmar.
-4. En **Resultados y señales**, pulsa **Actualizar resultados**. Consulta la cuenta y concilia
+5. En **Resultados y señales**, pulsa **Actualizar resultados**. Consulta la cuenta y concilia
    hasta diez intentos pendientes por pulsación mediante GET, guardando sus respuestas sin
    enviar órdenes. Comprueba la identidad/configuración actuales y la misma cuenta antes de
    guardar observaciones. Un error parcial conserva el estado anterior y muestra el motivo;
@@ -43,27 +46,31 @@ La revisión usa el límite y los resultados recalculan con el precio ejecutado.
 esta función no envía órdenes stop/objetivo. Las observaciones antiguas sin ATR muestran
 niveles ausentes en lugar de reconstruirlos con información futura.
 
-Los resultados usan Decimal y un modelo FIFO de **órdenes completamente ejecutadas**, ordenadas
-por su hora de finalización, con el precio medio de cada orden. No reconstruyen la secuencia
-de cada fill individual. Se muestran por lote, antes de comisiones, dividendos e impuestos;
-no son un cálculo fiscal ni el rendimiento completo de Alpaca. Las compras abiertas se valoran
+Los resultados usan Decimal y FIFO por **ejecución individual**, incluidas órdenes parcialmente
+ejecutadas y porciones ejecutadas de órdenes canceladas. Se muestran por lote, antes de costos
+y como neto estimado con fricción editable; dividendos e impuestos quedan fuera. No son un cálculo
+fiscal ni el rendimiento completo de Alpaca. Las compras abiertas se valoran
 con el precio de la última consulta de la cuenta, no con el cierre de Yahoo. No se mezcla USD
 con MXN ni se suma el saldo inicial de Paper al resultado de la estrategia.
 
-Las ejecuciones parciales, ventas sin compras suficientes y horas de finalización ausentes
-producen una limitación visible para ese símbolo. Las órdenes antiguas necesitan una nueva
-consulta del intento para guardar `filled_at` si se quieren reconstruir sus cierres. Un
-descuadre entre cantidades abiertas y la cuenta, o una orden ejecutada fuera del registro entre
-las últimas 50 órdenes, deja el resultado abierto sin calcular. Las limitaciones bloquean los
-totales agregados para evitar presentar un total incompleto como completo. Los lotes completos
-de otros símbolos siguen visibles con su alcance declarado. La detección de órdenes externas
-no sustituye un historial completo de actividades de la cuenta.
+La actualización pagina las actividades FILL desde un día antes del primer intento de la app.
+Comprueba cantidades e importes contra las órdenes confirmadas, deduplica por ID y guarda una
+huella de la descarga completa. Una descarga incompleta, una venta sin compras suficientes,
+una corrección incompatible o un descuadre con la cuenta dejan la limitación visible y bloquean
+los totales. Las ejecuciones externas del periodo participan en FIFO, pero sus beneficios se
+atribuyen únicamente a los lotes correspondientes. Las operaciones anteriores al periodo,
+dividendos y ajustes corporativos necesitan conciliación adicional si alteran las cantidades.
 Si un símbolo todavía no tiene ejecuciones confirmadas en la bitácora, pero Alpaca muestra
 una posición o ejecuciones recientes, también se exige conciliación y se dejan los totales
 pendientes. Los lotes completos de otros símbolos permanecen visibles con su alcance declarado.
 
-No se requiere otra tabla ni modificar Secrets: la referencia se incorpora al JSON del intento
-existente, con los mismos controles de identidad y cuenta y sin sobrescribir registros previos.
+La referencia de señal se incorpora al JSON del intento existente. Los controles, planes, fills
+y alertas usan `alpaca_trial_events`, con RLS y sólo SELECT/INSERT para el servidor. Las compras
+con presupuesto se reclaman mediante una función que serializa por usuario/cuenta, comprueba la
+revisión vigente y reserva los intentos concurrentes antes del único POST. No se modifican Secrets.
+El detalle está en [Control y evaluación de la prueba](alpaca_trial_controls.md).
+
+## Verificación de las entregas anteriores
 
 Validación de esta ampliación: suite local completa de 605 pruebas antes de los últimos cuatro
 casos de recuperación, seguida de 49 pruebas focalizadas y 22 tras el ajuste de presentación;
@@ -139,7 +146,8 @@ del usuario se valida al configurar Secrets y comparar el resultado con el panel
 
 ## Preparar, confirmar y seguir una orden Paper
 
-1. Conecta y compara tu cuenta con el panel de Alpaca. Abre **Orden limitada de prueba**.
+1. Conecta y compara tu cuenta con el panel de Alpaca. Guarda límites y planes en
+   **Control de la prueba** antes de ampliar posiciones. Abre **Orden limitada de prueba**.
 2. Escribe el símbolo, Compra o Venta, títulos enteros y precio límite USD. Pulsa
    **Preparar propuesta Paper**. Esta acción consulta datos; todavía no envía la orden.
 3. Revisa cuenta, símbolo, lado, cantidad, límite, importe y horario. La revisión vence en
@@ -149,6 +157,8 @@ del usuario se valida al configurar Secrets y comparar el resultado con el panel
    se limitan al menor entre efectivo, poder de compra y poder disponible sin margen
    (`non_marginable_buying_power`), incluyendo reservas comunicadas por Alpaca; las ventas requieren títulos
    largos disponibles (`qty_available`), descontadas las reservas informadas por Alpaca.
+   También se revalidan el presupuesto, el plan, las ejecuciones individuales y todas las órdenes
+   pendientes dentro del límite declarado. Una revisión de límites o plan exige preparar otra propuesta.
 5. El estado inicial puede ser aceptada o pendiente. Revisa **Seguimiento de los envíos de esta
    app** y pulsa **Consultar estado del intento** para obtener su última situación, cantidad
    ejecutada y precio medio. Una ejecución parcial se distingue de una ejecución completa.
@@ -187,6 +197,8 @@ silencioso. La consulta de estados es manual y no promete vigilancia continua de
 
 La cuenta gratuita sólo proporciona datos IEX en tiempo real, que no representan el volumen
 total del mercado de EE. UU. Esta conexión no utiliza ese volumen para recalcular indicadores.
+
+### Verificaciones iniciales
 
 La revisión local pasó 61 pruebas relacionadas con el adaptador, la interfaz, autorización,
 monedas y bitácora. Se revisaron capturas con datos sintéticos a 1440, 768 y 390 px, esperando

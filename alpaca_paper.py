@@ -83,6 +83,54 @@ class PaperAccountSnapshot:
     fetched_at: datetime
 
 
+@dataclass(frozen=True)
+class PaperFill:
+    id: str
+    order_id: str
+    symbol: str
+    side: str
+    quantity: Decimal
+    price: Decimal
+    timestamp: datetime
+
+    def to_json(self):
+        return {
+            "id": self.id,
+            "order_id": self.order_id,
+            "symbol": self.symbol,
+            "side": self.side,
+            "quantity": format(self.quantity.normalize(), "f"),
+            "price": format(self.price.normalize(), "f"),
+            "timestamp": self.timestamp.isoformat(),
+        }
+
+    @classmethod
+    def from_json(cls, row):
+        try:
+            identifier = row["id"]
+            if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_:./-]{1,180}", identifier):
+                raise ValueError
+            result = cls(
+                identifier,
+                str(UUID(row["order_id"])),
+                _text(row["symbol"]),
+                _text(row["side"]),
+                _number(row, "quantity"),
+                _number(row, "price"),
+                _timestamp(row["timestamp"]),
+            )
+            if (
+                result.side not in ("buy", "sell")
+                or result.quantity <= 0
+                or result.price <= 0
+                or result.timestamp is None
+            ):
+                raise ValueError
+            return result
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise AlpacaPaperError("Alpaca devolvió una ejecución individual inválida.") from None
+
+
 def _text(value: object) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_./-]{1,100}", value):
         raise AlpacaPaperError("Alpaca devolvió un identificador o estado inválido.")
@@ -122,8 +170,14 @@ def _timestamp(value: object) -> datetime | None:
 
 
 class AlpacaPaperClient:
-    def __init__(self, api_key: str, secret_key: str, *, expected_account_id: str = "",
-                 client: httpx.Client | None = None):
+    def __init__(
+        self,
+        api_key: str,
+        secret_key: str,
+        *,
+        expected_account_id: str = "",
+        client: httpx.Client | None = None,
+    ):
         for value in (api_key, secret_key):
             if not isinstance(value, str) or not re.fullmatch(r"[\x21-\x7e]{10,256}", value):
                 raise AlpacaPaperError("Configura las dos claves de Alpaca Paper en Secrets.")
@@ -144,8 +198,9 @@ class AlpacaPaperClient:
     @property
     def configuration_signature(self) -> str:
         # Invalidate private session data when credentials or the account binding change.
-        return sha256("\0".join((self._api_key, self._secret_key,
-                                 self._expected_account_id)).encode()).hexdigest()
+        return sha256(
+            "\0".join((self._api_key, self._secret_key, self._expected_account_id)).encode()
+        ).hexdigest()
 
     @contextmanager
     def _session(self):
@@ -156,14 +211,19 @@ class AlpacaPaperClient:
                 yield client
 
     def _headers(self):
-        return {"APCA-API-KEY-ID": self._api_key, "APCA-API-SECRET-KEY": self._secret_key,
-                "Accept": "application/json"}
+        return {
+            "APCA-API-KEY-ID": self._api_key,
+            "APCA-API-SECRET-KEY": self._secret_key,
+            "Accept": "application/json",
+        }
 
-    def _get(self, client: httpx.Client, path: str, *, params: dict | None = None,
-             missing_ok: bool = False):
+    def _get(self, client: httpx.Client, path: str, *, params: dict | None = None, missing_ok: bool = False):
         # No configurable URL, redirects or credential-bearing query strings.
         response = client.get(
-            PAPER_URL + path, params=params, follow_redirects=False, timeout=10,
+            PAPER_URL + path,
+            params=params,
+            follow_redirects=False,
+            timeout=10,
             headers=self._headers(),
         )
         if response.status_code == 404 and missing_ok:
@@ -207,33 +267,61 @@ class AlpacaPaperClient:
         if currency != "USD":
             raise AlpacaPaperError("Esta conexión espera una cuenta de simulación en USD.")
         account = PaperAccount(
-            account_id, _text(row["account_number"]), _text(row["status"]), currency,
-            _number(row, "equity"), _number(row, "cash"), _number(row, "buying_power"),
-            _flag(row, "account_blocked"), _flag(row, "trading_blocked"),
+            account_id,
+            _text(row["account_number"]),
+            _text(row["status"]),
+            currency,
+            _number(row, "equity"),
+            _number(row, "cash"),
+            _number(row, "buying_power"),
+            _flag(row, "account_blocked"),
+            _flag(row, "trading_blocked"),
             _flag(row, "trade_suspended_by_user") if "trade_suspended_by_user" in row else None,
             _number(row, "non_marginable_buying_power", optional=True),
         )
         positions = self._get(client, "/v2/positions")
-        orders = self._get(client, "/v2/orders", params={
-            "status": "all", "limit": str(ORDER_LIMIT), "direction": "desc", "nested": "false",
-        })
-        if (not isinstance(positions, list) or not isinstance(orders, list)
-                or len(orders) > ORDER_LIMIT):
+        orders = self._get(
+            client,
+            "/v2/orders",
+            params={
+                "status": "all",
+                "limit": str(ORDER_LIMIT),
+                "direction": "desc",
+                "nested": "false",
+            },
+        )
+        if not isinstance(positions, list) or not isinstance(orders, list) or len(orders) > ORDER_LIMIT:
             raise AlpacaPaperError("Alpaca devolvió posiciones u órdenes con formato inválido.")
-        parsed_positions = tuple(PaperPosition(
-            _text(p["symbol"]), _text(p["asset_class"]), _text(p["side"]),
-            _number(p, "qty"), _number(p, "avg_entry_price"),
-            _number(p, "current_price", optional=True), _number(p, "market_value", optional=True),
-            _number(p, "unrealized_pl", optional=True),
-            _number(p, "qty_available", optional=True),
-        ) for p in positions)
-        parsed_orders = tuple(PaperOrder(
-            _text(o["id"]), _text(o["symbol"]), _text(o["side"]),
-            _text(o["type"]), _text(o["status"]), _number(o, "qty", optional=True),
-            _number(o, "notional", optional=True), _number(o, "filled_qty"),
-            _number(o, "filled_avg_price", optional=True), _number(o, "limit_price", optional=True),
-            _timestamp(o.get("created_at")),
-        ) for o in orders)
+        parsed_positions = tuple(
+            PaperPosition(
+                _text(p["symbol"]),
+                _text(p["asset_class"]),
+                _text(p["side"]),
+                _number(p, "qty"),
+                _number(p, "avg_entry_price"),
+                _number(p, "current_price", optional=True),
+                _number(p, "market_value", optional=True),
+                _number(p, "unrealized_pl", optional=True),
+                _number(p, "qty_available", optional=True),
+            )
+            for p in positions
+        )
+        parsed_orders = tuple(
+            PaperOrder(
+                _text(o["id"]),
+                _text(o["symbol"]),
+                _text(o["side"]),
+                _text(o["type"]),
+                _text(o["status"]),
+                _number(o, "qty", optional=True),
+                _number(o, "notional", optional=True),
+                _number(o, "filled_qty"),
+                _number(o, "filled_avg_price", optional=True),
+                _number(o, "limit_price", optional=True),
+                _timestamp(o.get("created_at")),
+            )
+            for o in orders
+        )
         return PaperAccountSnapshot(account, parsed_positions, parsed_orders, datetime.now(UTC))
 
     def order_resource(self, kind: str, identifier: str = ""):
@@ -255,6 +343,91 @@ class AlpacaPaperClient:
                 "No se pudo consultar la orden, el instrumento o el horario de Alpaca."
             ) from None
 
+    def fetch_fills(self, after: datetime, *, max_pages: int = 50) -> tuple[PaperFill, ...]:
+        if after.tzinfo is None or not 1 <= max_pages <= 50:
+            raise AlpacaPaperError("El periodo de ejecuciones necesita zona horaria y un límite válido.")
+        rows, seen, token = [], set(), None
+        try:
+            with self._session() as client:
+                for _ in range(max_pages):
+                    params = {
+                        "activity_types": "FILL",
+                        "after": after.astimezone(UTC).isoformat(),
+                        "direction": "asc",
+                        "page_size": "100",
+                    }
+                    if token is not None:
+                        params["page_token"] = token
+                    page = self._get(client, "/v2/account/activities", params=params)
+                    if not isinstance(page, list) or len(page) > 100:
+                        raise AlpacaPaperError("Alpaca no confirmó una página completa de ejecuciones.")
+                    for row in page:
+                        if not isinstance(row, dict) or row.get("activity_type") != "FILL":
+                            raise AlpacaPaperError("La consulta de ejecuciones incluyó otra actividad.")
+                        fill = PaperFill.from_json(
+                            {
+                                "id": row.get("id"),
+                                "order_id": row.get("order_id"),
+                                "symbol": row.get("symbol"),
+                                "side": row.get("side"),
+                                "quantity": row.get("qty"),
+                                "price": row.get("price"),
+                                "timestamp": row.get("transaction_time"),
+                            }
+                        )
+                        if fill.id in seen or fill.timestamp < after:
+                            raise AlpacaPaperError(
+                                "La paginación de ejecuciones se repitió o salió del periodo."
+                            )
+                        seen.add(fill.id)
+                        rows.append(fill)
+                    if len(page) < 100:
+                        return tuple(sorted(rows, key=lambda f: (f.timestamp, f.id)))
+                    token = rows[-1].id
+        except httpx.HTTPError:
+            raise AlpacaPaperError(
+                "No se pudo descargar el historial completo de ejecuciones Paper."
+            ) from None
+        raise AlpacaPaperError("El historial excede 5,000 ejecuciones; no se presenta una descarga parcial.")
+
+    def fetch_open_orders(self):
+        try:
+            with self._session() as client:
+                rows = self._get(
+                    client,
+                    "/v2/orders",
+                    params={"status": "open", "limit": "500", "direction": "asc", "nested": "false"},
+                )
+            if not isinstance(rows, list) or len(rows) >= 500:
+                raise AlpacaPaperError("No se pudo confirmar el conjunto completo de órdenes pendientes.")
+            result = []
+            for row in rows:
+                order_id = str(UUID(row["id"]))
+                symbol, side = _text(row["symbol"]), _text(row["side"])
+                if side not in ("buy", "sell"):
+                    raise ValueError
+                quantity, filled = _number(row, "qty", optional=True), _number(row, "filled_qty")
+                limit = _number(row, "limit_price", optional=True)
+                if quantity is not None and not 0 <= filled <= quantity:
+                    raise ValueError
+                if limit is not None and limit <= 0:
+                    raise ValueError
+                result.append(
+                    {
+                        "id": order_id,
+                        "symbol": symbol,
+                        "side": side,
+                        "remaining": quantity - filled if quantity is not None else None,
+                        "quantity": quantity,
+                        "limit": limit,
+                    }
+                )
+            return result
+        except (httpx.HTTPError, KeyError, TypeError, ValueError):
+            raise AlpacaPaperError(
+                "No se pudieron verificar las órdenes pendientes de la cuenta Paper."
+            ) from None
+
     def submit_limit_order(self, draft):
         from alpaca_order_models import LimitDraft
 
@@ -265,8 +438,13 @@ class AlpacaPaperClient:
         payload = draft.payload()
         try:
             with self._session() as client:
-                response = client.post(PAPER_URL + "/v2/orders", json=payload, headers=self._headers(),
-                                       follow_redirects=False, timeout=10)
+                response = client.post(
+                    PAPER_URL + "/v2/orders",
+                    json=payload,
+                    headers=self._headers(),
+                    follow_redirects=False,
+                    timeout=10,
+                )
         except httpx.HTTPError:
             raise PaperOrderUncertain(
                 "La conexión se interrumpió durante el envío; consulta su estado."
@@ -284,10 +462,13 @@ class AlpacaPaperClient:
             message = body.get("message", "") if isinstance(body, dict) else ""
             if isinstance(message, str):
                 duplicate = "client_order_id" in message and any(
-                    word in message.lower() for word in ("unique", "duplicate"))
+                    word in message.lower() for word in ("unique", "duplicate")
+                )
         except ValueError:
             pass
         if 400 <= response.status_code < 500 and not duplicate and response.status_code != 408:
-            raise PaperOrderRejected(f"Alpaca rechazó la solicitud Paper (HTTP {response.status_code}).",
-                                     status_code=response.status_code)
+            raise PaperOrderRejected(
+                f"Alpaca rechazó la solicitud Paper (HTTP {response.status_code}).",
+                status_code=response.status_code,
+            )
         raise PaperOrderUncertain("El envío no quedó confirmado; consulta el identificador original.")

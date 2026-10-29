@@ -51,6 +51,7 @@ class LimitDraft:
     market_open: bool
     next_open: datetime
     research_json: str | None = None
+    trial_json: str | None = None
 
     def payload(self) -> dict:
         symbol, side, qty, price = limit_inputs(self.symbol, self.side, self.quantity, self.limit_price)
@@ -70,6 +71,12 @@ class LimitDraft:
             context = json.loads(self.research_json)
             context_json(context, self.symbol, self.prepared_at)
             result["signal_context"] = context
+        if self.trial_json is not None:
+            from alpaca_risk import validate_trial_context
+
+            trial = json.loads(self.trial_json)
+            validate_trial_context(trial, self)
+            result["trial_context"] = trial
         return result
 
     @classmethod
@@ -92,6 +99,12 @@ class LimitDraft:
 
                 draft = replace(draft, research_json=context_json(
                     row["signal_context"], draft.symbol, draft.prepared_at))
+            if row.get("trial_context") is not None:
+                from dataclasses import replace
+
+                from alpaca_risk import validate_trial_context
+
+                draft = replace(draft, trial_json=validate_trial_context(row["trial_context"], draft))
             return draft
         except (KeyError, TypeError, ValueError, AttributeError):
             raise AlpacaPaperError("La propuesta guardada contiene datos inválidos.") from None

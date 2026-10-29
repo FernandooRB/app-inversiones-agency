@@ -111,7 +111,7 @@ def _checks(client, symbol, side, quantity, price, *, account_id=None, now=None)
 
 
 def prepare_order(client, store, issuer, subject, symbol, side, quantity, price, *, now=None,
-                  signal_store=None, signal_key=None):
+                  signal_store=None, signal_key=None, trial_store=None):
     draft = _checks(client, symbol, side, quantity, price, now=now)
     if any(item.unresolved for item in _load(store, issuer, subject, draft.account_id)):
         raise AlpacaPaperError("Hay un envío sin confirmar. Consulta su estado antes de preparar otra orden.")
@@ -122,6 +122,11 @@ def prepare_order(client, store, issuer, subject, symbol, side, quantity, price,
             raise AlpacaPaperError("La referencia requiere verificar la bitácora de señales.")
         draft = replace(draft, research_json=saved_context(
             signal_store, issuer, subject, signal_key, draft.symbol, draft.prepared_at))
+    if trial_store is not None and side == "buy":
+        from alpaca_risk import build_trial_context
+
+        draft = replace(draft, trial_json=build_trial_context(
+            client, trial_store, store, issuer, subject, draft, now=now))
     return draft
 
 
@@ -150,7 +155,7 @@ def reconcile_order(client, store, issuer, subject, account_id, client_order_id)
 
 
 def submit_order(client, store, issuer, subject, draft: LimitDraft, *, confirmed: bool, now=None,
-                 signal_store=None):
+                 signal_store=None, trial_store=None):
     if confirmed is not True:
         raise AlpacaPaperError("Confirma los datos de la orden de simulación antes de enviarla.")
     states = _load(store, issuer, subject, draft.account_id)
@@ -173,6 +178,16 @@ def submit_order(client, store, issuer, subject, draft: LimitDraft, *, confirmed
                 json.loads(draft.research_json)["key"], draft.symbol,
                 draft.prepared_at) != draft.research_json:
             raise AlpacaPaperError("La señal de referencia cambió o no pudo verificarse.")
+    if trial_store is not None and draft.side == "buy" or draft.trial_json:
+        from alpaca_risk import build_trial_context
+
+        if trial_store is None or draft.trial_json is None:
+            raise AlpacaPaperError("Prepara otra compra con límites y un plan de salida guardados.")
+        fresh = build_trial_context(client, trial_store, store, issuer, subject, draft, now=now)
+        old, current = json.loads(draft.trial_json), json.loads(fresh)
+        if any(old[key] != current[key] for key in ("settings_key", "plan_key")):
+            raise AlpacaPaperError("Los límites o el plan cambiaron. Prepara otra propuesta.")
+        draft = replace(draft, trial_json=fresh)
     if ((now or datetime.now(UTC)) - draft.prepared_at).total_seconds() > 300:
         raise AlpacaPaperError("La propuesta venció durante la comprobación. Prepara otra.")
     try:
