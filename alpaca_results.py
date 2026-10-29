@@ -19,6 +19,12 @@ def paper_results(states, snapshot):
     for symbol, orders in sorted(groups.items()):
         executions = [s for s in orders if s.receipt and Decimal(s.receipt["filled_qty"]) > 0]
         if not executions:
+            position = positions.get(symbol)
+            has_position = position is not None and position.quantity != 0
+            has_broker_fills = any(o.symbol == symbol and o.filled_quantity > 0 for o in snapshot.orders)
+            if has_position or has_broker_fills:
+                limitations.append(f"{symbol}: Alpaca muestra posiciones o ejecuciones que todavía "
+                                   "no están conciliadas con el registro. Pulsa Actualizar resultados.")
             continue
         if any(s.status != "filled" for s in executions):
             limitations.append(f"{symbol}: hay órdenes con ejecución parcial; "
