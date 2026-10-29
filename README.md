@@ -22,7 +22,9 @@ y los requisitos pendientes antes de una prueba con dinero real.
 La [bitácora prospectiva en papel](docs/technical_paper_trial.md) registra señales y cotizaciones
 SIC hipotéticas por usuario, sin órdenes conectadas al intermediario.
 La [conexión con Alpaca Paper](docs/alpaca_paper_connection.md) permite consultar una cuenta de
-simulación y preparar órdenes limitadas DAY con confirmación manual y seguimiento por intento.
+simulación, preparar órdenes limitadas DAY con confirmación manual y revisar resultados por lote
+en **Resultados y señales**. Las nuevas propuestas pueden vincular una señal congelada antes
+de su envío; los intentos anteriores conservan su contexto.
 El comparativo de la interfaz incluye
 un resumen legible antes del anexo técnico. El [paquete de decisiones del servicio](docs/service_readiness_packet.md)
 documenta los pendientes externos de contratación, privacidad, actividad externa e integración del sitio.

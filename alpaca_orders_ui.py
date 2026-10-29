@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
@@ -12,6 +13,9 @@ from alpaca_order_models import limit_inputs
 from alpaca_order_store import order_store_for
 from alpaca_orders import order_states, prepare_order, reconcile_order, submit_order
 from alpaca_paper import AlpacaPaperError
+from alpaca_signal_context import alignment, reference_levels
+from technical_paper import PaperError
+from technical_paper_store import paper_store_for
 
 ZONE = ZoneInfo("America/Mexico_City")
 LABELS = {"filled": "Ejecutada", "partially_filled": "Ejecución parcial", "new": "Pendiente",
@@ -34,6 +38,7 @@ def render_paper_orders(client, watchlist_store, issuer, subject, *, client_load
     account = st.session_state["_technical_alpaca_snapshot"].account
     account_id = account.id
     store = order_store_for(watchlist_store)
+    signal_store = paper_store_for(watchlist_store)
     try:
         states = order_states(store.load(issuer, subject, account_id))
     except AlpacaPaperError as exc:
@@ -60,11 +65,26 @@ def render_paper_orders(client, watchlist_store, issuer, subject, *, client_load
                                     step=1, key="technical_alpaca_order_quantity")
         price = st.number_input("Precio límite · USD", min_value=0.0, value=0.0, step=0.01,
                                 format="%.4f", key="technical_alpaca_order_price")
+        try:
+            signals = {e.event_key: e for e in signal_store.load(issuer, subject)
+                       if e.kind == "signal" and e.ticker == symbol.strip().upper()
+                       and e.payload.get("origin_currency") == "USD"}
+        except PaperError:
+            signals = {}
+            st.warning("La bitácora de señales no está disponible; sólo puedes preparar una prueba técnica.")
+        signal_key = st.selectbox("Señal congelada de referencia", [None, *reversed(signals)],
+                                  format_func=lambda key: "Sin señal · prueba técnica" if key is None else
+                                  f"{signals[key].ticker} · {signals[key].payload['signal']} · "
+                                  f"{signals[key].signal_date}", key="technical_alpaca_order_signal")
+        st.caption("Congela la observación en Prueba en papel antes de preparar la orden. "
+                   "Una señal Esperar conserva la operación como prueba manual.")
         draft = st.session_state.get("_technical_alpaca_draft")
         if draft:
             try:
                 changed = draft.account_id != account_id or limit_inputs(symbol, side, quantity, price) != (
                     draft.symbol, draft.side, draft.quantity, draft.limit_price)
+                changed = changed or (json.loads(draft.research_json)["key"]
+                                      if draft.research_json else None) != signal_key
             except AlpacaPaperError:
                 changed = True
             if changed:
@@ -74,7 +94,8 @@ def render_paper_orders(client, watchlist_store, issuer, subject, *, client_load
             try:
                 with st.spinner("Comprobando instrumento, cuenta, disponibilidad y horario…"):
                     draft = prepare_order(authorized_client(), store, issuer, subject,
-                                          symbol, side, quantity, price)
+                                          symbol, side, quantity, price, signal_store=signal_store,
+                                          signal_key=signal_key)
                 st.session_state["_technical_alpaca_draft"] = draft
             except AlpacaPaperError as exc:
                 st.error(str(exc))
@@ -88,6 +109,12 @@ def render_paper_orders(client, watchlist_store, issuer, subject, *, client_load
             st.write(f"{side_label} · **{draft.symbol}** · {draft.quantity} {units} · "
                      f"límite **{price_text} USD** por título")
             st.write(f"Importe al límite, antes de costos: **{draft.quantity * draft.limit_price:,.2f} USD**")
+            st.write(alignment(draft))
+            levels = reference_levels(draft, draft.limit_price)
+            if levels:
+                st.caption(f"Referencias a este precio: stop {levels[0]:,.2f} USD · "
+                           f"objetivo {levels[1]:,.2f} USD. Se recalculan con la ejecución; "
+                           "no se envían como órdenes al broker.")
             st.caption(f"Cuenta Paper …{account.number[-4:]} · preparada {draft.prepared_at:%H:%M:%S} UTC · "
                        "vigencia de la revisión: 5 minutos")
             if draft.market_open:
@@ -108,7 +135,7 @@ def render_paper_orders(client, watchlist_store, issuer, subject, *, client_load
                 try:
                     with st.spinner("Guardando el intento y enviando una única solicitud Paper…"):
                         result = submit_order(authorized_client(), store, issuer, subject,
-                                               draft, confirmed=confirmed)
+                                               draft, confirmed=confirmed, signal_store=signal_store)
                     message = ("Envío sin confirmar. Consulta su estado; este intento no se reenviará."
                                if result.unresolved else
                                "Estado de la orden Paper: " + LABELS.get(result.status, result.status) + ".")

@@ -13,11 +13,17 @@ import httpx
 from supabase_watchlist import SupabaseWatchlistStore
 from technical_analysis import BUY
 from technical_paper import PaperError, PaperEvent
-from watchlist_store import WatchlistError, identity_key, normalize_watchlist
+from watchlist_store import WatchlistError, WatchlistStore, identity_key, normalize_watchlist
 
 MAX_EVENTS = 2000
 PAGE_SIZE = 500
 FIELDS = "event_key,signal_key,kind,ticker,signal_date,payload,recorded_at"
+
+
+def paper_store_for(store: WatchlistStore | SupabaseWatchlistStore):
+    if isinstance(store, SupabaseWatchlistStore):
+        return SupabasePaperStore(store)
+    return SQLitePaperStore(store.path.with_suffix(".paper.db"))
 
 
 def _event_from_row(row: dict) -> PaperEvent:

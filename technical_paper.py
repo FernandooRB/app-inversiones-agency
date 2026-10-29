@@ -67,6 +67,12 @@ def signal_event(snapshot: TechnicalSnapshot, history: MarketHistory) -> PaperEv
         raise PaperError("La hora de consulta del proveedor necesita zona horaria.")
     key = signal_key(snapshot.symbol, snapshot.as_of)
     last = snapshot.indicators.iloc[-1]
+    atr = last.get("ATR14")
+    try:
+        if atr is not None and (not math.isfinite(float(atr)) or float(atr) <= 0):
+            atr = None
+    except (TypeError, ValueError):
+        atr = None
     values = {
         "close": snapshot.close, "relative_volume": snapshot.relative_volume,
         "rsi": snapshot.rsi, "macd_histogram": last.get("MACDHistogram"),
@@ -84,6 +90,7 @@ def signal_event(snapshot: TechnicalSnapshot, history: MarketHistory) -> PaperEv
          "reason": snapshot.reason, "origin_currency": history.currency,
          "origin_market": history.exchange, "origin_source": history.source,
          "source_fetched_at": history.fetched_at.astimezone(UTC).isoformat(),
+         "atr": str(atr) if atr is not None else None,
          **{name: str(value) for name, value in values.items()},
          "buy_checks": [{"label": c.label, "met": c.met, "reading": c.reading}
                         for c in snapshot.buy_conditions],
