@@ -40,11 +40,21 @@ class OrderEvent:
 
 def _row(row) -> OrderEvent:
     try:
-        event = OrderEvent(int(row["event_seq"]), str(UUID(row["account_id"])), row["client_order_id"],
-                           row["event_key"], row["kind"], row["payload"],
-                           datetime.fromisoformat(row["recorded_at"]))
-        if (not CLIENT_ID.fullmatch(event.client_order_id) or event.kind not in KINDS
-                or not isinstance(event.payload, dict) or event.recorded_at.tzinfo is None):
+        event = OrderEvent(
+            int(row["event_seq"]),
+            str(UUID(row["account_id"])),
+            row["client_order_id"],
+            row["event_key"],
+            row["kind"],
+            row["payload"],
+            datetime.fromisoformat(row["recorded_at"]),
+        )
+        if (
+            not CLIENT_ID.fullmatch(event.client_order_id)
+            or event.kind not in KINDS
+            or not isinstance(event.payload, dict)
+            or event.recorded_at.tzinfo is None
+        ):
             raise ValueError
         if event.kind == "intent":
             if event.event_key != event.client_order_id:
@@ -95,10 +105,14 @@ class SQLiteOrderStore:
             "FOREIGN KEY(owner,account_id,client_order_id) "
             "REFERENCES alpaca_paper_order_events(owner,account_id,event_key))"
         )
-        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS alpaca_intent_unique "
-                           "ON alpaca_paper_order_events(account_id,event_key) WHERE kind='intent'")
-        connection.execute("CREATE INDEX IF NOT EXISTS alpaca_events_owner_account_seq "
-                           "ON alpaca_paper_order_events(owner,account_id,event_seq)")
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS alpaca_intent_unique "
+            "ON alpaca_paper_order_events(account_id,event_key) WHERE kind='intent'"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS alpaca_events_owner_account_seq "
+            "ON alpaca_paper_order_events(owner,account_id,event_seq)"
+        )
         return connection
 
     def load(self, issuer: str, subject: str, account_id: str) -> list[OrderEvent]:
@@ -107,12 +121,15 @@ class SQLiteOrderStore:
             with closing(self._connect()) as connection:
                 rows = connection.execute(
                     f"SELECT {FIELDS} FROM alpaca_paper_order_events WHERE owner=? AND account_id=? "
-                    "ORDER BY event_seq LIMIT ?", (owner, str(UUID(account_id)), MAX_EVENTS + 1),
+                    "ORDER BY event_seq LIMIT ?",
+                    (owner, str(UUID(account_id)), MAX_EVENTS + 1),
                 ).fetchall()
             if len(rows) > MAX_EVENTS:
                 raise AlpacaPaperError("El registro Paper requiere una exportación administrativa.")
-            return [_row(dict(zip(FIELDS.split(","), (*r[:5], json.loads(r[5]), r[6]), strict=True)))
-                    for r in rows]
+            return [
+                _row(dict(zip(FIELDS.split(","), (*r[:5], json.loads(r[5]), r[6]), strict=True)))
+                for r in rows
+            ]
         except (OSError, sqlite3.Error, ValueError) as exc:
             if isinstance(exc, AlpacaPaperError):
                 raise
@@ -124,6 +141,48 @@ class SQLiteOrderStore:
         timestamp = datetime.now(UTC).isoformat()
         try:
             with closing(self._connect()) as connection, connection:
+                if kind == "intent" and payload.get("trial_context") is not None:
+                    from alpaca_orders import order_states
+                    from alpaca_risk import check_claim, extra_reservations
+                    from alpaca_trial_store import ensure_sqlite_table
+
+                    connection.execute("BEGIN IMMEDIATE")
+                    ensure_sqlite_table(connection)
+                    context = payload["trial_context"]
+                    controls = connection.execute(
+                        "SELECT event_key,kind,payload FROM alpaca_trial_events "
+                        "WHERE owner=? AND account_id=? AND kind IN ('settings','plan') ORDER BY event_seq",
+                        (owner, account_id),
+                    ).fetchall()
+                    settings = next((r for r in reversed(controls) if r[1] == "settings"), None)
+                    plan = next(
+                        (
+                            r
+                            for r in reversed(controls)
+                            if r[1] == "plan" and json.loads(r[2])["symbol"] == payload["symbol"]
+                        ),
+                        None,
+                    )
+                    if (
+                        settings is None
+                        or plan is None
+                        or settings[0] != context["settings_key"]
+                        or plan[0] != context["plan_key"]
+                        or json.loads(settings[2]) != context["settings"]
+                        or json.loads(plan[2]) != context["plan"]
+                    ):
+                        raise AlpacaPaperError("Los límites o el plan cambiaron. Prepara otra propuesta.")
+                    records = connection.execute(
+                        f"SELECT {FIELDS} FROM alpaca_paper_order_events "
+                        "WHERE owner=? AND account_id=? ORDER BY event_seq",
+                        (owner, account_id),
+                    ).fetchall()
+                    events = [
+                        _row(dict(zip(FIELDS.split(","), (*r[:5], json.loads(r[5]), r[6]), strict=True)))
+                        for r in records
+                    ]
+                    states = [s for s in order_states(events) if s.draft.client_order_id != client_order_id]
+                    check_claim(context, *extra_reservations(states, context, payload["symbol"]))
                 cursor = connection.execute(
                     "INSERT INTO alpaca_paper_order_events "
                     "(owner,account_id,client_order_id,event_key,kind,payload,recorded_at) "
@@ -145,6 +204,7 @@ class SQLiteOrderStore:
 
 class SupabaseOrderStore:
     def __init__(self, watchlist: SupabaseWatchlistStore):
+        self._watchlist = watchlist
         self.endpoint = watchlist.endpoint.removesuffix("technical_watchlists") + "alpaca_paper_order_events"
         self._secret_key, self._client = watchlist.secret_key, watchlist.client
 
@@ -152,8 +212,9 @@ class SupabaseOrderStore:
         headers = {"apikey": self._secret_key, "Accept": "application/json"}
         headers.update(kwargs.pop("headers", {}))
         if self._client is not None:
-            return self._client.request(method, self.endpoint, headers=headers, timeout=10,
-                                        follow_redirects=False, **kwargs)
+            return self._client.request(
+                method, self.endpoint, headers=headers, timeout=10, follow_redirects=False, **kwargs
+            )
         with httpx.Client(timeout=10, follow_redirects=False, trust_env=False) as client:
             return client.request(method, self.endpoint, headers=headers, **kwargs)
 
@@ -163,9 +224,17 @@ class SupabaseOrderStore:
             account_id = str(UUID(account_id))
             rows = []
             while True:
-                response = self._request("GET", params={"owner": f"eq.{owner}",
-                    "account_id": f"eq.{account_id}", "select": FIELDS, "order": "event_seq.asc",
-                    "limit": str(PAGE_SIZE), "offset": str(len(rows))})
+                response = self._request(
+                    "GET",
+                    params={
+                        "owner": f"eq.{owner}",
+                        "account_id": f"eq.{account_id}",
+                        "select": FIELDS,
+                        "order": "event_seq.asc",
+                        "limit": str(PAGE_SIZE),
+                        "offset": str(len(rows)),
+                    },
+                )
                 if response.status_code != 200:
                     raise AlpacaPaperError("No se pudo leer el registro Paper en Supabase.")
                 page = response.json()
@@ -186,9 +255,44 @@ class SupabaseOrderStore:
         owner = identity_key(issuer, subject)
         account_id, key = _input(account_id, client_order_id, kind, payload)
         try:
-            response = self._request("POST", headers={"Prefer": "return=representation"}, json={
-                "owner": owner, "account_id": account_id, "client_order_id": client_order_id,
-                "event_key": key, "kind": kind, "payload": payload})
+            if kind == "intent" and payload.get("trial_context") is not None:
+                from alpaca_trial_store import SupabaseTrialStore
+
+                # Share the authenticated transport; the database serializes competing claims.
+                base = SupabaseTrialStore(self._watchlist)
+                response = base.request(
+                    "POST",
+                    "rpc/claim_alpaca_trial_order",
+                    json={
+                        "p_owner": owner,
+                        "p_account": account_id,
+                        "p_client": client_order_id,
+                        "p_payload": payload,
+                    },
+                )
+                if response.status_code == 409:
+                    raise OrderAlreadyRecorded("El intento ya está registrado; consulta su estado.")
+                if response.status_code != 200:
+                    raise AlpacaPaperError(
+                        "Los límites, el plan o la reserva disponible cambiaron. "
+                        "Actualiza resultados y prepara otra propuesta."
+                    )
+                rows = response.json()
+                if not isinstance(rows, list) or len(rows) != 1:
+                    raise ValueError
+                return _row(rows[0])
+            response = self._request(
+                "POST",
+                headers={"Prefer": "return=representation"},
+                json={
+                    "owner": owner,
+                    "account_id": account_id,
+                    "client_order_id": client_order_id,
+                    "event_key": key,
+                    "kind": kind,
+                    "payload": payload,
+                },
+            )
             if response.status_code == 409 and kind == "intent":
                 raise OrderAlreadyRecorded("El intento ya está registrado; consulta su estado.")
             if response.status_code != 201:

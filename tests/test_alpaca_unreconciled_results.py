@@ -8,8 +8,9 @@ from test_alpaca_signal_results import filled_state, snapshot_for
 
 from alpaca_order_store import SQLiteOrderStore
 from alpaca_orders import order_states
-from alpaca_paper import PaperOrder
+from alpaca_paper import PaperFill, PaperOrder
 from alpaca_results import paper_results
+from alpaca_trial_store import SQLiteTrialStore, fills_digest, stable_key
 
 
 def accepted_state(now, *, symbol="SIM"):
@@ -65,6 +66,13 @@ def test_ui_hides_total_when_a_second_position_has_no_confirmed_journal_fill(mon
                      "intent", state.draft.to_json())
         store.append("issuer", "alice", state.draft.account_id, state.draft.client_order_id,
                      "observed", state.receipt)
+    trial = SQLiteTrialStore(store.path)
+    fill = PaperFill("synthetic:complete", complete.receipt["id"], "SIM", "buy", Decimal(1),
+                     Decimal(100), now)
+    trial.append("issuer", "alice", complete.draft.account_id, "fill", fill.to_json(),
+                 key=stable_key("fill", fill.id))
+    trial.append("issuer", "alice", complete.draft.account_id, "fills_sync",
+                 {"digest": fills_digest([fill]), "complete": True, "count": 1})
     server.positions = [
         {"symbol": symbol, "asset_class": "us_equity", "side": "long", "qty": "1",
          "avg_entry_price": "100", "current_price": "110", "market_value": "110",

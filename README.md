@@ -25,6 +25,10 @@ La [conexión con Alpaca Paper](docs/alpaca_paper_connection.md) permite consult
 simulación, preparar órdenes limitadas DAY con confirmación manual y revisar resultados por lote
 en **Resultados y señales**. Las nuevas propuestas pueden vincular una señal congelada antes
 de su envío; los intentos anteriores conservan su contexto.
+El [control de la prueba Paper](docs/alpaca_trial_controls.md) añade presupuestos explícitos,
+planes de salida, alertas dentro de la app y conciliación por ejecución, incluidos llenados
+parciales. Separa las entradas con señal previa de las pruebas manuales y compara su evolución
+con mantener la primera entrada. Los planes son referencias; las órdenes requieren confirmación manual.
 El comparativo de la interfaz incluye
 un resumen legible antes del anexo técnico. El [paquete de decisiones del servicio](docs/service_readiness_packet.md)
 documenta los pendientes externos de contratación, privacidad, actividad externa e integración del sitio.

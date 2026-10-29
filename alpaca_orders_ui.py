@@ -14,6 +14,7 @@ from alpaca_order_store import order_store_for
 from alpaca_orders import order_states, prepare_order, reconcile_order, submit_order
 from alpaca_paper import AlpacaPaperError
 from alpaca_signal_context import alignment, reference_levels
+from alpaca_trial_store import trial_store_for
 from technical_paper import PaperError
 from technical_paper_store import paper_store_for
 
@@ -39,6 +40,7 @@ def render_paper_orders(client, watchlist_store, issuer, subject, *, client_load
     account_id = account.id
     store = order_store_for(watchlist_store)
     signal_store = paper_store_for(watchlist_store)
+    trial_store = trial_store_for(watchlist_store)
     try:
         states = order_states(store.load(issuer, subject, account_id))
     except AlpacaPaperError as exc:
@@ -95,7 +97,7 @@ def render_paper_orders(client, watchlist_store, issuer, subject, *, client_load
                 with st.spinner("Comprobando instrumento, cuenta, disponibilidad y horario…"):
                     draft = prepare_order(authorized_client(), store, issuer, subject,
                                           symbol, side, quantity, price, signal_store=signal_store,
-                                          signal_key=signal_key)
+                                          signal_key=signal_key, trial_store=trial_store)
                 st.session_state["_technical_alpaca_draft"] = draft
             except AlpacaPaperError as exc:
                 st.error(str(exc))
@@ -110,6 +112,15 @@ def render_paper_orders(client, watchlist_store, issuer, subject, *, client_load
                      f"límite **{price_text} USD** por título")
             st.write(f"Importe al límite, antes de costos: **{draft.quantity * draft.limit_price:,.2f} USD**")
             st.write(alignment(draft))
+            if draft.trial_json:
+                budget = json.loads(draft.trial_json)
+                st.write(f"Pérdida prevista al stop, con costos supuestos: "
+                         f"**{float(budget['order_loss']):,.2f} USD** · "
+                         f"tamaño máximo según la consulta: **{budget['max_quantity']} títulos**.")
+                st.caption(f"Plan guardado: stop {float(budget['plan']['stop']):,.2f} USD · "
+                           f"objetivo {float(budget['plan']['target']):,.2f} USD · "
+                           f"revisión {budget['plan']['review_on']}. "
+                           "Los niveles son referencias y el tamaño se vuelve a comprobar al confirmar.")
             levels = reference_levels(draft, draft.limit_price)
             if levels:
                 st.caption(f"Referencias a este precio: stop {levels[0]:,.2f} USD · "
@@ -135,7 +146,8 @@ def render_paper_orders(client, watchlist_store, issuer, subject, *, client_load
                 try:
                     with st.spinner("Guardando el intento y enviando una única solicitud Paper…"):
                         result = submit_order(authorized_client(), store, issuer, subject,
-                                               draft, confirmed=confirmed, signal_store=signal_store)
+                                               draft, confirmed=confirmed, signal_store=signal_store,
+                                               trial_store=trial_store)
                     message = ("Envío sin confirmar. Consulta su estado; este intento no se reenviará."
                                if result.unresolved else
                                "Estado de la orden Paper: " + LABELS.get(result.status, result.status) + ".")

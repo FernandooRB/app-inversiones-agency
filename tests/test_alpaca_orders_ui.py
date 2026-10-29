@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from alpaca_order_fakes import ACCOUNT_ID, FakePaper
 from streamlit.testing.v1 import AppTest
@@ -6,9 +6,11 @@ from streamlit.testing.v1 import AppTest
 import alpaca_paper_ui
 from alpaca_order_store import SQLiteOrderStore
 from alpaca_paper import AlpacaPaperError
+from alpaca_risk import plan_payload, settings_payload
+from alpaca_trial_store import SQLiteTrialStore
 
 
-def open_orders(monkeypatch, tmp_path):
+def open_orders(monkeypatch, tmp_path, *, configured=True):
     server = FakePaper(datetime.now(UTC))
     allowed = {"value": True}
 
@@ -19,11 +21,27 @@ def open_orders(monkeypatch, tmp_path):
 
     monkeypatch.setattr(alpaca_paper_ui, "configured_alpaca_paper", factory)
     path = str(tmp_path / "watchlist.db")
-    code = ("import streamlit as st\nfrom pathlib import Path\n"
-            "from watchlist_store import WatchlistStore\n"
-            "from alpaca_paper_ui import render_alpaca_paper\n"
-            f"render_alpaca_paper('issuer', st.session_state.get('test_subject', 'alice'), "
-            f"watchlist_store=WatchlistStore(Path({path!r})))")
+    if configured:
+        trial = SQLiteTrialStore((tmp_path / "watchlist.db").with_suffix(".alpaca-orders.db"))
+        trial.append(
+            "issuer", "alice", ACCOUNT_ID, "settings", settings_payload(1000, 100, 1000, 100, "0.0035")
+        )
+        trial.append(
+            "issuer",
+            "alice",
+            ACCOUNT_ID,
+            "plan",
+            plan_payload(
+                "SIM", "100", "90", "120", (datetime.now(UTC) + timedelta(days=20)).date(), "Plan sintético"
+            ),
+        )
+    code = (
+        "import streamlit as st\nfrom pathlib import Path\n"
+        "from watchlist_store import WatchlistStore\n"
+        "from alpaca_paper_ui import render_alpaca_paper\n"
+        f"render_alpaca_paper('issuer', st.session_state.get('test_subject', 'alice'), "
+        f"watchlist_store=WatchlistStore(Path({path!r})))"
+    )
     app = AppTest.from_string(code, default_timeout=60).run()
     app.button(key="technical_alpaca_refresh").click().run()
     return app, server, allowed
