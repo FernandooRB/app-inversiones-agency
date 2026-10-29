@@ -13,6 +13,7 @@ from alpaca_order_store import OrderEvent, SQLiteOrderStore
 from alpaca_orders import order_states, prepare_order, submit_order
 from alpaca_paper import AlpacaPaperError, PaperAccountSnapshot, PaperPosition
 from alpaca_results import paper_results
+from alpaca_results_sync import refresh_results
 from alpaca_signal_context import alignment, context_json, reference_levels
 from technical_analysis import BUY, WAIT, Condition, MarketHistory, TechnicalSnapshot
 from technical_paper import signal_event
@@ -189,8 +190,7 @@ def test_ui_saves_reviewed_signal_and_shows_fill_result_without_an_extra_order(m
     server.positions = [{"symbol": "SIM", "asset_class": "us_equity", "side": "long",
                          "qty": "1", "qty_available": "1", "avg_entry_price": "99",
                          "current_price": "105", "market_value": "105", "unrealized_pl": "6"}]
-    app.button(key="technical_alpaca_order_reconcile").click().run()
-    app.button(key="technical_alpaca_refresh").click().run()
+    app.button(key="technical_alpaca_order_results_refresh").click().run()
     assert not app.exception and not app.error and len(server.posts) == 1
     frame = next(item.value for item in app.dataframe if "ID de entrada" in item.value.columns)
     assert frame.loc[0, "Resultado abierto · USD"] == 6
@@ -235,3 +235,35 @@ def test_a_later_receipt_without_fill_time_keeps_the_confirmed_timestamp():
     later = replace(state.latest, sequence=3, event_key=str(uuid4()), payload=payload)
     folded = order_states([state.intent, state.latest, later])[0]
     assert folded.receipt["filled_at"] == state.receipt["filled_at"]
+
+
+def test_refresh_batches_existing_intents_without_posts_and_continues_after_lookup_failure(tmp_path):
+    now = datetime.now(UTC)
+    server = FakePaper(now)
+    store = SQLiteOrderStore(tmp_path / "orders.db")
+    for sequence in range(3):
+        state = filled_state(now, "buy", 1, "100", 2 * sequence + 1)
+        store.append("issuer", "alice", ACCOUNT_ID, state.draft.client_order_id,
+                     "intent", state.draft.to_json())
+        server.orders[state.draft.client_order_id] = {**state.receipt, "created_at": now.isoformat()}
+    first_key = next(iter(server.orders))
+    missing = server.orders.pop(first_key)
+    _, updated, remaining, errors = refresh_results(server.client, store, "issuer", "alice", ACCOUNT_ID,
+                                                   batch_size=2)
+    assert updated == 1 and remaining == 1 and len(errors) == 1 and not server.posts
+    assert len([s for s in order_states(store.load("issuer", "alice", ACCOUNT_ID))
+                if s.status == "filled"]) == 1
+    server.orders[first_key] = missing
+    _, updated, remaining, errors = refresh_results(server.client, store, "issuer", "alice", ACCOUNT_ID,
+                                                   batch_size=2)
+    assert updated == 2 and remaining == 0 and not errors and not server.posts
+    assert all(s.status == "filled" for s in order_states(store.load("issuer", "alice", ACCOUNT_ID)))
+    assert not store.load("issuer", "bob", ACCOUNT_ID)
+
+
+def test_results_refresh_rejects_changed_account_before_journal_writes(tmp_path):
+    server = FakePaper()
+    store = SQLiteOrderStore(tmp_path / "orders.db")
+    with pytest.raises(AlpacaPaperError, match="cuenta cambió"):
+        refresh_results(server.client, store, "issuer", "alice", str(uuid4()))
+    assert not server.posts and not store.load("issuer", "alice", ACCOUNT_ID)

@@ -12,20 +12,43 @@ from alpaca_order_store import order_store_for
 from alpaca_orders import order_states
 from alpaca_paper import AlpacaPaperError
 from alpaca_results import paper_results
+from alpaca_results_sync import refresh_results
 from alpaca_signal_context import alignment
 
 
-def render_paper_results(watchlist, issuer, subject, snapshot):
+def render_paper_results(watchlist, issuer, subject, snapshot, *, client_loader, expected_signature):
     st.subheader("Resultados y señales")
     st.caption("Sólo órdenes enviadas desde esta app · Paper · USD · consulta manual")
+    notice = st.session_state.pop("_technical_alpaca_results_notice", None)
+    if notice:
+        st.info(notice[0])
+        for error in notice[1]:
+            st.warning(error)
+    store = order_store_for(watchlist)
     try:
-        states = order_states(order_store_for(watchlist).load(issuer, subject, snapshot.account.id))
+        states = order_states(store.load(issuer, subject, snapshot.account.id))
         rows, limitations = paper_results(states, snapshot)
     except AlpacaPaperError as exc:
         st.error(str(exc))
         return
+    if st.button("Actualizar resultados", key="technical_alpaca_order_results_refresh"):
+        try:
+            client = client_loader()
+            if client.configuration_signature != expected_signature:
+                raise AlpacaPaperError("La configuración cambió. Vuelve a conectar la cuenta.")
+            with st.spinner("Consultando la cuenta y hasta diez intentos existentes…"):
+                fresh, updated, remaining, errors = refresh_results(
+                    client, store, issuer, subject, snapshot.account.id)
+            st.session_state["_technical_alpaca_snapshot"] = fresh
+            message = f"Cuenta actualizada · {updated} intentos consultados."
+            if remaining:
+                message += f" Quedan {remaining} por consultar en otro lote."
+            st.session_state["_technical_alpaca_results_notice"] = (message, errors)
+            st.rerun()
+        except AlpacaPaperError as exc:
+            st.error(str(exc))
     st.caption(f"Precios de la cuenta consultados {snapshot.fetched_at:%Y-%m-%d %H:%M:%S} UTC. "
-               "Actualiza la cuenta y consulta los intentos para incorporar cambios.")
+               "Actualizar resultados consulta la cuenta y los intentos pendientes; no envía órdenes.")
     if not states:
         st.info("Aún no hay órdenes registradas en esta app para la cuenta conectada.")
         return

@@ -86,7 +86,10 @@ def render_alpaca_paper(
     with results_tab:
         from alpaca_results_ui import render_paper_results
 
-        render_paper_results(watchlist_store, issuer, subject, snapshot)
+        render_paper_results(watchlist_store, issuer, subject, snapshot,
+                             client_loader=lambda: (client_factory or configured_alpaca_paper)(
+                                 issuer, subject),
+                             expected_signature=client.configuration_signature)
 
 
 def _render_account(snapshot):

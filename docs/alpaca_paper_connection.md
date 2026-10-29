@@ -24,7 +24,11 @@ Para una nueva prueba:
    disponible, el ATR14. La captura no abre una posición SIC ni una orden Alpaca.
 3. En **Alpaca Paper → Orden limitada de prueba**, elige ese ticker y la señal congelada de
    referencia. Prepara la propuesta y revisa su clasificación antes de confirmar.
-4. Consulta el intento después del envío y actualiza la cuenta para revisar los resultados.
+4. En **Resultados y señales**, pulsa **Actualizar resultados**. Consulta la cuenta y concilia
+   hasta diez intentos pendientes por pulsación mediante GET, guardando sus respuestas sin
+   enviar órdenes. Comprueba la identidad/configuración actuales y la misma cuenta antes de
+   guardar observaciones. Un error parcial conserva el estado anterior y muestra el motivo;
+   si quedan más intentos, indica que hay otro lote por consultar.
 
 La referencia debe pertenecer al mismo usuario y ticker, tener moneda USD y haberse guardado
 antes de preparar la propuesta. Se vuelve a leer antes del POST. Su contenido queda dentro
@@ -64,6 +68,9 @@ Ruff y comprobación de parche correctos. Se probaron persistencia, aislamiento,
 posteriores o alteradas, cambio de referencia, ATR ausente/inválido, reconstrucción FIFO, cierres
 parciales de un lote, órdenes parcialmente ejecutadas y discrepancias con la cuenta. Las pruebas
 usan cuentas sintéticas y MockTransport, sin enviar nuevas órdenes a Alpaca del usuario.
+
+La conciliación agrupada se verificó además con errores parciales, límite por lote y cuenta
+cambiada, comprobando que sólo hace GET al broker y conserva los intentos existentes.
 
 La revisión visual mantuvo SIG y la dirección existente `achromatic-ledger` (semilla 1942259728),
 sin redibujar el shell. Las capturas locales a 1440, 768 y 390 px mostraron el resultado como

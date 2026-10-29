@@ -21,8 +21,8 @@ def paper_results(states, snapshot):
         if not executions:
             continue
         if any(s.status != "filled" for s in executions):
-            limitations.append(f"{symbol}: hay ejecuciones parciales; "
-                               "consulta los intentos hasta confirmar su cierre.")
+            limitations.append(f"{symbol}: hay órdenes con ejecución parcial; "
+                               "este modelo requiere ejecuciones completas.")
             continue
         has_sales = any(s.draft.side == "sell" for s in executions)
         if has_sales and any(not s.receipt.get("filled_at") for s in executions):
