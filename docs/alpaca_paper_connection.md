@@ -58,6 +58,9 @@ las últimas 50 órdenes, deja el resultado abierto sin calcular. Las limitacion
 totales agregados para evitar presentar un total incompleto como completo. Los lotes completos
 de otros símbolos siguen visibles con su alcance declarado. La detección de órdenes externas
 no sustituye un historial completo de actividades de la cuenta.
+Si un símbolo todavía no tiene ejecuciones confirmadas en la bitácora, pero Alpaca muestra
+una posición o ejecuciones recientes, también se exige conciliación y se dejan los totales
+pendientes. Los lotes completos de otros símbolos permanecen visibles con su alcance declarado.
 
 No se requiere otra tabla ni modificar Secrets: la referencia se incorpora al JSON del intento
 existente, con los mismos controles de identidad y cuenta y sin sobrescribir registros previos.
