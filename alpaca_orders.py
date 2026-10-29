@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 from alpaca_order_models import LimitDraft, decimal_value, limit_inputs, new_draft, validate_receipt
@@ -58,6 +59,9 @@ def order_states(events: list[OrderEvent]) -> list[OrderState]:
                     continue
                 if old["status"] == "filled" and receipt["status"] != "filled":
                     continue
+                if old.get("filled_at") and not receipt.get("filled_at") and receipt["status"] == "filled":
+                    receipt["filled_at"] = old["filled_at"]
+                    event = replace(event, payload=receipt)
         elif previous.receipt:
             # A failed lookup never erases an earlier broker confirmation.
             continue
@@ -106,10 +110,18 @@ def _checks(client, symbol, side, quantity, price, *, account_id=None, now=None)
     return new_draft(account.id, symbol, side, quantity, price, clock, now=now)
 
 
-def prepare_order(client, store, issuer, subject, symbol, side, quantity, price, *, now=None):
+def prepare_order(client, store, issuer, subject, symbol, side, quantity, price, *, now=None,
+                  signal_store=None, signal_key=None):
     draft = _checks(client, symbol, side, quantity, price, now=now)
     if any(item.unresolved for item in _load(store, issuer, subject, draft.account_id)):
         raise AlpacaPaperError("Hay un envío sin confirmar. Consulta su estado antes de preparar otra orden.")
+    if signal_key is not None:
+        from alpaca_signal_context import saved_context
+
+        if signal_store is None:
+            raise AlpacaPaperError("La referencia requiere verificar la bitácora de señales.")
+        draft = replace(draft, research_json=saved_context(
+            signal_store, issuer, subject, signal_key, draft.symbol, draft.prepared_at))
     return draft
 
 
@@ -137,7 +149,8 @@ def reconcile_order(client, store, issuer, subject, account_id, client_order_id)
     return _state(store, issuer, subject, state.draft)
 
 
-def submit_order(client, store, issuer, subject, draft: LimitDraft, *, confirmed: bool, now=None):
+def submit_order(client, store, issuer, subject, draft: LimitDraft, *, confirmed: bool, now=None,
+                 signal_store=None):
     if confirmed is not True:
         raise AlpacaPaperError("Confirma los datos de la orden de simulación antes de enviarla.")
     states = _load(store, issuer, subject, draft.account_id)
@@ -153,6 +166,13 @@ def submit_order(client, store, issuer, subject, draft: LimitDraft, *, confirmed
                       account_id=draft.account_id, now=now)
     if checked.market_open != draft.market_open or checked.next_open != draft.next_open:
         raise AlpacaPaperError("El horario de mercado cambió. Prepara y revisa una nueva propuesta.")
+    if draft.research_json:
+        from alpaca_signal_context import saved_context
+
+        if signal_store is None or saved_context(signal_store, issuer, subject,
+                json.loads(draft.research_json)["key"], draft.symbol,
+                draft.prepared_at) != draft.research_json:
+            raise AlpacaPaperError("La señal de referencia cambió o no pudo verificarse.")
     if ((now or datetime.now(UTC)) - draft.prepared_at).total_seconds() > 300:
         raise AlpacaPaperError("La propuesta venció durante la comprobación. Prepara otra.")
     try:

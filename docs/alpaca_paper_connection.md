@@ -10,6 +10,75 @@ solicitud Paper y consultar después su ejecución. La cancelación se realiza e
 La cuenta corresponde al mercado de origen y a importes USD. Esta vista es independiente de
 la bitácora manual SIC/GBM en MXN y no cambia la fuente Yahoo/yfinance de las señales.
 
+## Señales de origen y resultados
+
+La pestaña **Resultados y señales** muestra los lotes comprados desde esta app, la cantidad
+abierta, el resultado por precio abierto/cerrado y la señal que se eligió antes del envío.
+Las órdenes antiguas sin referencia se conservan como pruebas técnicas; no se les asignan
+señales calculadas o guardadas después. Las compras iniciales de NVDA quedan en esta categoría.
+
+Para una nueva prueba:
+
+1. Añade el ticker en Seguimiento y actualiza sus señales.
+2. En **Prueba en papel**, congela la observación. Esto guarda sus condiciones y, cuando está
+   disponible, el ATR14. La captura no abre una posición SIC ni una orden Alpaca.
+3. En **Alpaca Paper → Orden limitada de prueba**, elige ese ticker y la señal congelada de
+   referencia. Prepara la propuesta y revisa su clasificación antes de confirmar.
+4. En **Resultados y señales**, pulsa **Actualizar resultados**. Consulta la cuenta y concilia
+   hasta diez intentos pendientes por pulsación mediante GET, guardando sus respuestas sin
+   enviar órdenes. Comprueba la identidad/configuración actuales y la misma cuenta antes de
+   guardar observaciones. Un error parcial conserva el estado anterior y muestra el motivo;
+   si quedan más intentos, indica que hay otro lote por consultar.
+
+La referencia debe pertenecer al mismo usuario y ticker, tener moneda USD y haberse guardado
+antes de preparar la propuesta. Se vuelve a leer antes del POST. Su contenido queda dentro
+del intento inmutable en Supabase/SQLite, separado de los datos enviados al broker. Cambiar la
+referencia invalida la revisión anterior. Una señal Esperar, antigua (más de cinco días
+naturales), de otra versión o sin todas las condiciones confirmadas se etiqueta como prueba
+manual; no cuenta como confirmación de la estrategia. Incluso una coincidencia es evidencia
+de cumplimiento de reglas, no una probabilidad de beneficio ni una evaluación de idoneidad.
+
+Para compras con ATR14 guardado, stop = entrada − 2 ATR y objetivo = entrada + 4 ATR.
+La revisión usa el límite y los resultados recalculan con el precio ejecutado. Son referencias;
+esta función no envía órdenes stop/objetivo. Las observaciones antiguas sin ATR muestran
+niveles ausentes en lugar de reconstruirlos con información futura.
+
+Los resultados usan Decimal y un modelo FIFO de **órdenes completamente ejecutadas**, ordenadas
+por su hora de finalización, con el precio medio de cada orden. No reconstruyen la secuencia
+de cada fill individual. Se muestran por lote, antes de comisiones, dividendos e impuestos;
+no son un cálculo fiscal ni el rendimiento completo de Alpaca. Las compras abiertas se valoran
+con el precio de la última consulta de la cuenta, no con el cierre de Yahoo. No se mezcla USD
+con MXN ni se suma el saldo inicial de Paper al resultado de la estrategia.
+
+Las ejecuciones parciales, ventas sin compras suficientes y horas de finalización ausentes
+producen una limitación visible para ese símbolo. Las órdenes antiguas necesitan una nueva
+consulta del intento para guardar `filled_at` si se quieren reconstruir sus cierres. Un
+descuadre entre cantidades abiertas y la cuenta, o una orden ejecutada fuera del registro entre
+las últimas 50 órdenes, deja el resultado abierto sin calcular. Las limitaciones bloquean los
+totales agregados para evitar presentar un total incompleto como completo. Los lotes completos
+de otros símbolos siguen visibles con su alcance declarado. La detección de órdenes externas
+no sustituye un historial completo de actividades de la cuenta.
+
+No se requiere otra tabla ni modificar Secrets: la referencia se incorpora al JSON del intento
+existente, con los mismos controles de identidad y cuenta y sin sobrescribir registros previos.
+
+Validación de esta ampliación: suite local completa de 605 pruebas antes de los últimos cuatro
+casos de recuperación, seguida de 49 pruebas focalizadas y 22 tras el ajuste de presentación;
+Ruff y comprobación de parche correctos. Se probaron persistencia, aislamiento, referencias
+posteriores o alteradas, cambio de referencia, ATR ausente/inválido, reconstrucción FIFO, cierres
+parciales de un lote, órdenes parcialmente ejecutadas y discrepancias con la cuenta. Las pruebas
+usan cuentas sintéticas y MockTransport, sin enviar nuevas órdenes a Alpaca del usuario.
+
+La conciliación agrupada se verificó además con errores parciales, límite por lote y cuenta
+cambiada, comprobando que sólo hace GET al broker y conserva los intentos existentes.
+
+La revisión visual mantuvo SIG y la dirección existente `achromatic-ledger` (semilla 1942259728),
+sin redibujar el shell. Las capturas locales a 1440, 768 y 390 px mostraron el resultado como
+figura principal, cantidades enteras, números alineados y desplazamiento interno de la tabla
+sin desbordamiento horizontal de página. Se adelantaron resultado/cantidad sobre los IDs y se
+acortó la selección del intento. Los importes de revisión son sintéticos. El asesor de seguridad
+de Supabase no reportó hallazgos; esta ampliación no altera permisos ni estructura de tablas.
+
 ## Configuración en Streamlit Community Cloud
 
 1. En el panel de Alpaca, elige **Paper Trading** y genera las dos **API Keys** de esa cuenta.

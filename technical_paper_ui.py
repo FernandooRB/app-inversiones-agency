@@ -20,16 +20,10 @@ from technical_paper import (
     signal_event,
     signal_key,
 )
-from technical_paper_store import SQLitePaperStore, SupabasePaperStore
+from technical_paper_store import paper_store_for
 from watchlist_store import WatchlistStore
 
 MEXICO_CITY = ZoneInfo("America/Mexico_City")
-
-
-def paper_store_for(store: WatchlistStore | SupabaseWatchlistStore):
-    if isinstance(store, SupabaseWatchlistStore):
-        return SupabasePaperStore(store)
-    return SQLitePaperStore(store.path.with_suffix(".paper.db"))
 
 
 def _load_events(store, issuer: str, subject: str, *, refresh: bool = False) -> list[PaperEvent]:

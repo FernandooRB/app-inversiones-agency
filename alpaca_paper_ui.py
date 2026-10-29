@@ -73,7 +73,8 @@ def render_alpaca_paper(
     if watchlist_store is None:
         _render_account(snapshot)
         return
-    account_tab, order_tab = st.tabs(["Cuenta y órdenes", "Orden limitada de prueba"])
+    account_tab, order_tab, results_tab = st.tabs([
+        "Cuenta y órdenes", "Orden limitada de prueba", "Resultados y señales"])
     with account_tab:
         _render_account(snapshot)
     with order_tab:
@@ -82,6 +83,13 @@ def render_alpaca_paper(
         render_paper_orders(client, watchlist_store, issuer, subject,
                             client_loader=lambda: (client_factory or configured_alpaca_paper)(
                                 issuer, subject))
+    with results_tab:
+        from alpaca_results_ui import render_paper_results
+
+        render_paper_results(watchlist_store, issuer, subject, snapshot,
+                             client_loader=lambda: (client_factory or configured_alpaca_paper)(
+                                 issuer, subject),
+                             expected_signature=client.configuration_signature)
 
 
 def _render_account(snapshot):

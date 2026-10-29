@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -49,6 +50,7 @@ class LimitDraft:
     prepared_at: datetime
     market_open: bool
     next_open: datetime
+    research_json: str | None = None
 
     def payload(self) -> dict:
         symbol, side, qty, price = limit_inputs(self.symbol, self.side, self.quantity, self.limit_price)
@@ -59,9 +61,16 @@ class LimitDraft:
                 "order_class": "simple", "client_order_id": self.client_order_id}
 
     def to_json(self):
-        return {"version": 1, **self.payload(), "prepared_at": self.prepared_at.isoformat(),
+        result = {"version": 1, **self.payload(), "prepared_at": self.prepared_at.isoformat(),
                 "market_open": self.market_open, "next_open": self.next_open.isoformat(),
                 "purpose": "manual_paper_execution_test"}
+        if self.research_json is not None:
+            from alpaca_signal_context import context_json
+
+            context = json.loads(self.research_json)
+            context_json(context, self.symbol, self.prepared_at)
+            result["signal_context"] = context
+        return result
 
     @classmethod
     def from_json(cls, account_id: str, row: dict):
@@ -76,6 +85,13 @@ class LimitDraft:
                     or draft.next_open.tzinfo is None or any(
                         row.get(key) != value for key, value in draft.payload().items())):
                 raise ValueError
+            if row.get("signal_context") is not None:
+                from dataclasses import replace
+
+                from alpaca_signal_context import context_json
+
+                draft = replace(draft, research_json=context_json(
+                    row["signal_context"], draft.symbol, draft.prepared_at))
             return draft
         except (KeyError, TypeError, ValueError, AttributeError):
             raise AlpacaPaperError("La propuesta guardada contiene datos inválidos.") from None
@@ -115,8 +131,14 @@ def validate_receipt(draft: LimitDraft, row: dict) -> dict:
                 or (filled > 0 and (price is None or price <= 0))
                 or (status == "filled" and filled != draft.quantity)):
             raise ValueError
+        filled_at = row.get("filled_at")
+        if filled_at is not None:
+            stamp = datetime.fromisoformat(filled_at)
+            if stamp.tzinfo is None or stamp < draft.prepared_at:
+                raise ValueError
         return {**expected, "id": order_id, "status": status, "filled_qty": str(filled),
-                "filled_avg_price": str(price) if price is not None else None}
+                "filled_avg_price": str(price) if price is not None else None,
+                **({"filled_at": filled_at} if filled_at is not None else {})}
     except (KeyError, TypeError, ValueError, AttributeError):
         raise AlpacaPaperError(
             "La respuesta de Alpaca no confirma la orden revisada; requiere conciliación."
