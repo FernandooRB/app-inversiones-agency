@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from alpaca_alerts import active_alerts, observation, observation_key
+from alpaca_alerts import active_alerts, observation, observation_record_key
 from alpaca_paper import AlpacaPaperError
 from alpaca_risk import plan_payload, settings_payload
 from alpaca_trial_store import exit_plans, latest, stable_key, trial_store_for
@@ -255,7 +255,8 @@ def _render_alerts(store, issuer, subject, snapshot, current_client, symbols, hi
                                 "currency": "",
                             }
                         store.append(
-                            issuer, subject, current.account.id, "observation", row, key=observation_key(row)
+                            issuer, subject, current.account.id, "observation", row,
+                            key=observation_record_key(row),
                         )
                 events = store.load(issuer, subject, current.account.id)
             observations = {}
