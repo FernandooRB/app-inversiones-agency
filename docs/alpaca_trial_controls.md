@@ -86,6 +86,11 @@ exposición. Se guardan sin sobrescribir la primera observación del aviso, se p
 revisados y conservan historial. Reconocer un aviso no desactiva un límite de compra.
 
 **Actualizar señales y alertas** evalúa sesiones terminadas con el motor de señales existente.
+Cada consulta del proveedor conserva su hora en un registro nuevo, aunque la sesión y la señal
+coincidan con la consulta anterior. Repetir la misma respuesta almacenada en caché es idempotente
+y conserva su hora original. La vigencia usa la consulta más reciente; los avisos de cambio usan
+la identidad de la señal para evitar duplicarlos al actualizar. Las observaciones anteriores y
+sus fechas permanecen inmutables, incluidos los registros del formato anterior.
 El interruptor opcional consulta precios cada 60 segundos mientras la sesión de la app permanece
 activa. Las señales se recalculan con el botón; se avisa si la consulta tiene más de una hora.
 La cuenta se considera vencida para avisos tras 15 minutos sin consultar. Cada consulta verifica

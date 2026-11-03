@@ -21,9 +21,15 @@ def observation(history, snapshot):
 
 
 def observation_key(row):
+    """Logical signal identity, used to deduplicate change alerts across consultations."""
     return stable_key(
         "observation", "|".join(row[k] for k in ("symbol", "session", "signal", "strategy_version"))
     )
+
+
+def observation_record_key(row):
+    """Persist each provider consultation while making retries of the same response idempotent."""
+    return stable_key("observation", observation_key(row) + "|" + row["fetched_at"])
 
 
 def active_alerts(snapshot, events, observations, *, now=None):
@@ -122,7 +128,8 @@ def active_alerts(snapshot, events, observations, *, now=None):
             (
                 e.payload
                 for e in reversed(events)
-                if e.kind == "observation" and e.payload["symbol"] == symbol and e.key != key
+                if e.kind == "observation" and e.payload["symbol"] == symbol
+                and observation_key(e.payload) != key
             ),
             None,
         )
