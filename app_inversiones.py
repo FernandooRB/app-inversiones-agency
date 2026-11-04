@@ -12,7 +12,9 @@ import streamlit as st
 
 from access import require_access
 from account_scope import read_account_scope_csv
+from allocation_analysis import calculate_allocation
 from allocation_policy import parse_asset_classes, parse_class_limits, policy_table
+from analysis_session import analysis_key, session_call, session_compute
 from backtesting import run_holdout_backtest
 from benchmarking import analyze_benchmark
 from black_litterman import black_litterman_posterior, parse_absolute_views
@@ -43,21 +45,18 @@ from implementation_costs import (
 from instrument_identity import read_instrument_identity_csv
 from instruments import analysis_inputs, display_catalog, load_catalog
 from liquidity import merge_liquidity_index, read_liquidity_rate_csv
+from model_estimation import DEFAULT_METHOD, METHOD_LABELS
 from multi_cut import run_multi_cut_backtest
 from portfolio_core import (
     PortfolioError,
     PortfolioMetrics,
-    annualized_moments,
-    calculate_returns,
     calculate_risk_metrics,
     download_adjusted_prices,
-    efficient_frontier,
     feasible_reference_weights,
     normalize_tickers,
     optimize_portfolio,
     parse_current_weights,
     portfolio_statistics,
-    random_portfolios,
 )
 from position_bridge import read_position_bridge_csv
 from price_quality import assess_price_quality
@@ -107,6 +106,17 @@ if work_area in {"Expedientes", "Guía operativa"}:
         render_workspace()
     else:
         render_operations()
+    st.stop()
+
+
+analysis_mode = st.pills(
+    "Modo de análisis", ["Por cuenta", "Análisis avanzado"],
+    default="Análisis avanzado", key="analysis_mode",
+)
+if analysis_mode == "Por cuenta":
+    from account_workflow_ui import render_account_workflow
+
+    render_account_workflow()
     st.stop()
 
 
@@ -218,6 +228,11 @@ with st.sidebar:
         'Supuesto manual: verifica la tasa para la moneda base y el periodo; no se consulta una '
         'fuente.'
     )
+    covariance_method = st.selectbox(
+        "Estimador de covarianza", list(METHOD_LABELS),
+        index=list(METHOD_LABELS).index(DEFAULT_METHOD), format_func=METHOD_LABELS.get,
+        help="El mismo método se usa en el piloto local. La calibración requiere 100 retornos.",
+    )
     max_weight = st.slider("Peso máximo por activo", 10, 100, 60, 5) / 100
     report_objective = st.text_input(
         "Objetivo y alcance del informe (opcional)", max_chars=500,
@@ -234,7 +249,8 @@ with st.sidebar:
         benchmark_name_input = st.text_input("Nombre del benchmark", "Referencia de mercado")
         benchmark_quote = st.selectbox(
             "Moneda de cotización del benchmark",
-            ["MXN", "USD", "EUR", "GBP", "CAD", "JPY", "CHF"],
+            ["USD", "MXN", "EUR", "GBP", "CAD", "JPY", "CHF"],
+            index=None, placeholder="Confirma la moneda del benchmark",
         )
         st.caption(
             "Se descarga como serie separada, se convierte a la moneda base y se compara "
@@ -841,6 +857,7 @@ if order_tariff_contents:
         "plantilla_alcance_cuenta.csv", "text/csv",
     )
 settings = (
+    covariance_method,
     tickers_input,
     start_date,
     end_date,
@@ -924,6 +941,8 @@ if st.session_state.get("analysis_settings") != settings:
     st.stop()
 
 try:
+    if benchmark_ticker_input.strip() and benchmark_quote is None:
+        raise PortfolioError("Confirma la moneda de cotización del benchmark antes de analizar.")
     if tariff_upload is not None and not tariff_contents:
         raise PortfolioError("El perfil de costos CSV cargado está vacío.")
     if order_tariff_upload is not None and not order_tariff_contents:
@@ -1238,23 +1257,14 @@ try:
                 position_bridge=position_bridge_result,
             ) if holdings_result is not None else None
         )
-        returns = calculate_returns(prices)
-        mean_returns, covariance = annualized_moments(returns)
-        max_sharpe = optimize_portfolio(
-            mean_returns, covariance, risk_free_rate, "max_sharpe", max_weight,
-            allocation_groups,
-        )
-        min_volatility = optimize_portfolio(
-            mean_returns, covariance, risk_free_rate, "min_volatility", max_weight,
-            allocation_groups,
-        )
-        frontier = efficient_frontier(
-            mean_returns, covariance, max_weight, allocation_groups=allocation_groups
-        )
-        random_set = random_portfolios(
-            mean_returns, covariance, risk_free_rate, max_weight=max_weight,
-            allocation_groups=allocation_groups,
-        )
+        model_key = analysis_key(prices, risk_free_rate, max_weight, allocation_groups, covariance_method)
+        model = session_compute(st.session_state, "allocation", model_key, lambda: calculate_allocation(
+            prices, risk_free_rate, max_weight, allocation_groups, covariance_method,
+        ))
+        returns = model.returns
+        mean_returns, covariance = model.moments.mean, model.moments.covariance
+        max_sharpe, min_volatility = model.max_sharpe, model.min_volatility
+        frontier, random_set = model.frontier, model.random_set
         risk = calculate_risk_metrics(returns, max_sharpe.weights, confidence, horizon)
         alternatives = [
             PortfolioAlternative("Máximo Sharpe", max_sharpe, risk),
@@ -1297,7 +1307,7 @@ try:
             else:
                 equilibrium_weights = equal_weights
                 black_litterman_source = "referencia simple factible"
-            black_litterman_result = black_litterman_posterior(
+            black_litterman_result = session_call(st.session_state, black_litterman_posterior,
                 covariance,
                 equilibrium_weights,
                 risk_free_rate,
@@ -1307,7 +1317,7 @@ try:
                     black_litterman_views_input, analysis_tickers
                 ),
             )
-            black_litterman_metrics = optimize_portfolio(
+            black_litterman_metrics = session_call(st.session_state, optimize_portfolio,
                 black_litterman_result.posterior_returns,
                 covariance,
                 risk_free_rate,
@@ -1323,7 +1333,7 @@ try:
                 ),
             ))
         risk_attributions = tuple(
-            attribute_volatility(
+            session_call(st.session_state, attribute_volatility,
                 covariance,
                 alternative.metrics.weights,
                 alternative_name=alternative.name,
@@ -1464,7 +1474,7 @@ try:
                 benchmark_fx,
             )[benchmark_ticker]
             benchmark_analyses = tuple(
-                analyze_benchmark(
+                session_call(st.session_state, analyze_benchmark,
                     returns, alternative.metrics.weights, benchmark_prices,
                     benchmark_name=benchmark_name_input,
                     portfolio_name=alternative.name,
@@ -1477,6 +1487,8 @@ try:
                 f"cotización declarada {benchmark_quote}; convertido a {base_currency}"
             )
 
+    data_source += f". Estimador: {model.moments.description}"
+    st.caption(f"Estimador aplicado: {model.moments.description}")
     if download.rejected_tickers:
         st.warning("Tickers excluidos por falta de datos: " + ", ".join(download.rejected_tickers))
     st.success(
@@ -2198,7 +2210,7 @@ try:
             "terminan en la misma fecha; diferencias grandes indican sensibilidad histórica."
         )
         if st.checkbox("Comparar ventanas de estimación"):
-            sensitivity = analyze_allocation_sensitivity(
+            sensitivity = session_call(st.session_state, analyze_allocation_sensitivity,
                 returns, risk_free_rate=risk_free_rate, max_weight=max_weight,
                 allocation_groups=allocation_groups,
             )
@@ -2310,7 +2322,7 @@ try:
                     )
                 seed = st.number_input("Semilla reproducible", min_value=0, value=42, step=1)
                 scenario = next(item for item in alternatives if item.name == selected)
-                simulated = simulate_portfolio_paths(
+                simulated = session_call(st.session_state, simulate_portfolio_paths,
                     returns, scenario.metrics.weights, initial_value=portfolio_value,
                     months=years * 12, paths=path_count,
                     monthly_contribution=contribution, monthly_withdrawal=withdrawal,
@@ -2393,7 +2405,7 @@ try:
         if st.checkbox("Calcular pruebas de estrés"):
             historical_parts = []
             for alternative in alternatives:
-                history = historical_worst_windows(
+                history = session_call(st.session_state, historical_worst_windows,
                     returns, alternative.metrics.weights, horizons=(1, 5, 21)
                 )
                 history.insert(0, "Escenario", alternative.name)
@@ -2454,7 +2466,7 @@ try:
                     )
                 shocks = pd.Series(shocks_array, index=analysis_tickers, name="Shock")
                 shock_results = {
-                    alternative.name: deterministic_shock(
+                    alternative.name: session_call(st.session_state, deterministic_shock,
                         alternative.metrics.weights, shocks_array, portfolio_value,
                         labels=analysis_tickers,
                     )
@@ -2528,7 +2540,7 @@ try:
                     "Costo inicial por rotación (puntos base)",
                     min_value=0.0, max_value=500.0, value=0.0, step=5.0,
                 )
-                backtest = run_holdout_backtest(
+                backtest = session_call(st.session_state, run_holdout_backtest,
                     returns, training_fraction=training_percent / 100,
                     risk_free_rate=risk_free_rate, max_weight=max_weight,
                     current_weights=current_weights,
@@ -2556,7 +2568,7 @@ try:
                 st.dataframe(display, width="stretch")
                 st.line_chart(backtest.equity_curves, y_label="Capital relativo (1 = inicio)")
                 if st.checkbox("Comparar estimadores de covarianza (corte único)"):
-                    diagonal = run_holdout_backtest(
+                    diagonal = session_call(st.session_state, run_holdout_backtest,
                         returns, training_fraction=training_percent / 100,
                         risk_free_rate=risk_free_rate, max_weight=max_weight,
                         current_weights=current_weights,
@@ -2573,7 +2585,7 @@ try:
                         if backtest.training_observations < 100:
                             st.info("Se necesitan 100 retornos iniciales para calibrar.")
                         else:
-                            calibrated = run_holdout_backtest(
+                            calibrated = session_call(st.session_state, run_holdout_backtest,
                                 returns, training_fraction=training_percent / 100,
                                 risk_free_rate=risk_free_rate, max_weight=max_weight,
                                 current_weights=current_weights,
@@ -2652,7 +2664,7 @@ try:
                         "Muestral": 0.0, "Diagonal 50%": 0.5,
                         "Calibrada con bloques previos": "cv",
                     }[estimator]
-                    multi = run_multi_cut_backtest(
+                    multi = session_call(st.session_state, run_multi_cut_backtest,
                         returns, risk_free_rate=risk_free_rate, max_weight=max_weight,
                         current_weights=current_weights,
                         trading_cost_bps=multi_cost,
@@ -2728,7 +2740,7 @@ try:
                     "Costo por rotación en cada revisión (puntos base)",
                     min_value=0.0, max_value=500.0, value=0.0, step=5.0,
                 )
-                walk = run_walk_forward_backtest(
+                walk = session_call(st.session_state, run_walk_forward_backtest,
                     returns, training_fraction=train_percent / 100,
                     cadence_months=cadence, risk_free_rate=risk_free_rate,
                     max_weight=max_weight,
@@ -2754,7 +2766,7 @@ try:
                 st.dataframe(display, width="stretch")
                 st.line_chart(walk.equity_curves, y_label="Capital relativo (1 = inicio)")
                 if st.checkbox("Comparar estimadores de covarianza (revisiones)"):
-                    diagonal_walk = run_walk_forward_backtest(
+                    diagonal_walk = session_call(st.session_state, run_walk_forward_backtest,
                         returns, training_fraction=train_percent / 100,
                         cadence_months=cadence, risk_free_rate=risk_free_rate,
                         max_weight=max_weight,
@@ -2768,7 +2780,7 @@ try:
                         if int(len(returns) * train_percent / 100) < 100:
                             st.info("Se necesitan 100 retornos iniciales para calibrar.")
                         else:
-                            calibrated_walk = run_walk_forward_backtest(
+                            calibrated_walk = session_call(st.session_state, run_walk_forward_backtest,
                                 returns, training_fraction=train_percent / 100,
                                 cadence_months=cadence, risk_free_rate=risk_free_rate,
                                 max_weight=max_weight,
@@ -2842,78 +2854,93 @@ try:
         "se documentan fuera de esta app."
     )
 
-    pdf = create_pdf_report(
-        analysis_tickers,
-        prices.index.min().date(),
-        prices.index.max().date(),
-        max_sharpe,
-        risk,
-        portfolio_value,
-        base_currency=base_currency,
-        risk_free_rate=risk_free_rate,
-        max_weight=max_weight,
-        observations=len(returns),
-        quotes=analysis_quotes,
-        data_source=data_source,
-        holdings_audit=holdings_report_audit,
-        price_quality_issues=price_quality_issues,
-        implementation_costs=(implementation_estimates[0],),
-        implementation_cost_assumptions=implementation_assumptions,
-        implementation_cost_source=implementation_source,
-        implementation_cost_source_date=implementation_source_date,
-        account_scope=account_scope,
-        tax_reserve_estimates=tax_reserve_estimates[:1],
-        tax_basis_profile=tax_basis_profile,
-        tax_cash_flow_ledger=tax_cash_flow_ledger,
-        allocation_policy=allocation_policy_table,
-        benchmark_analyses=benchmark_analyses[:1],
-        benchmark_source=benchmark_source,
-        risk_attributions=risk_attributions[:1],
-    )
-    st.download_button(
-        "Descargar reporte metodológico interno PDF", pdf,
-        f"reporte_interno_portafolio_{date.today()}.pdf", "application/pdf"
-    )
-    comparison_pdf = create_comparison_pdf_report(
-        analysis_tickers,
-        prices.index.min().date(),
-        prices.index.max().date(),
-        tuple(alternatives),
-        portfolio_value,
-        base_currency=base_currency,
-        risk_free_rate=risk_free_rate,
-        observations=len(returns),
-        quotes=analysis_quotes,
-        data_source=data_source,
-        holdings_audit=holdings_report_audit,
-        price_quality_issues=price_quality_issues,
-        implementation_costs=implementation_estimates,
-        implementation_cost_assumptions=implementation_assumptions,
-        implementation_cost_source=implementation_source,
-        implementation_cost_source_date=implementation_source_date,
-        account_scope=account_scope,
-        tax_reserve_estimates=tax_reserve_estimates,
-        tax_basis_profile=tax_basis_profile,
-        tax_cash_flow_ledger=tax_cash_flow_ledger,
-        simulation=simulation_report,
-        stress=stress_report,
-        allocation_policy=allocation_policy_table,
-        benchmark_analyses=benchmark_analyses,
-        benchmark_source=benchmark_source,
-        risk_attributions=risk_attributions,
-        black_litterman=black_litterman_result,
-        black_litterman_source=black_litterman_source,
-        executive_summary=True,
-        objective=report_objective.strip() or None,
-    )
-    st.download_button(
-        (
-            "Descargar comparativo interno ampliado PDF"
-            if simulation_report is not None or stress_report is not None
-            else "Descargar comparativo interno de carteras PDF"
-        ), comparison_pdf,
-        f"comparativo_interno_carteras_{date.today()}.pdf", "application/pdf",
-    )
+    report_key = analysis_key(settings, prices, tuple(alternatives), simulation_report,
+                              stress_report, report_objective, data_source)
+    if st.session_state.get("_analysis_pdfs", {}).get("key") != report_key:
+        st.session_state["_analysis_pdfs"] = {"key": report_key}
+    report_files = dict(st.session_state["_analysis_pdfs"])
+    pdf = report_files.get("method")
+    if st.button("Generar reporte metodológico PDF"):
+        pdf = create_pdf_report(
+            analysis_tickers,
+            prices.index.min().date(),
+            prices.index.max().date(),
+            max_sharpe,
+            risk,
+            portfolio_value,
+            base_currency=base_currency,
+            risk_free_rate=risk_free_rate,
+            max_weight=max_weight,
+            observations=len(returns),
+            quotes=analysis_quotes,
+            data_source=data_source,
+            holdings_audit=holdings_report_audit,
+            price_quality_issues=price_quality_issues,
+            implementation_costs=(implementation_estimates[0],),
+            implementation_cost_assumptions=implementation_assumptions,
+            implementation_cost_source=implementation_source,
+            implementation_cost_source_date=implementation_source_date,
+            account_scope=account_scope,
+            tax_reserve_estimates=tax_reserve_estimates[:1],
+            tax_basis_profile=tax_basis_profile,
+            tax_cash_flow_ledger=tax_cash_flow_ledger,
+            allocation_policy=allocation_policy_table,
+            benchmark_analyses=benchmark_analyses[:1],
+            benchmark_source=benchmark_source,
+            risk_attributions=risk_attributions[:1],
+        )
+        report_files["method"] = pdf
+        st.session_state["_analysis_pdfs"] = report_files
+    if pdf is not None:
+        st.download_button(
+            "Descargar reporte metodológico interno PDF", pdf,
+            f"reporte_interno_portafolio_{date.today()}.pdf", "application/pdf", on_click="ignore",
+        )
+    comparison_pdf = report_files.get("comparison")
+    if st.button("Generar comparativo PDF"):
+        comparison_pdf = create_comparison_pdf_report(
+            analysis_tickers,
+            prices.index.min().date(),
+            prices.index.max().date(),
+            tuple(alternatives),
+            portfolio_value,
+            base_currency=base_currency,
+            risk_free_rate=risk_free_rate,
+            observations=len(returns),
+            quotes=analysis_quotes,
+            data_source=data_source,
+            holdings_audit=holdings_report_audit,
+            price_quality_issues=price_quality_issues,
+            implementation_costs=implementation_estimates,
+            implementation_cost_assumptions=implementation_assumptions,
+            implementation_cost_source=implementation_source,
+            implementation_cost_source_date=implementation_source_date,
+            account_scope=account_scope,
+            tax_reserve_estimates=tax_reserve_estimates,
+            tax_basis_profile=tax_basis_profile,
+            tax_cash_flow_ledger=tax_cash_flow_ledger,
+            simulation=simulation_report,
+            stress=stress_report,
+            allocation_policy=allocation_policy_table,
+            benchmark_analyses=benchmark_analyses,
+            benchmark_source=benchmark_source,
+            risk_attributions=risk_attributions,
+            black_litterman=black_litterman_result,
+            black_litterman_source=black_litterman_source,
+            executive_summary=True,
+            objective=report_objective.strip() or None,
+        )
+        report_files["comparison"] = comparison_pdf
+        st.session_state["_analysis_pdfs"] = report_files
+    if comparison_pdf is not None:
+        st.download_button(
+            (
+                "Descargar comparativo interno ampliado PDF"
+                if simulation_report is not None or stress_report is not None
+                else "Descargar comparativo interno de carteras PDF"
+            ), comparison_pdf,
+            f"comparativo_interno_carteras_{date.today()}.pdf", "application/pdf", on_click="ignore",
+        )
     st.warning(
         "Los resultados dependen de datos históricos y supuestos estadísticos. Los costos "
         "configurables de simulación, rebalanceo e implementación son hipotéticos; las métricas "
@@ -2922,17 +2949,18 @@ try:
     )
     from workspace_ui import render_archive_report
 
-    render_archive_report(comparison_pdf, {
-        "analysis_settings": settings,
-        "assets": analysis_tickers,
-        "effective_start": prices.index.min().date().isoformat(),
-        "effective_end": prices.index.max().date().isoformat(),
-        "weights": weights.to_dict(orient="records"),
-        "objective": report_objective,
-        "capital": portfolio_value,
-        "currency": base_currency,
-        "notes": "Internal research; model metrics exclude implementation costs and taxes.",
-    })
+    if comparison_pdf is not None:
+        render_archive_report(comparison_pdf, {
+            "analysis_settings": settings,
+            "assets": analysis_tickers,
+            "effective_start": prices.index.min().date().isoformat(),
+            "effective_end": prices.index.max().date().isoformat(),
+            "weights": weights.to_dict(orient="records"),
+            "objective": report_objective,
+            "capital": portfolio_value,
+            "currency": base_currency,
+            "notes": "Internal research; model metrics exclude implementation costs and taxes.",
+        })
 except PortfolioError as exc:
     st.error(str(exc))
 except Exception as exc:

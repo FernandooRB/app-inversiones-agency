@@ -9,6 +9,7 @@ def render_shell(areas: tuple[str, ...] = ("Análisis", "Seguimiento", "Expedien
     st.html("""<style>
       [data-testid="stMainBlockContainer"] {padding-top:4.25rem; padding-bottom:2rem;}
       [data-testid="stSidebar"] {background:#f8f8f8;}
+      [data-testid="stAppViewContainer"] {font-variant-numeric:tabular-nums;}
       h1 {font-size:1.55rem!important; font-weight:600!important; padding-top:.3rem!important;}
       h2,h3 {font-size:1.05rem!important; font-weight:600!important;}
       [data-testid="stMetricValue"] {font-size:1.65rem; font-variant-numeric:tabular-nums;}

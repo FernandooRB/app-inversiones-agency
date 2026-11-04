@@ -325,3 +325,16 @@ Al cerrar este cambio, se anotarán aquí el resultado de CI y revisión.
   El libro conserva `REVIEW_REQUIRED` y no se publica con los documentos.
 - Esta aclaración modifica guías, no código. Se revisaron enlaces, alcance y ausencia de
   identificadores privados en el cambio público; la conciliación financiera sigue abierta.
+
+## Análisis por cuenta y prioridades 1 a 8 (2026-11-03)
+
+La [entrega y su verificación](priority_1_8_delivery_2026-11-03.md) conectan importación GBM XLSX
+revisada, alternativas con costos, ejecuciones por cuenta, exposición parcial de fondos, comparación
+de cortes y metas con Monte Carlo. La [guía de uso](account_workflow.md) documenta el recorrido.
+
+Se corrigieron moneda inicial del benchmark, estimador compartido y repetición del cálculo/PDF.
+La suite completa aprobó 662 pruebas; los tres recorridos de interfaz afectados por el formato final
+volvieron a pasar. Ruff, `pip check` y `git diff --check` resultaron correctos. Playwright/Edge verificó
+preparación y resultados a 1440/768/390 px y el recorrido de PDF, guardado cifrado y reapertura con
+insumos y PDF archivado. Las cuentas fueron sintéticas; el registro de la entrega conserva alcance,
+advertencias del inspector y antecedentes de las repeticiones.

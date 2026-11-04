@@ -21,6 +21,7 @@ class SimulationResult:
     seed: int
     shortfall_paths: np.ndarray
     total_withdrawn: np.ndarray
+    unpaid_fees: np.ndarray | None = None
 
     def bands(self) -> pd.DataFrame:
         percentiles = np.quantile(self.monthly_values, [0.05, 0.5, 0.95], axis=1).T
@@ -101,6 +102,8 @@ def simulate_portfolio_paths(
     method: str = "bootstrap_blocks",
     seed: int = 42,
     block_days: int = 21,
+    monthly_fixed_fee: float = 0.0,
+    fee_exempt_assets: tuple[int, ...] = (),
 ) -> SimulationResult:
     """Simulate correlated asset returns and deterministic cash-flow rules.
 
@@ -116,9 +119,18 @@ def simulate_portfolio_paths(
         annual_fee, transaction_cost_bps, rebalance_months, inflation_rate, seed,
         block_days, method,
     )
+    if (type(monthly_fixed_fee) not in (int, float)
+            or not np.isfinite(monthly_fixed_fee) or monthly_fixed_fee < 0):
+        raise PortfolioError("El cargo fijo mensual debe ser finito y no negativo.")
     rng = np.random.default_rng(seed)
     cost_rate = transaction_cost_bps / 10_000
     fee_factor = (1 - annual_fee) ** (1 / (12 * SESSIONS_PER_MONTH))
+    if (not isinstance(fee_exempt_assets, tuple) or len(set(fee_exempt_assets)) != len(fee_exempt_assets)
+            or any(type(index) is not int or not 0 <= index < len(target_weights)
+                   for index in fee_exempt_assets)):
+        raise PortfolioError("Los activos exentos de cargo porcentual deben ser índices únicos y válidos.")
+    fee_factors = np.full(len(target_weights), fee_factor)
+    fee_factors[list(fee_exempt_assets)] = 1.0
     holdings = np.broadcast_to(
         initial_value * (1 - cost_rate) * target_weights, (paths, len(target_weights))
     ).copy()
@@ -127,6 +139,7 @@ def simulate_portfolio_paths(
     invested = initial_value + monthly_contribution * np.arange(months + 1)
     shortfall_paths = np.zeros(paths, dtype=bool)
     total_withdrawn = np.zeros(paths)
+    unpaid_fees = np.zeros(paths)
 
     if method == "lognormal":
         log_returns = np.log1p(data)
@@ -145,11 +158,18 @@ def simulate_portfolio_paths(
         else:
             log_draw = rng.standard_normal((paths, len(target_weights))) @ factor.T + log_mean
             daily_growth = np.exp(log_draw)
-        holdings *= daily_growth * fee_factor
+        holdings *= daily_growth * fee_factors
 
         if day % SESSIONS_PER_MONTH == 0:
             month = day // SESSIONS_PER_MONTH
             holdings += monthly_contribution * (1 - cost_rate) * target_weights
+            if monthly_fixed_fee:
+                before_fee = holdings.sum(axis=1)
+                paid_fee = np.minimum(before_fee, monthly_fixed_fee)
+                unpaid_fees += monthly_fixed_fee - paid_fee
+                fee_fraction = np.divide(before_fee - paid_fee, before_fee,
+                                         out=np.zeros_like(before_fee), where=before_fee > 0)
+                holdings *= fee_fraction[:, None]
             if monthly_withdrawal > 0:
                 before = holdings.sum(axis=1)
                 gross_sale = np.minimum(before, monthly_withdrawal / (1 - cost_rate))
@@ -174,5 +194,5 @@ def simulate_portfolio_paths(
     real_terminal = monthly_values[-1] / (1 + inflation_rate) ** (months / 12)
     return SimulationResult(
         monthly_values, invested, real_terminal, method, seed,
-        shortfall_paths, total_withdrawn,
+        shortfall_paths, total_withdrawn, unpaid_fees,
     )

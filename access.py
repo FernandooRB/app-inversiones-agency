@@ -4,6 +4,7 @@ import json
 import math
 import time
 from collections.abc import Mapping
+from hashlib import sha256
 
 import streamlit as st
 
@@ -32,6 +33,14 @@ def authorized(claims, policy, now=None):
         for entry in entries
         if isinstance(entry, Mapping)
     )
+
+
+def isolate_session_identity(state, claims):
+    """Private inputs and computed results must not survive an identity change."""
+    identity = sha256(json.dumps([claims.get("iss"), claims.get("sub")]).encode()).hexdigest()
+    if state.get("_authorized_identity") != identity:
+        state.clear()
+        state["_authorized_identity"] = identity
 
 
 def require_access():
@@ -71,6 +80,7 @@ def require_access():
             st.session_state.clear()
             st.logout()
         st.stop()
+    isolate_session_identity(st.session_state, claims)
     if st.sidebar.button("Cerrar sesión"):
         st.session_state.clear()
         st.logout()
