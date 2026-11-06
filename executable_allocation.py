@@ -8,6 +8,7 @@ from scipy.optimize import Bounds, LinearConstraint, milp, minimize
 
 from implementation_costs import ImplementationCostAssumptions, _validate_assumptions
 from portfolio_core import PortfolioError
+from portfolio_exposure import _text
 
 
 def cost_aware_target(
@@ -87,6 +88,14 @@ def executable_plan(
             "Confirma cotizaciones sin ajuste e importa cantidad, precio y lote de 1 a 25 activos."
         )
     frame = positions.copy()
+    if (
+        not set(frame).issubset(required | {"PesoObjetivo", "Clase"})
+        or not frame["Instrumento"].map(_text).all()
+        or ("Clase" in frame and not frame["Clase"].map(_text).all())
+    ):
+        raise PortfolioError(
+            "Las columnas y etiquetas de la propuesta no tienen un formato seguro de exportación."
+        )
     if frame["Instrumento"].duplicated().any() or frame["Instrumento"].astype(str).str.strip().eq("").any():
         raise PortfolioError("Cada instrumento debe aparecer una sola vez.")
     try:

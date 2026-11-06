@@ -396,3 +396,12 @@ def test_fractional_lots_reserve_cash_for_cent_rounding():
     assert (result["detail"]["Comisión e IVA"] * 100).round().tolist() == pytest.approx(
         (result["detail"]["Comisión e IVA"] * 100).tolist()
     )
+
+
+def test_executable_csv_rejects_formula_labels_and_unreviewed_extra_columns():
+    for frame in (
+        positions().assign(Instrumento=["=EXTERNAL()", "SIM-B"]),
+        positions().assign(Notes="=EXTERNAL()"),
+    ):
+        with pytest.raises(PortfolioError, match="exportación"):
+            executable_plan(frame, 0, [0.5, 0.5], quotes_confirmed=True)

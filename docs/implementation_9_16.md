@@ -34,6 +34,9 @@ Validación local de la entrega:
 - Inspector visual sin fallos; advertencias de bordes de controles nativos y tablas auxiliares
   de accesibilidad. Las cifras visibles se revisaron y se muestran alineadas a la derecha.
 - Blueprint validado sin errores contra `https://render.com/schema/render.yaml.json`.
-- Construcción local del contenedor pendiente: Docker Desktop tiene el motor detenido.
-  La rama incluye una comprobación de construcción y arranque cerrado en GitHub Actions.
+- El contenedor se construyó en GitHub Actions y aprobó arranque cerrado sin configuración,
+  arranque válido con cuenta ficticia, uso sin privilegios, persistencia de borradores tras
+  reinicio y respaldo/restauración. El motor local de Docker permanece detenido.
+- La exportación de propuestas rechaza etiquetas con fórmulas y columnas no revisadas;
+  su prueba final y el módulo de operación correspondiente también aprobaron.
 - No se ha activado un alojamiento ni enviado documentación real a servicios externos.
