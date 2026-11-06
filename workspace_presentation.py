@@ -3,7 +3,9 @@
 import streamlit as st
 
 
-def render_shell(areas: tuple[str, ...] = ("Análisis", "Seguimiento", "Expedientes", "Guía operativa")):
+def render_shell(
+    areas: tuple[str, ...] = ("Análisis", "Operación", "Seguimiento", "Expedientes", "Guía operativa"),
+):
     # 256px parameter rail + 2 x 24px gutters + fluid canvas. At mobile width the
     # native Streamlit rail folds; form columns and the canvas remain fluid.
     st.html("""<style>

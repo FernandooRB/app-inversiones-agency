@@ -17,7 +17,7 @@ UNKNOWN = "Sin cobertura"
 def validate_metadata(metadata, assets, as_of=None):
     if not isinstance(metadata, dict) or not set(metadata).issubset(set(assets)):
         raise PortfolioError("La clasificación debe corresponder a los instrumentos de la cartera.")
-    fields = {"Tipo", "Emisor", "Sector", "Pais", "Moneda", "Fuente", "Fecha"}
+    fields = {"Tipo", "Emisor", "EmisorID", "Sector", "Pais", "Moneda", "Fuente", "Fecha"}
     for value in metadata.values():
         if not isinstance(value, dict) or not set(value).issubset(fields):
             raise PortfolioError("La clasificación del instrumento no tiene el formato esperado.")
@@ -50,10 +50,13 @@ def read_components(contents, assets, *, as_of=None):
         raise PortfolioError("Los componentes deben ser un CSV de hasta 2 MB.")
     try:
         frame = pd.read_csv(BytesIO(contents), dtype=str, keep_default_na=False)
-        if tuple(frame.columns) != COMPONENT_COLUMNS or frame.empty or len(frame) > 10000:
+        extended = (*COMPONENT_COLUMNS, "EmisorID")
+        if tuple(frame.columns) not in {COMPONENT_COLUMNS, extended} or frame.empty or len(frame) > 10000:
             raise ValueError
         frame = frame.map(lambda value: value.strip())
         if not all(frame[column].map(_text).all() for column in COMPONENT_COLUMNS if column != "Peso"):
+            raise ValueError
+        if "EmisorID" in frame and not frame["EmisorID"].map(_text).all():
             raise ValueError
         frame["Peso"] = pd.to_numeric(frame["Peso"], errors="raise")
         if (
@@ -104,6 +107,7 @@ def analyze_exposure(assets, weights, metadata, components=None, *, as_of=None):
                         "Componente": item["Componente"],
                         "Peso": float(weight * item["Peso"]),
                         "Emisor": item["Emisor"],
+                        "EmisorID": item.get("EmisorID", ""),
                         "Sector": item["Sector"],
                         "Pais": item["Pais"],
                         "Moneda": item["Moneda"],
@@ -123,6 +127,7 @@ def analyze_exposure(assets, weights, metadata, components=None, *, as_of=None):
                     "Peso": float(weight),
                     **{key: meta[key] for key in ("Emisor", "Sector", "Pais", "Moneda", "Fuente")},
                     "Fecha": meta.get("Fecha", "Declarada"),
+                    "EmisorID": meta.get("EmisorID", ""),
                     "Cubierto": True,
                 }
             )
@@ -139,6 +144,7 @@ def analyze_exposure(assets, weights, metadata, components=None, *, as_of=None):
                     "Fecha": "",
                     "Fuente": "No aportada",
                     "Cubierto": False,
+                    "EmisorID": "",
                 }
             )
     detail = pd.DataFrame(rows)
@@ -146,16 +152,25 @@ def analyze_exposure(assets, weights, metadata, components=None, *, as_of=None):
         field: detail.groupby(field, sort=True)["Peso"].sum().sort_values(ascending=False)
         for field in ("Emisor", "Sector", "Pais", "Moneda")
     }
+    # Preserve display names while grouping verified catalogue IDs across aliases.
+    detail["ClaveEmisor"] = ("ID: " + detail["EmisorID"]).where(detail["EmisorID"].ne(""), detail["Emisor"])
+    aggregates["Emisor"] = detail.groupby("ClaveEmisor")["Peso"].sum().sort_values(ascending=False)
+    dated = pd.to_datetime(detail["Fecha"], errors="coerce")
+    detail["AntiguedadDias"] = ((pd.Timestamp(as_of or date.today()) - dated).dt.days).astype("Int64")
     known = detail[detail["Cubierto"]]
-    counts = known.groupby("Emisor")["Instrumento"].nunique()
+    counts = known.groupby("ClaveEmisor")["Instrumento"].nunique()
     overlap = (
-        known[known["Emisor"].isin(counts[counts > 1].index)]
-        .groupby("Emisor")
+        known[known["ClaveEmisor"].isin(counts[counts > 1].index)]
+        .groupby("ClaveEmisor")
         .agg(Peso=("Peso", "sum"), Vehiculos=("Instrumento", "nunique"))
     )
     return {
         "detail": detail,
         "coverage": float(known["Peso"].sum()),
+        "identity_coverage": float(known.loc[known["EmisorID"].ne(""), "Peso"].sum()),
+        "fresh_coverage_90_days": float(
+            known.loc[known["AntiguedadDias"].le(90).fillna(False), "Peso"].sum()
+        ),
         "aggregates": aggregates,
         "overlap": overlap,
     }

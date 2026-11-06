@@ -93,6 +93,11 @@ st.set_page_config(page_title="SIG | Análisis y seguimiento de portafolios", la
 require_access()
 
 work_area = render_shell()
+if work_area == "Operación":
+    from operations_ui import render_account_operations
+
+    render_account_operations()
+    st.stop()
 if work_area == "Seguimiento":
     from technical_ui import render_technical
 

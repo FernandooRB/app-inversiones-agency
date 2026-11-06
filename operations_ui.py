@@ -1,0 +1,729 @@
+"""Account operations: reviewed evidence, ledger, implementation, feeds and wealth."""
+
+import base64
+import json
+from dataclasses import asdict
+from datetime import date
+from hashlib import sha256
+from io import BytesIO
+from pathlib import Path
+from time import monotonic
+from uuid import uuid4
+
+import pandas as pd
+import streamlit as st
+
+from account_workflow import code_fingerprint
+from analysis_session import analysis_key, session_compute
+from case_workspace import WorkspaceError
+from executable_allocation import cost_aware_target, executable_plan
+from gbm_documents import read_cfdi_evidence, read_statement
+from implementation_costs import ImplementationCostAssumptions
+from multi_currency_wealth import consolidate_wealth, consolidated_performance, match_internal_flows
+from operations_jobs import refresh_subscription
+from portfolio_core import PortfolioError
+from realized_performance import Flow, performance
+from transaction_ledger import COLUMNS, book_at, read_ledger, value_book
+
+
+def _key(name):
+    return name + "_" + st.session_state.get("_ops_context_key", "temporary")
+
+
+def _csv(upload):
+    if upload is None:
+        return None
+    if len(upload.getvalue()) > 2_000_000:
+        raise PortfolioError("El archivo supera 2 MB.")
+    try:
+        return pd.read_csv(BytesIO(upload.getvalue()), keep_default_na=False)
+    except (ValueError, UnicodeError, pd.errors.ParserError):
+        raise PortfolioError("No se pudo leer el CSV con encabezados.") from None
+
+
+def _template(label, columns, key):
+    st.download_button(
+        label, (",".join(columns) + "\n").encode(), key + ".csv", "text/csv", key=key, on_click="ignore"
+    )
+
+
+def _context():
+    from workspace_ui import configured_workspace
+
+    try:
+        store, principal, _ = configured_workspace()
+    except WorkspaceError:
+        st.caption("Operación temporal · abre Expedientes para configurar conservación cifrada por cuenta.")
+        return None, None, None, None
+    cases = {item["id"]: item["alias"] for item in store.list_cases(principal) if not item["archived"]}
+    if not cases:
+        st.info("Crea un expediente y una cuenta para conservar los resultados de operación.")
+        return store, principal, None, None
+    chosen = st.selectbox("Expediente de operación", list(cases), format_func=cases.get)
+    state = store.read(principal, chosen)
+    accounts = {
+        item["id"]: f"{item['portfolio']} · {item['product']} · {item['currency']}"
+        for item in state["accounts"]
+    }
+    account = (
+        st.selectbox("Cuenta de operación", list(accounts), format_func=accounts.get) if accounts else None
+    )
+    return store, principal, state, account
+
+
+def _save_evidence(context, label, payload):
+    store, principal, state, account = context
+    if store and state and account and principal.role in {"ADMIN", "ANALYST"}:
+        if st.button(label):
+            modules = (
+                "transaction_ledger.py",
+                "realized_performance.py",
+                "executable_allocation.py",
+                "multi_currency_wealth.py",
+                "gbm_documents.py",
+                "instrument_catalogue.py",
+            )
+            payload = {
+                "schema": 1,
+                "code_sha256": {
+                    name: sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() for name in modules
+                },
+                **payload,
+            }
+            store.attach(
+                principal,
+                state["id"],
+                state["revision"],
+                f"operacion_{date.today()}_{uuid4().hex}.json",
+                json.dumps(payload, ensure_ascii=False, default=str, allow_nan=False).encode(),
+                account_id=account,
+            )
+            st.success(
+                "Evidencia cifrada y versionada en el expediente; requiere las revisiones correspondientes."
+            )
+
+
+def _ledger(context):
+    st.subheader("Movimientos y rendimiento histórico")
+    st.caption("Títulos a fecha de operación, efectivo a liquidación y pendientes separados. MXN y USD.")
+    _template("Plantilla de libro normalizado", COLUMNS, "ledger_template")
+    source = st.file_uploader("Libro normalizado de movimientos", type=["csv"], key=_key("ops_ledger"))
+    if not source:
+        st.info(
+            "Importa el libro para revisar saldos y flujos. "
+            "Las compras, ventas y dividendos son movimientos internos."
+        )
+        return
+    events = read_ledger(source.getvalue())
+    cutoff = st.date_input("Cierre del libro", value=date.today(), max_value=date.today())
+    book = book_at(events, cutoff)
+    st.session_state[_key("_ops_last_book")] = {"book": book, "cutoff": cutoff.isoformat()}
+    ledger_view = pd.DataFrame([asdict(event) for event in events]).rename(
+        columns={
+            "id": "ID",
+            "day": "Operación",
+            "settled": "Liquidación",
+            "kind": "Tipo",
+            "asset": "Instrumento",
+            "currency": "Moneda",
+            "quantity": "Cantidad",
+            "price": "Precio",
+            "amount": "Importe bruto",
+            "fee": "Comisión",
+            "tax": "Impuesto",
+            "reference": "Referencia",
+            "timing": "Momento del flujo",
+        }
+    )
+    st.dataframe(
+        ledger_view.style.format(
+            {
+                "Cantidad": "{:,.6g}",
+                "Precio": "{:,.6f}",
+                "Importe bruto": "{:,.2f}",
+                "Comisión": "{:,.2f}",
+                "Impuesto": "{:,.2f}",
+            }
+        ),
+        hide_index=True,
+        width="stretch",
+    )
+    st.write("**Efectivo liquidado y pendientes**")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"Moneda": c, "Liquidado": book["cash"].get(c, 0), "Pendiente": book["pending"].get(c, 0)}
+                for c in sorted(set(book["cash"]) | set(book["pending"]))
+            ]
+        ),
+        hide_index=True,
+    )
+    quotes_file = st.file_uploader(
+        "Cotizaciones de cierre: Fecha,Instrumento,Moneda,Precio", ["csv"], key=_key("ops_raw")
+    )
+    fx_file = st.file_uploader(
+        "FX del cierre: Fecha,Moneda,Base,Tasa,Fuente", ["csv"], key=_key("ops_book_fx")
+    )
+    base = st.selectbox("Moneda del rendimiento y valuación", ["MXN", "USD"])
+    raw_confirmed = st.checkbox(
+        "Confirmé cotizaciones sin ajuste y sus fechas contra la fuente del cierre",
+        key=_key("raw_confirmation"),
+    )
+    if quotes_file and raw_confirmed:
+        quotes = _csv(quotes_file)
+        if not {"Fecha", "Instrumento", "Moneda", "Precio"}.issubset(quotes):
+            raise PortfolioError("Las cotizaciones requieren fecha, instrumento, moneda y precio.")
+        if (
+            quotes["Fecha"].astype(str).ne(cutoff.isoformat()).any()
+            or quotes.duplicated(["Instrumento", "Moneda"]).any()
+        ):
+            raise PortfolioError("Las cotizaciones deben ser únicas y corresponder al cierre elegido.")
+        quote_map = {(row["Instrumento"], row["Moneda"]): row["Precio"] for row in quotes.to_dict("records")}
+        fx = _csv(fx_file) if fx_file else pd.DataFrame()
+        if not fx.empty:
+            # Reuse exact-cut validation, including source and duplicate-rate rejection.
+            currencies = sorted(set(book["cash"]) | {c for _, c in book["positions"]} | set(book["pending"]))
+            dummy = pd.DataFrame(
+                [
+                    {
+                        "Fecha": cutoff.isoformat(),
+                        "Cuenta": "local",
+                        "Instrumento": c,
+                        "Moneda": c,
+                        "Valor": 1,
+                        "EmisorID": "",
+                    }
+                    for c in currencies
+                ]
+            )
+            consolidate_wealth(dummy, fx, cutoff=cutoff, base=base)
+        rates = {(row["Moneda"], row["Base"]): row["Tasa"] for row in fx.to_dict("records")}
+        valued = value_book(book, quote_map, rates, base=base, raw_prices_confirmed=True)
+        st.metric(f"Patrimonio neto al cierre · {base}", f"{valued['nav']:,.2f}")
+        st.dataframe(pd.DataFrame(valued["detail"]), hide_index=True, width="stretch")
+    nav_file = st.file_uploader("Valuaciones históricas verificadas: Fecha,NAV", ["csv"], key=_key("ops_nav"))
+    flow_fx_file = st.file_uploader(
+        "FX por fecha de cada flujo: Fecha,Moneda,Base,Tasa,Fuente", ["csv"], key=_key("ops_flow_fx")
+    )
+    verified = st.checkbox(
+        "Concilié todos los flujos externos y las valuaciones del periodo en la moneda elegida",
+        key=_key("flows_confirmation"),
+    )
+    if nav_file and verified:
+        frame = _csv(nav_file)
+        if not {"Fecha", "NAV"}.issubset(frame):
+            raise PortfolioError("Las valuaciones requieren Fecha y NAV.")
+        nav = frame.set_index("Fecha")["NAV"]
+        start, end = min(map(date.fromisoformat, nav.index)), max(map(date.fromisoformat, nav.index))
+        fx_frame = _csv(flow_fx_file) if flow_fx_file else pd.DataFrame()
+        flows = []
+        external = {"DEPOSIT", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT", "ASSET_IN", "ASSET_OUT"}
+        for event in events:
+            if event.kind not in external or not start < event.settled <= end:
+                continue
+            amount = float(event.quantity * event.price if event.kind.startswith("ASSET_") else event.amount)
+            if event.kind in {"WITHDRAWAL", "TRANSFER_OUT", "ASSET_OUT"}:
+                amount *= -1
+            if event.currency != base:
+                needed = {"Fecha", "Moneda", "Base", "Tasa", "Fuente"}
+                if not needed.issubset(fx_frame):
+                    raise PortfolioError("Falta FX fechado para convertir los flujos externos.")
+                match = fx_frame[
+                    (fx_frame["Fecha"] == event.settled.isoformat())
+                    & (fx_frame["Moneda"] == event.currency)
+                    & (fx_frame["Base"] == base)
+                ]
+                if (
+                    len(match) != 1
+                    or not str(match.iloc[0]["Fuente"]).strip()
+                    or float(match.iloc[0]["Tasa"]) <= 0
+                ):
+                    raise PortfolioError("Un flujo no tiene un único FX positivo y documentado.")
+                amount *= float(match.iloc[0]["Tasa"])
+            flows.append(Flow(event.settled, amount, event.timing))
+        result = performance(nav, flows)
+        a, b, c = st.columns(3)
+        a.metric("Ganancia separada de flujos", f"{result['gain']:,.2f} {base}")
+        b.metric("TWR del periodo", f"{result['twr']:.2%}" if result["twr"] is not None else "Pendiente")
+        c.metric("XIRR anualizada", f"{result['xirr']:.2%}" if result["xirr"] is not None else "Pendiente")
+        st.caption(
+            f"TWR: {result['twr_status']} · XIRR: {result['xirr_status']}. "
+            "TWR requiere valuación en cada flujo y momento BOD/EOD confirmado."
+        )
+        _save_evidence(
+            context,
+            "Conservar libro y cálculo de rendimiento",
+            {
+                "schema": 1,
+                "result": result,
+                "base": base,
+                "flows": [asdict(f) for f in flows],
+                "ledger": base64.b64encode(source.getvalue()).decode(),
+                "valuations": base64.b64encode(nav_file.getvalue()).decode(),
+                "flow_fx": base64.b64encode(flow_fx_file.getvalue()).decode() if flow_fx_file else None,
+            },
+        )
+
+
+def _implementation(context):
+    st.subheader("Propuesta por títulos y lotes")
+    st.caption(
+        "Minimiza desvío del objetivo y costos sujetos a efectivo, lotes, concentración y rotación. "
+        "Comprueba precios, lotes y tarifas con tu intermediario antes de usar una propuesta."
+    )
+    _template(
+        "Plantilla de posiciones y objetivo",
+        ["Instrumento", "Cantidad", "Precio", "Lote", "PesoObjetivo"],
+        "execution_template",
+    )
+    upload = st.file_uploader(
+        "Posiciones, cotizaciones sin ajuste y pesos objetivo", ["csv"], key=_key("ops_execution")
+    )
+    cash = st.number_input("Efectivo disponible para operar", min_value=0.0, value=0.0)
+    floor = st.number_input("Efectivo mínimo que deseas conservar", min_value=0.0, value=0.0)
+    currency = st.selectbox("Moneda de las órdenes", ["MXN", "USD"])
+    quote_day = st.date_input("Fecha de cotización de las órdenes", date.today(), max_value=date.today())
+    quote_source = st.text_input("Fuente de cotizaciones y lotes")
+    commission = st.number_input("Comisión · puntos base por operación", 0.0, 500.0, 0.0)
+    minimum = st.number_input("Comisión mínima por orden", 0.0, 100000.0, 0.0)
+    market = st.number_input("Costo de mercado · puntos base", 0.0, 500.0, 0.0)
+    vat = st.number_input("IVA sobre comisión · %", 0.0, 100.0, 0.0) / 100
+    tariff_source = st.text_input("Fuente y vigencia de las tarifas aplicables")
+    turnover = st.slider("Rotación máxima · suma de compras y ventas / patrimonio", 0.0, 2.0, 0.5)
+    cap = st.slider("Concentración máxima por activo sobre capital inicial", 0.01, 1.0, 1.0)
+    min_trade = st.number_input("Importe mínimo por orden", 0.0, value=0.0)
+    confirmed = st.checkbox(
+        "Confirmé precios sin ajuste, títulos, lotes, moneda y tarifas de esta cuenta",
+        key=_key("orders_confirmation"),
+    )
+    optimize = st.checkbox("Usar modelo de costos y riesgo del análisis de cuenta abierto en esta sesión")
+    if st.button("Calcular propuesta de títulos", disabled=not upload or not confirmed):
+        if not quote_source.strip() or not tariff_source.strip():
+            raise PortfolioError("Documenta las fuentes de cotizaciones y tarifas.")
+        positions = _csv(upload)
+        if "PesoObjetivo" not in positions:
+            raise PortfolioError("Falta el peso objetivo de cada instrumento.")
+        target = pd.to_numeric(positions["PesoObjetivo"], errors="raise").to_numpy()
+        if optimize:
+            flow = st.session_state.get("_account_flow", {})
+            completed = flow.get("completed")
+            _, _, state, account = context
+            if (
+                not completed
+                or currency != "MXN"
+                or (state and flow.get("context", (None,) * 4)[2:] != (state["id"], account))
+            ):
+                raise PortfolioError("Abre primero un análisis MXN de esta misma cuenta.")
+            assets = tuple(positions["Instrumento"])
+            if assets != completed["settings"].assets:
+                raise PortfolioError("Los instrumentos y su orden deben coincidir con el análisis de cuenta.")
+            moments = completed["result"]["model"].moments
+            current = positions["Cantidad"].astype(float) * positions["Precio"].astype(float)
+            target = cost_aware_target(
+                moments.mean,
+                moments.covariance,
+                current / current.sum(),
+                cost_rate=(commission * (1 + vat) + market) / 10000,
+                max_weight=cap,
+                max_turnover=turnover,
+            )
+        assumptions = ImplementationCostAssumptions(commission, market, vat, minimum)
+        result = executable_plan(
+            positions,
+            cash,
+            target,
+            assumptions,
+            cash_floor=floor,
+            max_turnover=turnover,
+            max_weight=cap,
+            minimum_trade=min_trade,
+            quotes_confirmed=confirmed,
+        )
+        st.session_state["_execution_proposal"] = {
+            "context": (context[2]["id"] if context[2] else None, context[3]),
+            "result": result,
+            "inputs": {
+                "currency": currency,
+                "date": str(quote_day),
+                "quote_source": quote_source,
+                "tariff_source": tariff_source,
+                "tariff": asdict(assumptions),
+                "cash": cash,
+                "cash_floor": floor,
+                "max_turnover": turnover,
+                "max_weight": cap,
+                "minimum_trade": min_trade,
+                "target": target.tolist(),
+                "csv": base64.b64encode(upload.getvalue()).decode(),
+            },
+        }
+    proposal = st.session_state.get("_execution_proposal")
+    binding = (context[2]["id"] if context[2] else None, context[3])
+    if proposal and proposal["context"] == binding:
+        result = proposal["result"]
+        formats = {column: "{:,.2f}" for column in ("Importe firmado", "Comisión e IVA", "Costo de mercado")}
+        formats.update({column: "{:.2%}" for column in ("PesoObjetivo", "Peso final sobre capital inicial")})
+        st.dataframe(result["detail"].style.format(formats), hide_index=True, width="stretch")
+        st.write(
+            f"Efectivo final **{result['cash']:,.2f} {proposal['inputs']['currency']}** · "
+            f"costo **{result['cost']:,.2f}** · rotación **{result['turnover']:.2%}**"
+        )
+        st.caption(
+            result["basis"]
+            + (" Solución óptima." if result["optimal"] else " Solución factible con límite de tiempo.")
+        )
+        st.download_button(
+            "Descargar propuesta CSV",
+            result["detail"].to_csv(index=False).encode(),
+            "propuesta_titulos.csv",
+            "text/csv",
+            on_click="ignore",
+        )
+        _save_evidence(
+            context,
+            "Conservar propuesta e insumos",
+            {
+                "inputs": proposal["inputs"],
+                "result": {**result, "detail": result["detail"].to_dict("records")},
+            },
+        )
+
+
+def _feeds(context):
+    st.subheader("Fuentes aprobadas y alertas")
+    store, principal, state, account = context
+    catalogue_file = st.file_uploader(
+        "Catálogo de instrumentos e identidades de emisor", ["csv"], key=_key("ops_catalogue")
+    )
+    if catalogue_file:
+        from instrument_catalogue import read_catalogue
+
+        catalogue = read_catalogue(catalogue_file.getvalue())
+        st.dataframe(catalogue, hide_index=True, width="stretch")
+        flow = st.session_state.get("_account_flow", {})
+        binding = (state["id"] if state else None, account)
+        if flow.get("context", (None,) * 4)[2:] == binding and flow.get("files", {}).get("holdings"):
+            if st.button("Aplicar clasificación a la preparación de esta cuenta"):
+                assets = flow["defaults"].get("assets", ())
+                subset = catalogue[catalogue["Instrumento"].isin(assets)]
+                if len(subset) != len(assets):
+                    raise PortfolioError(
+                        "El catálogo debe cubrir todos los instrumentos del análisis abierto."
+                    )
+                for row in subset.to_dict("records"):
+                    flow["metadata"][row["Instrumento"]] = {
+                        key: row[key]
+                        for key in (
+                            "Tipo",
+                            "Emisor",
+                            "EmisorID",
+                            "Sector",
+                            "Pais",
+                            "Moneda",
+                            "Fecha",
+                            "Fuente",
+                        )
+                    }
+                flow["files"]["catalogue"] = catalogue_file.getvalue()
+                flow["token"] = uuid4().hex
+                st.success("Clasificación aplicada. Recalcula la cuenta para actualizar sus resultados.")
+    if not store or not state or not account:
+        st.info("Selecciona expediente y cuenta con almacenamiento persistente para programar revisiones.")
+        return
+    try:
+        config = st.secrets.get("operations", {})
+    except FileNotFoundError:
+        config = {}
+    sources = config.get("sources", {})
+    if not sources:
+        st.info("Administración debe registrar fuentes aprobadas y su vigencia de uso antes de programarlas.")
+    else:
+        source = st.selectbox("Fuente aprobada", list(sources))
+        rows = store.working_records(principal, state["id"], account, "subscription")
+        prior = next((row for row in rows if row["name"] == source), None)
+        monitor = prior["data"].get("monitor") if prior else None
+        last_book = st.session_state.get(_key("_ops_last_book"))
+        flow = st.session_state.get("_account_flow", {})
+        completed = flow.get("completed")
+        if last_book and completed and flow.get("context", (None,) * 4)[2:] == (state["id"], account):
+            checked = st.checkbox(
+                "Confirmé que las cantidades del libro siguen vigentes para vigilar desvíos",
+                key=_key("monitor_confirmation"),
+            )
+            if checked:
+                book = last_book["book"]
+                assets = completed["settings"].assets
+                if {currency for _, currency in book["positions"]} != {"MXN"} or {
+                    asset for asset, _ in book["positions"]
+                } != set(assets):
+                    raise PortfolioError("El seguimiento necesita los mismos instrumentos MXN del análisis.")
+                if any(book["pending"].values()):
+                    raise PortfolioError(
+                        "Revisa la liquidación pendiente antes de fijar cantidades de seguimiento."
+                    )
+                reference_name = completed["settings"].tracking_reference
+                reference = next(
+                    item for item in completed["result"]["alternatives"] if item.name == reference_name
+                )
+                monitor = {
+                    "quantities": {asset: str(book["positions"][(asset, "MXN")]) for asset in assets},
+                    "weights": dict(zip(assets, reference.metrics.weights.tolist(), strict=True)),
+                    "currency": "MXN",
+                    "as_of": last_book["cutoff"],
+                    "tolerance": completed["settings"].drift_tolerance,
+                }
+                st.caption(
+                    "El seguimiento compara pesos invertidos sin efectivo. "
+                    "Actualiza las cantidades confirmadas después de operar."
+                )
+        enabled = st.checkbox(
+            "Revisar esta fuente periódicamente", value=bool(prior and prior["data"].get("enabled"))
+        )
+        age = st.number_input(
+            "Antigüedad máxima de datos · días",
+            0,
+            366,
+            int(prior["data"].get("max_age_days", 7)) if prior else 7,
+        )
+        interval = st.number_input("Intervalo de revisión · minutos", 15, 10080, 60)
+        notify = st.checkbox("Avisar también cuando cambie el contenido aprobado")
+        if st.button("Guardar programación", disabled=principal.role not in {"ADMIN", "ANALYST"}):
+            store.save_working(
+                principal,
+                state["id"],
+                account,
+                "subscription",
+                source,
+                {
+                    "enabled": enabled,
+                    "source_id": source,
+                    "interval_minutes": interval,
+                    "max_age_days": age,
+                    "notify_updates": notify,
+                    "monitor": monitor,
+                },
+                expected_version=prior["version"] if prior else 0,
+            )
+            st.rerun()
+        if prior and st.button("Revisar ahora", disabled=principal.role not in {"ADMIN", "ANALYST"}):
+            refresh_subscription(store, principal, state["id"], account, prior, sources, force=True)
+            st.rerun()
+        if config.get("enabled") is not True:
+            st.caption("El servicio periódico está desactivado. La revisión manual sigue disponible.")
+    caches = store.working_records(principal, state["id"], account, "feed")
+    if caches:
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Fuente": row["name"],
+                        **{
+                            key: row["data"].get(key, "Pendiente")
+                            for key in ("status", "age_days", "stale", "last_attempt")
+                        },
+                    }
+                    for row in caches
+                ]
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        chosen = st.selectbox("Datos conservados para revisar", [row["name"] for row in caches])
+        row = next(item for item in caches if item["name"] == chosen)
+        if row["data"].get("bytes"):
+            st.download_button(
+                "Descargar última fuente válida",
+                base64.b64decode(row["data"]["bytes"]),
+                "fuente_para_revision.csv",
+                "text/csv",
+                on_click="ignore",
+            )
+    for row in store.working_records(principal, state["id"], account, "alert"):
+        st.info(f"{row['updated'][:19]} UTC · {row['data']['source_id']} · {row['data']['message']}")
+
+
+def _wealth(context):
+    st.subheader("Patrimonio entre cuentas MXN y USD")
+    cutoff = st.date_input("Corte común del patrimonio", date.today(), max_value=date.today())
+    base = st.selectbox("Moneda base del patrimonio", ["MXN", "USD"])
+    _template(
+        "Plantilla de patrimonio",
+        ["Fecha", "Cuenta", "Instrumento", "Moneda", "Valor", "EmisorID"],
+        "wealth_template",
+    )
+    _, _, state, _ = context
+    if state:
+        st.caption("Usa los identificadores de las cuentas de este expediente en la columna Cuenta.")
+        st.dataframe(pd.DataFrame(state["accounts"])[["id", "portfolio", "currency"]], hide_index=True)
+    source = st.file_uploader(
+        "Posiciones, efectivo y pendientes de todas las cuentas", ["csv"], key=_key("ops_wealth")
+    )
+    fx_file = st.file_uploader("Tipos de cambio documentados del corte", ["csv"], key=_key("ops_wealth_fx"))
+    if source:
+        result = consolidate_wealth(
+            _csv(source),
+            _csv(fx_file) if fx_file else pd.DataFrame(),
+            cutoff=cutoff,
+            base=base,
+            allowed_accounts={a["id"] for a in state["accounts"]} if state else None,
+        )
+        st.metric(f"Patrimonio neto · {base}", f"{result['nav']:,.2f}")
+        st.dataframe(result["detail"], hide_index=True, width="stretch")
+        st.caption(f"Cobertura por identidad de emisor: {result['identity_coverage']:.1%}.")
+        st.bar_chart(result["accounts"], color="#1d5fbf")
+        _save_evidence(
+            context,
+            "Conservar patrimonio y tipos de cambio",
+            {
+                "cutoff": cutoff.isoformat(),
+                "base": base,
+                "nav": result["nav"],
+                "positions": base64.b64encode(source.getvalue()).decode(),
+                "fx": base64.b64encode(fx_file.getvalue()).decode() if fx_file else None,
+            },
+        )
+    legs_file = st.file_uploader(
+        "Pares de transferencias: Fecha,Cuenta,Tipo,Moneda,Importe,Referencia",
+        ["csv"],
+        key=_key("ops_transfers"),
+    )
+    if legs_file:
+        legs = _csv(legs_file)
+        if state and (
+            "Cuenta" not in legs or not set(legs["Cuenta"]).issubset({a["id"] for a in state["accounts"]})
+        ):
+            raise PortfolioError("Las transferencias deben pertenecer a cuentas de este expediente.")
+        st.dataframe(match_internal_flows(legs), hide_index=True, width="stretch")
+        st.caption(
+            "Sólo los pares verificados se excluyen de flujos externos. "
+            "El patrimonio no se reduce por transferir."
+        )
+    with st.expander("Rendimiento histórico del patrimonio"):
+        navs = st.file_uploader(
+            "Cierres por cuenta: Fecha,Cuenta,Moneda,NAV", ["csv"], key=_key("ops_multi_nav")
+        )
+        rates = st.file_uploader(
+            "FX de cada cierre: Fecha,Moneda,Base,Tasa,Fuente", ["csv"], key=_key("ops_multi_fx")
+        )
+        movements = st.file_uploader(
+            "Flujos: Fecha,Cuenta,Tipo,Moneda,Importe,Referencia,MomentoFlujo,FXBase,FuenteFX",
+            ["csv"],
+            key=_key("ops_multi_flows"),
+        )
+        confirmed = st.checkbox(
+            "Concilié los cierres y todos los flujos del patrimonio, con FX al momento de cada flujo",
+            key=_key("multi_confirmation"),
+        )
+        if navs and movements and confirmed:
+            result = consolidated_performance(
+                _csv(navs),
+                _csv(rates) if rates else pd.DataFrame(),
+                _csv(movements),
+                base=base,
+                allowed_accounts={a["id"] for a in state["accounts"]} if state else None,
+            )
+            historical = result["performance"]
+            st.write(f"Ganancia separada de flujos: **{historical['gain']:,.2f} {base}**")
+            st.write("TWR: " + (f"{historical['twr']:.2%}" if historical["twr"] is not None else "Pendiente"))
+            st.write(
+                "XIRR anualizada: "
+                + (f"{historical['xirr']:.2%}" if historical["xirr"] is not None else "Pendiente")
+            )
+            st.line_chart(result["valuations"], color="#1d5fbf")
+            st.caption(
+                "Se exige el mismo calendario de cierres para todas las cuentas. "
+                "Las transferencias sin pareja verificada bloquean el cálculo."
+            )
+            _save_evidence(
+                context,
+                "Conservar rendimiento del patrimonio",
+                {
+                    "result": historical,
+                    "base": base,
+                    "valuations": base64.b64encode(navs.getvalue()).decode(),
+                    "flows": base64.b64encode(movements.getvalue()).decode(),
+                    "fx": base64.b64encode(rates.getvalue()).decode() if rates else None,
+                },
+            )
+
+
+def _documents(context):
+    st.subheader("Revisión de originales GBM")
+    files = st.file_uploader(
+        "Estados PDF y comprobantes CFDI XML",
+        ["pdf", "xml"],
+        accept_multiple_files=True,
+        key=_key("ops_docs"),
+    )
+    if not files:
+        st.info(
+            "Cada documento conserva huella y procedencia. "
+            "Los comprobantes no generan cargos automáticamente."
+        )
+    for file in files:
+        with st.expander(file.name):
+            raw = file.getvalue()
+            if file.name.lower().endswith(".pdf"):
+                draft = session_compute(
+                    st.session_state,
+                    "gbm_pdf",
+                    analysis_key(raw, code_fingerprint()),
+                    lambda raw=raw: read_statement(raw),
+                )
+                st.caption(
+                    f"Corte {draft['end']} · {len(draft['positions'])} posiciones · "
+                    f"huella {draft['sha256'][:12]}"
+                )
+                st.dataframe(pd.DataFrame(draft["positions"]), hide_index=True, width="stretch")
+                st.dataframe(pd.DataFrame(draft["movement_candidates"]), hide_index=True, width="stretch")
+                for warning in draft["warnings"]:
+                    st.warning(warning)
+                st.caption(
+                    "Las filas de movimientos siguen pendientes de clasificación, fechas y conciliación."
+                )
+            else:
+                evidence = read_cfdi_evidence(raw)
+                st.write(evidence["notice"])
+                st.dataframe(pd.DataFrame([evidence["checks"]]), hide_index=True)
+            st.download_button(
+                "Descargar evidencia de revisión",
+                json.dumps(
+                    draft if file.name.lower().endswith(".pdf") else evidence, ensure_ascii=False
+                ).encode(),
+                "revision_documento.json",
+                "application/json",
+                key=_key("doc_" + sha256(raw).hexdigest()),
+                on_click="ignore",
+            )
+
+
+def render_account_operations():
+    st.title("Operación por cuenta")
+    st.caption("Revisa movimientos y fuentes, prepara cambios y reúne el patrimonio con sus datos de origen.")
+    started = monotonic()
+    try:
+        context = _context()
+        st.session_state["_ops_context_key"] = sha256(
+            str(
+                (
+                    context[1].actor if context[1] else None,
+                    context[2]["id"] if context[2] else None,
+                    context[3],
+                )
+            ).encode()
+        ).hexdigest()[:16]
+        tabs = st.tabs(
+            ["Movimientos", "Implementación", "Fuentes y alertas", "Patrimonio", "Originales GBM"],
+            key="operations_tabs",
+        )
+        for tab, render in zip(tabs, (_ledger, _implementation, _feeds, _wealth, _documents), strict=True):
+            with tab:
+                render(context)
+        st.caption(
+            f"Preparación de la vista: {monotonic() - started:.2f} s. "
+            "Los cálculos se ejecutan al solicitarlos."
+        )
+    except (PortfolioError, WorkspaceError, ValueError, KeyError, TypeError):
+        st.error(
+            "No se pudo completar esta etapa. Revisa formato, fechas, fuentes y correspondencia de cuenta."
+        )

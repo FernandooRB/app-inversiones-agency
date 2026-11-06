@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from account_demo import demo_account
+from account_drafts import draft_payload, is_run, restore_draft, run_name, run_options
 from account_import import confirm_gbm_draft, read_gbm_draft
 from account_workflow import (
     AccountSettings,
@@ -21,7 +22,7 @@ from account_workflow import (
     read_run_bundle,
     run_account_analysis,
 )
-from analysis_session import analysis_key
+from analysis_session import analysis_key, session_compute
 from case_workspace import WorkspaceError
 from data_rights import RIGHTS_COLUMNS, read_data_rights_csv
 from holdings import read_current_holdings_csv
@@ -99,11 +100,7 @@ def _load(flow, manifest, files, settings, bundle):
 def _archive_picker(flow, store, principal, state, account):
     if state is None or account is None:
         return
-    runs = {
-        item["id"]: item["name"]
-        for item in state.get("artifacts", [])
-        if item["account_id"] == account and item["name"].startswith("cartera_run_")
-    }
+    runs = run_options(state, account)
     if not runs:
         return
     with st.expander("Retomar un análisis guardado"):
@@ -119,7 +116,7 @@ def _import_positions(flow, prefix):
     st.subheader("1. Preparar la cartera")
     source = st.radio(
         "Origen de las posiciones",
-        ["Cartera GBM XLSX", "Cartera normalizada CSV"],
+        ["Cartera GBM XLSX", "Estado GBM PDF", "Cartera normalizada CSV"],
         key=prefix + "origin",
         horizontal=True,
     )
@@ -158,10 +155,63 @@ def _import_positions(flow, prefix):
                 review = confirm_gbm_draft(draft, mapping, cutoff, total, currency_confirmed=checked)
                 flow["files"]["holdings"] = review["holdings"]
                 flow["files"]["source_xlsx"] = raw
+                flow["files"].pop("source_pdf", None)
                 flow["import_review"] = {key: value for key, value in review.items() if key != "holdings"}
                 flow["defaults"].update(outside_cash=float(review["cash_mxn"]))
                 st.session_state[prefix + "cash"] = float(review["cash_mxn"])
                 st.success("Cartera importada; se conservaron filas, huella y declaraciones de revisión.")
+    elif source == "Estado GBM PDF":
+        from gbm_documents import confirm_statement, read_statement
+
+        uploaded = st.file_uploader("Estado de cuenta GBM · PDF original", type=["pdf"], key=prefix + "pdf")
+        if uploaded:
+            raw = uploaded.getvalue()
+            draft = session_compute(
+                st.session_state,
+                "gbm_pdf",
+                analysis_key(raw, code_fingerprint()),
+                lambda: read_statement(raw),
+            )
+            st.caption(f"Corte {draft['end']} · revisa cuenta, moneda y correspondencias en el original.")
+            st.dataframe(pd.DataFrame(draft["positions"]), hide_index=True, width="stretch")
+            for warning in draft["warnings"]:
+                st.warning(warning)
+            mapping = st.data_editor(
+                pd.DataFrame(
+                    {
+                        "Documento": [row["Instrumento"] for row in draft["positions"]],
+                        "Instrumento local": [""] * len(draft["positions"]),
+                    }
+                ),
+                disabled=["Documento"],
+                hide_index=True,
+                key=prefix + draft["sha256"][:10] + "pdfmap",
+            )
+            checked = st.checkbox(
+                "Confirmé la cuenta, la moneda MXN y las correspondencias del PDF", key=prefix + "pdfchecked"
+            )
+            accepted = st.checkbox(
+                "Revisé las diferencias impresas y acepto conservarlas como advertencias",
+                key=prefix + "pdfaccepted",
+            )
+            if st.button("Confirmar e importar PDF", disabled=not checked):
+                holdings_raw = confirm_statement(
+                    draft,
+                    contract_confirmed=checked,
+                    currency_confirmed=checked,
+                    differences_accepted=accepted,
+                    mapping=dict(zip(mapping["Documento"], mapping["Instrumento local"], strict=True)),
+                )
+                flow["files"].update(holdings=holdings_raw, source_pdf=raw)
+                flow["files"].pop("source_xlsx", None)
+                flow["import_review"] = {
+                    key: draft[key] for key in ("sha256", "end", "positions", "cash", "warnings", "checks")
+                }
+                flow["defaults"]["outside_cash"] = float(draft["cash"])
+                st.session_state[prefix + "cash"] = float(draft["cash"])
+                st.success(
+                    "Posiciones importadas con procedencia. Los movimientos requieren revisión separada."
+                )
     else:
         uploaded = st.file_uploader(
             "Posiciones: FechaCorte,Instrumento,ValorMXN", type=["csv"], key=prefix + "holdings"
@@ -169,6 +219,7 @@ def _import_positions(flow, prefix):
         if uploaded:
             flow["files"]["holdings"] = uploaded.getvalue()
             flow["files"].pop("source_xlsx", None)
+            flow["files"].pop("source_pdf", None)
             flow["import_review"] = None
     if not flow["files"].get("holdings"):
         st.info("Importa la cartera o abre la demostración ficticia para continuar.")
@@ -270,7 +321,7 @@ def _inputs(flow, prefix):
             "Clasifica sólo lo que hayas comprobado. La moneda económica puede diferir de la cotización."
         )
         assets = flow["defaults"]["assets"]
-        fields = ("Tipo", "Emisor", "Sector", "Pais", "Moneda", "Fuente")
+        fields = ("Tipo", "Emisor", "EmisorID", "Sector", "Pais", "Moneda", "Fecha", "Fuente")
         frame = pd.DataFrame(
             [
                 {
@@ -606,7 +657,10 @@ def _results(flow, store, principal, state, account):
             st.write("• " + pending)
     if not settings.costs_confirmed:
         st.caption("Tarifario pendiente: costos desconocidos y metas brutas quedan identificados.")
-    tabs = st.tabs(["Alternativas y costos", "Exposición", "Meta", "Cortes y archivo"])
+    tabs = st.tabs(
+        ["Alternativas y costos", "Exposición", "Meta", "Cortes y archivo"],
+        key="account_result_tabs_" + completed["run_id"],
+    )
     with tabs[0]:
         st.dataframe(
             _comparison_view(result["comparison"]),
@@ -643,6 +697,10 @@ def _results(flow, store, principal, state, account):
     with tabs[1]:
         exposure = result["exposure"]
         st.write(f"**Cobertura de exposición: {exposure['coverage']:.1%}** del capital analizado")
+        st.caption(
+            f"Emisor con ID estable: {exposure['identity_coverage']:.1%} · "
+            f"clasificación con antigüedad máxima de 90 días: {exposure['fresh_coverage_90_days']:.1%}"
+        )
         dimension = st.selectbox("Agrupar exposición", ["Emisor", "Sector", "Pais", "Moneda"])
         st.dataframe(
             exposure["aggregates"][dimension].rename("Peso de cartera").reset_index(),
@@ -706,16 +764,13 @@ def _results(flow, store, principal, state, account):
             pdf=completed.get("pdf"),
         )
         if store and state and account and principal.role in {"ADMIN", "ANALYST"}:
-            saved = any(
-                item["name"] == f"cartera_run_{completed['run_id']}.zip"
-                for item in state.get("artifacts", [])
-            )
+            saved = any(is_run(item["name"], completed["run_id"]) for item in state.get("artifacts", []))
             if st.button("Guardar ejecución y sus insumos cifrados", disabled=saved):
                 store.attach(
                     principal,
                     state["id"],
                     state["revision"],
-                    f"cartera_run_{completed['run_id']}.zip",
+                    run_name(settings, completed["run_id"]),
                     bundle,
                     account_id=account,
                 )
@@ -726,13 +781,7 @@ def _results(flow, store, principal, state, account):
                     "Esta ejecución ya está guardada. Recalcular con otros supuestos crea una "
                     "ejecución nueva."
                 )
-            earlier = {
-                item["id"]: item["name"]
-                for item in state.get("artifacts", [])
-                if item["account_id"] == account
-                and item["name"].startswith("cartera_run_")
-                and item["name"] != f"cartera_run_{completed['run_id']}.zip"
-            }
+            earlier = run_options(state, account, excluding=completed["run_id"])
             if earlier:
                 older = st.selectbox("Corte guardado para comparar", list(earlier), format_func=earlier.get)
                 if st.button("Comparar cortes"):
@@ -746,7 +795,7 @@ def _results(flow, store, principal, state, account):
         st.download_button(
             "Descargar paquete para retomar",
             bundle,
-            f"cartera_run_{completed['run_id']}.zip",
+            run_name(settings, completed["run_id"]),
             "application/zip",
             on_click="ignore",
         )
@@ -782,6 +831,19 @@ def render_account_workflow():
         if st.session_state.get("_account_flow", {}).get("context") != context:
             st.session_state["_account_flow"] = _new_state(context)
         flow = st.session_state["_account_flow"]
+        if store and state and account and principal.role in {"ADMIN", "ANALYST"}:
+            if "draft_version" not in flow:
+                drafts = store.working_records(principal, state["id"], account, "draft")
+                draft = next((item for item in drafts if item["name"] == "analysis"), None)
+                flow["draft_version"] = draft["version"] if draft else 0
+                flow["draft_candidate"] = draft
+            candidate = flow.get("draft_candidate")
+            if candidate and not flow["files"]:
+                st.caption(f"Borrador cifrado disponible · guardado {candidate['updated'][:19]} UTC")
+                if st.button("Recuperar borrador de esta cuenta"):
+                    flow.update(restore_draft(candidate["data"]))
+                    flow.pop("draft_candidate", None)
+                    st.rerun()
         _archive_picker(flow, store, principal, state, account)
         if st.button("Abrir demostración ficticia"):
             files, metadata, defaults = demo_account()
@@ -853,6 +915,26 @@ def render_account_workflow():
             _inputs(flow, prefix)
             profile = state.get("profile") if state else None
             settings = _settings(flow, holdings, profile, prefix)
+            flow["defaults"].update(asdict(settings))
+            if store and state and account and principal.role in {"ADMIN", "ANALYST"}:
+                payload = draft_payload(flow)
+                digest = analysis_key(payload)
+                if flow.get("draft_digest") != digest:
+                    try:
+                        flow["draft_version"] = store.save_working(
+                            principal,
+                            state["id"],
+                            account,
+                            "draft",
+                            "analysis",
+                            payload,
+                            expected_version=flow["draft_version"],
+                        )
+                        flow["draft_digest"] = digest
+                    except WorkspaceError as exc:
+                        st.warning(str(exc))
+                if flow.get("draft_digest") == digest:
+                    st.caption("Borrador guardado automáticamente y cifrado para esta cuenta.")
             ready = {"holdings", "prices", "rights"}.issubset(flow["files"])
             confirmed = st.checkbox(
                 "Confirmé que posiciones, fechas y precios corresponden a esta cuenta y están en MXN",

@@ -41,10 +41,22 @@ from simulation import simulate_portfolio_paths
 
 RUN_VERSION = 1
 MAX_BUNDLE_BYTES = 9_000_000
-INPUT_NAMES = {"holdings", "prices", "rights", "identity", "components", "source_xlsx"}
+INPUT_NAMES = {
+    "holdings",
+    "prices",
+    "rights",
+    "identity",
+    "components",
+    "source_xlsx",
+    "source_pdf",
+    "catalogue",
+}
 CODE_FILES = (
     "account_workflow.py",
     "account_import.py",
+    "gbm_documents.py",
+    "scripts/inspect_gbm_intake.py",
+    "instrument_catalogue.py",
     "allocation_analysis.py",
     "model_estimation.py",
     "portfolio_core.py",
