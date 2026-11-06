@@ -15,6 +15,9 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    env:
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,3 +59,5 @@ jobs:
           docker run --rm sig-portfolio:test
           code=$?
           test "$code" -eq 2
+      - name: Verify synthetic health, durable drafts, restart and recovery
+        run: python scripts/check_container.py sig-portfolio:test
