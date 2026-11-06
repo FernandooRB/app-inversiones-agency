@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: sig-portfolio-staging
+    runtime: docker
+    plan: 1c-2g
+    region: oregon
+    numInstances: 1
+    autoDeployTrigger: "off"
+    healthCheckPath: /_stcore/health
+    disk:
+      name: sig-private-data
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: SIG_DATA_DIR
+        value: /var/data
+      - key: SIG_SECRETS_TOML
+        sync: false

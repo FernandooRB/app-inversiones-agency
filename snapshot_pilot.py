@@ -7,16 +7,15 @@ from hashlib import sha256
 import numpy as np
 import pandas as pd
 
-from covariance_calibration import select_diagonal_shrinkage
 from data_rights import read_data_rights_csv
 from holdings import CurrentHoldings, read_current_holdings_csv
 from holdings_control import HoldingsCoverageControl, read_holdings_coverage_csv
 from instrument_identity import read_instrument_identity_csv
+from model_estimation import DEFAULT_METHOD, METHOD_LABELS, estimate_moments
 from pilot_validation import PilotCosts
 from portfolio_core import (
     PortfolioError,
     PortfolioMetrics,
-    annualized_moments,
     calculate_returns,
     calculate_risk_metrics,
     optimize_portfolio,
@@ -56,8 +55,11 @@ class SnapshotSettings:
     tolerance_pct: float = 0.1
     minimum_coverage_pct: float = 100.0
     max_price_age_days: int = 7
+    covariance_method: str = DEFAULT_METHOD
 
     def validate(self) -> None:
+        if self.covariance_method not in METHOD_LABELS:
+            raise PortfolioError("Estimador de covarianza no reconocido.")
         if (self.history_start >= self.as_of or self.as_of > date.today()
                 or not self.assets or len(self.assets) > 25 or len(set(self.assets)) != len(self.assets)
                 or any(not isinstance(asset, str) or asset != asset.strip().upper()
@@ -210,8 +212,7 @@ class SnapshotRun:
             base_currency="MXN", risk_free_rate=settings.risk_free_rate,
             observations=len(self.prepared.prices) - 1, quotes=dict.fromkeys(settings.assets, "MXN"),
             data_source=(self.prepared.provenance + ". "
-                         f"Covarianza con contracción diagonal de {self.shrinkage:.0%}, "
-                         "calibrada con bloques anteriores dentro de la muestra. "
+                         f"{METHOD_LABELS[settings.covariance_method]} de {self.shrinkage:.0%}. "
                          f"Tope por instrumento de las propuestas: {settings.max_weight:.2%}"),
             holdings_audit=HoldingsAuditReport(
                 self.prepared.holdings, "Archivo de posiciones; cotejo humano pendiente",
@@ -230,8 +231,8 @@ def run_snapshot(prepared: PreparedSnapshot) -> SnapshotRun:
     """Run four fixed-allocation alternatives and two simulation methods, without future data."""
     settings = prepared.settings
     returns = calculate_returns(prepared.prices)
-    calibration = select_diagonal_shrinkage(returns)
-    mean, covariance = annualized_moments(returns, covariance_shrinkage=calibration.intensity)
+    moments = estimate_moments(returns, settings.covariance_method)
+    mean, covariance = moments.mean, moments.covariance
     metrics = []
     for name, weights in (
         ("Cartera al corte", prepared.holdings.weights.to_numpy()),
@@ -253,4 +254,4 @@ def run_snapshot(prepared: PreparedSnapshot) -> SnapshotRun:
         months=settings.months, paths=settings.paths, seed=settings.seed,
         rebalance_months=settings.rebalance_months, block_days=settings.block_days, method=method,
     ) for method in ("bootstrap_blocks", "lognormal")} for alternative in alternatives}
-    return SnapshotRun(prepared, alternatives, simulations, calibration.intensity)
+    return SnapshotRun(prepared, alternatives, simulations, moments.shrinkage)

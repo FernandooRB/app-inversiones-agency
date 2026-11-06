@@ -14,6 +14,11 @@ El [registro interno de expedientes](docs/workspace_operations.md) añade perfil
 cuentas, archivos cifrados, historial, revisiones por versión y respaldo/recuperación. Está
 desactivado por defecto; no se han migrado documentos reales ni habilitado recepción de clientes.
 La navegación separa Análisis, Seguimiento, Expedientes y Guía operativa. El
+[recorrido por cuenta](docs/account_workflow.md), en **Análisis → Por cuenta**, conecta importación
+GBM XLSX revisada o posiciones CSV, comparación con costos, exposición subyacente parcial, metas,
+archivo reproducible por cuenta y comparación de cortes. La investigación avanzada conserva su
+pantalla; ambos recorridos y el piloto local comparten un estimador explícito. Los cálculos se
+conservan en cada sesión y los PDF se generan a demanda. El
 [seguimiento técnico](docs/technical_signals.md) guarda una lista por usuario y combina volumen,
 RSI, tendencia y MACD con gráficos, niveles de referencia y simulación histórica con costos.
 La [revisión de robustez y preparación SIC/GBM](docs/technical_readiness_2026-10-26.md)

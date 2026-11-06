@@ -15,7 +15,7 @@ import re
 import sqlite3
 import uuid
 from collections.abc import Mapping
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -599,7 +599,7 @@ class CaseStore:
             self._event(db, "inventory", "BACKUP", self.master, {"actor": principal.actor}, "")
         with destination.open("xb"):
             pass
-        with sqlite3.connect(self.path) as source, sqlite3.connect(destination) as target:
+        with closing(sqlite3.connect(self.path)) as source, closing(sqlite3.connect(destination)) as target:
             source.backup(target)
         return self.restore_check(principal, destination)
 
@@ -619,12 +619,85 @@ class CaseStore:
                     expected_ids.add(item["id"])
             if expected_ids != {row[0] for row in db.execute("SELECT id FROM artifacts")}:
                 raise WorkspaceError("El inventario de archivos del respaldo no coincide.")
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='working_records'").fetchone():
+                for item in db.execute("SELECT * FROM working_records").fetchall():
+                    case_row = db.execute("SELECT * FROM cases WHERE id=?", (item["case_id"],)).fetchone()
+                    if case_row is None:
+                        raise WorkspaceError("Un registro operativo no tiene expediente.")
+                    self._working_value(other._cipher(case_row), item)
             return {
                 "cases": db.execute("SELECT count(*) FROM cases").fetchone()[0],
                 "events": db.execute("SELECT count(*) FROM audit").fetchone()[0],
                 "integrity": "VERIFIED",
                 "client_delivery_allowed": False,
             }
+
+    @staticmethod
+    def _working_value(cipher, row):
+        value = json.loads(cipher.decrypt(row["token"]))
+        binding = [row[key] for key in ("case_id", "account_id", "owner", "kind", "name", "version")]
+        if value.get("binding") != binding:
+            raise WorkspaceError("El registro operativo no corresponde a su contexto.")
+        return value["data"]
+
+    def working_records(self, principal, case_id, account_id, kind):
+        """Private owner-bound working data; every read rechecks current case membership."""
+        with self._connection() as db:
+            _, cipher, state = self._state(db, case_id, principal)
+            if account_id not in {item["id"] for item in state["accounts"]}:
+                raise WorkspaceError("La cuenta no pertenece al expediente.")
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='working_records'").fetchone():
+                return []
+            rows = db.execute(
+                "SELECT * FROM working_records WHERE case_id=? AND account_id=? AND owner=? AND kind=? "
+                "ORDER BY updated DESC, name",
+                (case_id, account_id, principal.actor, kind),
+            ).fetchall()
+            return [
+                {
+                    "name": row["name"],
+                    "version": row["version"],
+                    "updated": row["updated"],
+                    "data": self._working_value(cipher, row),
+                }
+                for row in rows
+            ]
+
+    def save_working(self, principal, case_id, account_id, kind, name, data, *, expected_version=0):
+        """Encrypted autosave/jobs/alerts without changing the reviewed financial evidence revision.
+
+        Financial evidence must still be attached explicitly. Compare-and-swap
+        prevents a second browser or worker silently overwriting a newer draft.
+        """
+        kind, name = _text(kind, 60), _text(name, 120)
+        encoded = _json(data)
+        if len(encoded) > 12_000_000:
+            raise WorkspaceError("El registro operativo supera el tamaño permitido.")
+        with self._connection() as db:
+            _, cipher, state = self._state(db, case_id, principal, edit=True)
+            if account_id not in {item["id"] for item in state["accounts"]}:
+                raise WorkspaceError("La cuenta no pertenece al expediente.")
+            db.execute("""CREATE TABLE IF NOT EXISTS working_records (
+                case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                account_id TEXT NOT NULL, owner TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL,
+                version INTEGER NOT NULL, updated TEXT NOT NULL, token BLOB NOT NULL,
+                PRIMARY KEY(case_id,account_id,owner,kind,name))""")
+            binding = (case_id, account_id, principal.actor, kind, name)
+            prior = db.execute(
+                "SELECT * FROM working_records WHERE case_id=? AND account_id=? "
+                "AND owner=? AND kind=? AND name=?",
+                binding,
+            ).fetchone()
+            current = prior["version"] if prior else 0
+            if expected_version != current:
+                raise WorkspaceError("Existe una versión operativa más reciente; recarga antes de guardar.")
+            version = current + 1
+            token = cipher.encrypt(_json({"binding": [*binding, version], "data": data}))
+            db.execute(
+                "INSERT OR REPLACE INTO working_records VALUES (?,?,?,?,?,?,?,?)",
+                (*binding, version, datetime.now(UTC).isoformat(), token),
+            )
+            return version
 
     def _check_artifact(self, db, case_row, item):
         record = db.execute(

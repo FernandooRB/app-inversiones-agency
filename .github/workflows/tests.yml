@@ -15,6 +15,9 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    env:
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -42,3 +45,19 @@ jobs:
           python -m pytest --cov=portfolio_core --cov=reporting
           --cov=technical_analysis --cov=technical_market_data --cov=technical_backtesting
           --cov=watchlist_store --cov=technical_ui --cov-report=term-missing
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build public application image without private inputs
+        run: docker build --tag sig-portfolio:test .
+      - name: Reject startup without OIDC and persistent-storage configuration
+        run: |
+          set +e
+          docker run --rm sig-portfolio:test
+          code=$?
+          test "$code" -eq 2
+      - name: Verify synthetic health, durable drafts, restart and recovery
+        run: python scripts/check_container.py sig-portfolio:test

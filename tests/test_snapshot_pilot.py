@@ -120,6 +120,21 @@ def test_future_quotes_do_not_change_estimation_or_simulation(pilot):
             )
 
 
+def test_snapshot_and_interactive_calculation_use_identical_moments_and_weights(pilot):
+    from allocation_analysis import calculate_allocation
+
+    files, settings = pilot
+    prepared = prepare_snapshot(files, settings)
+    snapshot = run_snapshot(prepared)
+    interactive = calculate_allocation(prepared.prices, settings.risk_free_rate, settings.max_weight,
+                                       method=settings.covariance_method, chart_data=False)
+    assert snapshot.shrinkage == interactive.moments.shrinkage
+    np.testing.assert_array_equal(
+        snapshot.alternatives[2].metrics.weights, interactive.min_volatility.weights
+    )
+    np.testing.assert_array_equal(snapshot.alternatives[3].metrics.weights, interactive.max_sharpe.weights)
+
+
 def test_rejects_nonmatching_identity_between_sources(pilot):
     files, settings = pilot
     changed = dict(files)

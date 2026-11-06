@@ -3,12 +3,15 @@
 import streamlit as st
 
 
-def render_shell(areas: tuple[str, ...] = ("Análisis", "Seguimiento", "Expedientes", "Guía operativa")):
+def render_shell(
+    areas: tuple[str, ...] = ("Análisis", "Operación", "Seguimiento", "Expedientes", "Guía operativa"),
+):
     # 256px parameter rail + 2 x 24px gutters + fluid canvas. At mobile width the
     # native Streamlit rail folds; form columns and the canvas remain fluid.
     st.html("""<style>
       [data-testid="stMainBlockContainer"] {padding-top:4.25rem; padding-bottom:2rem;}
       [data-testid="stSidebar"] {background:#f8f8f8;}
+      [data-testid="stAppViewContainer"] {font-variant-numeric:tabular-nums;}
       h1 {font-size:1.55rem!important; font-weight:600!important; padding-top:.3rem!important;}
       h2,h3 {font-size:1.05rem!important; font-weight:600!important;}
       [data-testid="stMetricValue"] {font-size:1.65rem; font-variant-numeric:tabular-nums;}

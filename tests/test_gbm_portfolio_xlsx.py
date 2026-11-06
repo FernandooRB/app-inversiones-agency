@@ -75,3 +75,29 @@ def test_snapshot_preflight_rejects_oversized_uncompressed_archive():
         archive.writestr("xl/workbook.xml", b"A" * 15_000_001)
     with pytest.raises(PortfolioXlsxError, match="límite de contenido"):
         inspect_portfolio_xlsx(stream.getvalue())
+
+
+def test_reviewed_import_preserves_rows_and_reconciles_positions_plus_cash():
+    from datetime import date
+
+    import pandas as pd
+
+    from account_import import confirm_gbm_draft, read_gbm_draft
+    from portfolio_core import PortfolioError
+
+    raw = portfolio_book()
+    draft = read_gbm_draft(raw)
+    assert draft.rows["Fila"].tolist() == [3, 4]
+    mapping = pd.DataFrame({"Fila": [3, 4], "Instrumento": ["AAA", "BBB"]})
+    result = confirm_gbm_draft(draft, mapping, date(2025, 1, 1), 32, currency_confirmed=True)
+    assert result["cash_mxn"] == "1.00"
+    assert result["account_total_mxn"] == "32"
+    assert result["source_sha256"] == sha256(raw).hexdigest()
+    assert b"AAA,22.00" in result["holdings"]
+    with pytest.raises(PortfolioError, match="no coincide"):
+        confirm_gbm_draft(draft, mapping, date(2025, 1, 1), 31, currency_confirmed=True)
+    with pytest.raises(PortfolioError, match="Confirma"):
+        confirm_gbm_draft(draft, mapping, date(2025, 1, 1), 32, currency_confirmed=False)
+    mapping.loc[0, "Instrumento"] = None
+    with pytest.raises(PortfolioError, match="celdas vacías"):
+        confirm_gbm_draft(draft, mapping, date(2025, 1, 1), 32, currency_confirmed=True)

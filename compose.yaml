@@ -1,0 +1,19 @@
+services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:8501:8501"
+    environment:
+      SIG_SECRETS_FILE: /run/secrets/sig_config
+      SIG_DATA_DIR: /var/data
+    secrets:
+      - sig_config
+    volumes:
+      - sig_private:/var/data
+    restart: unless-stopped
+    init: true
+secrets:
+  sig_config:
+    file: ${SIG_SECRETS_FILE:?Provide an absolute private TOML config path}
+volumes:
+  sig_private:

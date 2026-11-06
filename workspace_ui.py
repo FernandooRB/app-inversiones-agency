@@ -45,6 +45,13 @@ def configured_workspace():
     return store, principal, policy
 
 
+def _open_account_analysis(case_id, account_id):
+    st.session_state["_open_analysis_case"] = case_id
+    st.session_state["_open_analysis_account"] = account_id
+    st.session_state["workspace_area"] = "Análisis"
+    st.session_state["analysis_mode"] = "Por cuenta"
+
+
 def render_workspace():
     st.title("Expedientes por cuenta")
     st.caption("Archivo interno · alias sin nombres ni números de cuenta · entrega a clientes pendiente")
@@ -111,6 +118,15 @@ def render_workspace():
             account_column, profile_column = st.columns(2, gap="medium")
             with account_column:
                 st.subheader("Intermediario, producto y cartera")
+                mxn_accounts = {item["id"]: item["portfolio"] for item in state["accounts"]
+                                if item["currency"] == "MXN"}
+                if mxn_accounts:
+                    analysis_account = st.selectbox(
+                        "Cuenta para continuar el análisis", list(mxn_accounts), format_func=mxn_accounts.get,
+                        key=f"continue_account_{case_id}",
+                    )
+                    st.button("Analizar esta cuenta", on_click=_open_account_analysis,
+                              args=(case_id, analysis_account))
                 if state["accounts"]:
                     st.dataframe(
                         pd.DataFrame(state["accounts"])[
