@@ -62,6 +62,14 @@ def configured_watchlist() -> tuple[WatchlistStore | SupabaseWatchlistStore, str
         raise WatchlistError("Inicia una sesión autorizada para abrir tu seguimiento.") from None
     if not authorized(claims, policy):
         raise WatchlistError("La sesión no está autorizada o ha expirado.")
+    if (
+        st.secrets.get("deployment", {}).get("storage_mode") == "session_only"
+        and configuration.get("backend", "sqlite") != "supabase"
+    ):
+        raise WatchlistError(
+            "El piloto gratuito necesita almacenamiento externo para conservar Seguimiento y sus bitácoras. "
+            "Puedes usar estas funciones en tu equipo o conectar una base externa."
+        )
     default = Path(__file__).resolve().parent / "data" / "private" / "technical_watchlists.db"
     location = configuration.get("database_path", str(default))
     if not isinstance(location, str):

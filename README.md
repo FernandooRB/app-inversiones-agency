@@ -242,6 +242,10 @@ sola una licencia para reutilizarlo; define una antes de autorizar su reutilizac
 
 ## Acceso OIDC (obligatorio)
 
+Para la etapa de presupuesto USD 0, consulta el [piloto gratuito en Community Cloud](docs/free_pilot.md).
+El perfil conserva el acceso con Google y permite retomar análisis mediante paquetes descargables;
+los expedientes completos permanecen locales mientras no se configure almacenamiento externo.
+
 La aplicación deniega acceso si no hay configuración. Copia `.streamlit/secrets.example.toml`
 a `.streamlit/secrets.toml` únicamente en el servidor y configura una aplicación OIDC.
 El ejemplo utiliza Google. Registra la URL exacta `/oauth2callback` del despliegue con HTTPS

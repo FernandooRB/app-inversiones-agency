@@ -28,6 +28,11 @@ def configured_workspace():
     try:
         configuration = st.secrets.get("workspace", {})
         policy = st.secrets.get("access", {})
+        if st.secrets.get("deployment", {}).get("storage_mode") == "session_only":
+            raise WorkspaceError(
+                "Piloto gratuito: los expedientes permanentes se conservan en tu equipo. "
+                "En esta web descarga el paquete del análisis para retomarlo después."
+            )
     except FileNotFoundError:
         raise WorkspaceError(
             "Configura almacenamiento cifrado y roles antes de guardar expedientes."

@@ -140,7 +140,14 @@ Una transferencia no se resta del patrimonio; se elimina de los flujos externos.
 Las conversiones entre monedas requieren sus patas FX, no se cancelan como si fueran
 transferencias en una misma moneda.
 
-## Entorno de prueba recomendado
+## Entorno de prueba actual: gratuito
+
+El piloto actual usa presupuesto de alojamiento USD 0. La configuración y el alcance
+están en [Piloto gratuito](free_pilot.md): Community Cloud para análisis en sesión y
+paquetes descargables; expedientes completos conservados localmente hasta disponer
+de almacenamiento externo verificado. La autorización anterior de gasto fue retirada.
+
+## Entorno opcional con disco persistente (de pago)
 
 Se entrega `Dockerfile`, `.dockerignore`, `compose.yaml` y `render.yaml`. El blueprint
 usa Render `1c-2g`, una instancia y un disco de 5 GB en `/var/data`. App y trabajador
@@ -151,7 +158,8 @@ Un fallo de configuración detiene el arranque, sin imprimir secretos.
 
 Referencia de precio consultada: cómputo USD 25/mes más disco USD 0.25/GB/mes:
 5 GB dan una base estimada de **USD 26.25/mes**, antes de impuestos y consumos extra.
-No se ha contratado este servicio. Verificar el total en la cuenta antes de activarlo.
+No se ha contratado este servicio y no es el destino actual. Requiere una nueva
+autorización de gasto antes de crear cualquier recurso.
 
 Pasos de activación:
 
