@@ -1,3 +1,6 @@
+# OPTIONAL PAID DEPLOYMENT. This is not the current USD 0 pilot target.
+# Requires a new explicit spending authorization before creating any resources.
+# For the free pilot use docs/free_pilot.md and Streamlit Community Cloud.
 services:
   - type: web
     name: sig-portfolio-staging
