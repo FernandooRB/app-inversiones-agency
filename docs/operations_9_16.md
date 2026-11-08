@@ -81,6 +81,19 @@ la declaración de cartera completa. Las diferencias de un centavo se conservan 
 advertencias y requieren aceptación explícita. Los movimientos extraídos se muestran
 como candidatos revisables; las filas desconocidas no se contabilizan automáticamente.
 
+La revisión de efectivo muestra cada transición con saldo anterior impreso, neto,
+saldo esperado, saldo impreso y diferencia. La apertura se coteja por separado con
+la portada. La diferencia usa `anterior + abono o - cargo - saldo impreso` y el
+siguiente cálculo parte siempre del saldo **impreso**, sin arrastrar ajustes para
+cuadrar. Las filas exactas también conservan revisión humana pendiente. El JSON de
+revisión incluye texto original, página/fila, huella e identificador por documento
+y ubicación. Los dos días impresos no se convierten en fechas confirmadas.
+
+El script local `scripts/run_private_pilot.py` admite `--review-dir` para preparar
+JSON y Markdown por corte, además del resumen sin importes de `--output`. El detalle
+incluye valores privados y sólo permite una carpeta dentro de `data/private/`.
+No es un paquete ZIP de análisis ni un libro de eventos contabilizados.
+
 El XML se valida como evidencia de cargos. **Un CFDI no crea un segundo cargo**:
 debe vincularse y conciliarse contra un movimiento antes de contabilizar importes.
 No se valida el timbrado ante SAT ni se infiere tratamiento fiscal.

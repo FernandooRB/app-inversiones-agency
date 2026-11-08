@@ -338,3 +338,35 @@ volvieron a pasar. Ruff, `pip check` y `git diff --check` resultaron correctos. 
 preparación y resultados a 1440/768/390 px y el recorrido de PDF, guardado cifrado y reapertura con
 insumos y PDF archivado. Las cuentas fueron sintéticas; el registro de la entrega conserva alcance,
 advertencias del inspector y antecedentes de las repeticiones.
+
+## Piloto gratuito y revisión de efectivo por fila — 8 de noviembre de 2026
+
+Se reutilizó la app existente en Streamlit Community Cloud, con Python 3.12, Google
+y presupuesto USD 0. Se verificaron login real, bloqueo del análisis en un navegador
+sin sesión y análisis ficticio con descarga de PDF/ZIP y reapertura. Expedientes
+en disco temporal y operaciones programadas permanecen desactivados. Se conservaron
+las identidades y las integraciones ya configuradas. [Alcance gratuito](free_pilot.md).
+
+La generación del PDF ahora precede a la construcción del paquete: el ZIP disponible
+en esa misma interacción incluye el informe recién generado. Una prueba de interfaz
+captura el ZIP ofrecido, lo abre, comprueba el PDF exacto y verifica que no se vuelve
+a ejecutar el optimizador. Se corrigió el desfase que exigía otra interacción.
+
+La revisión GBM añade saldo anterior, neto, saldo esperado, saldo impreso, diferencia
+y procedencia por fila. Mantiene los valores originales y la revisión humana pendiente;
+el saldo siguiente siempre parte del impreso. La exportación local de JSON/Markdown
+con importes se limita a `data/private/`. Se reprodujeron los controles del piloto
+propio sin modificar originales ni subirlos al alojamiento.
+
+Verificación local: **690 pruebas** de la suite completa y **78 pruebas dirigidas**,
+Ruff de los Python versionados y `pip check` aprobados. Navegador Edge con documentos
+ficticios: ZIP con PDF tras una sola generación y revisión de diferencia de un centavo
+en 1440, 768 y 390 px, sin excepciones ni desbordamiento de página. Tras el ajuste
+final de etiquetas se repitió la revisión GBM en las tres anchuras. El inspector no
+registró fallos; conserva avisos sobre el tamaño de títulos, espacio de la vista de
+archivo y números de la tabla de posiciones previa. La tabla nueva de efectivo
+muestra importes a la derecha y las capturas se revisaron visualmente.
+
+Evidencia sintética local: `outputs/free_next_2026-11-08/`. Los documentos y resultados
+del caso propio permanecen privados. No se declara conciliación humana, rendimiento
+real, aprobación de reportes para clientes ni operación automática del intermediario.

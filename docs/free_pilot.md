@@ -4,6 +4,20 @@ Destino actual: **Streamlit Community Cloud**, con presupuesto de alojamiento **
 La aplicación continúa siendo Streamlit; no requiere reescribir la interfaz ni
 contratar Render. `render.yaml` permanece como referencia de pago para otra etapa.
 
+## Estado comprobado el 8 de noviembre de 2026
+
+La aplicación existente está activa en
+[app-inversiones-agency.streamlit.app](https://app-inversiones-agency.streamlit.app/),
+con Python 3.12 y acceso mediante Google. Se comprobó el análisis de una cartera
+ficticia, descarga de PDF/ZIP, integridad del paquete y reapertura con resultados y
+PDF archivado. Un navegador sin sesión no tuvo acceso al análisis. No se probó otra
+identidad Google ni se subieron estados de cuenta reales para esta comprobación.
+
+Se conservaron la configuración de acceso y el backend externo de Seguimiento.
+Expedientes en disco temporal y operaciones programadas permanecen desactivados.
+No se contrataron servicios de pago. La comprobación no cambia los pendientes de
+revisión del piloto GBM propio ni habilita entrega de reportes a clientes.
+
 ## Alcance
 
 | Función | Piloto web gratuito | App en tu equipo |

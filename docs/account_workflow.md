@@ -10,9 +10,14 @@ La demostración usa instrumentos `SIM-A`, `SIM-B` y `SIM-F`, series generadas y
 
 ### Posiciones GBM
 
-Se admite el diseño XLSX observado de **Mercado de Capitales Nacional** y **Efectivo**, con una hoja y los encabezados reconocidos por el inspector existente. Otros diseños, PDF, operaciones y eventos corporativos no se importan automáticamente en este recorrido.
+Se admite el diseño XLSX observado de **Mercado de Capitales Nacional** y **Efectivo**,
+con una hoja y los encabezados reconocidos por el inspector existente. También se
+admite el diseño PDF GBM documentado en [Operación](operations_9_16.md): conserva
+página/fila, bloquea categorías sin normalizar y exige aceptación explícita de las
+diferencias impresas. Otros diseños, operaciones y eventos corporativos no se
+importan automáticamente en este recorrido.
 
-La pantalla muestra etiqueta, fila original, cantidad, precio, valor y diferencia aritmética. Debes:
+Para XLSX, la pantalla muestra etiqueta, fila original, cantidad, precio, valor y diferencia aritmética. Debes:
 
 1. Asignar un símbolo local único a cada fila.
 2. Declarar y cotejar el corte del documento.
@@ -84,7 +89,12 @@ El gráfico y la meta usan las mismas unidades: nominales o pesos de hoy. Las al
 
 La ejecución contiene identificador, configuración con campos nombrados, fecha del cálculo, versión del esquema y huella del código, perfil usado, clasificación, revisión de importación, resumen y archivos con huellas SHA-256. El paquete evita serializar objetos ejecutables y comprueba nombres, tamaños y huellas al abrirlo.
 
-En el expediente se adjunta cifrado y vinculado a la cuenta. Si generas el PDF antes de guardar, también queda dentro del paquete, con su huella, y puede descargarse al retomar. Adjuntarlo crea una revisión nueva e invalida las revisiones anteriores conforme a la operación existente. Recalcular crea una ejecución nueva; no sobrescribe la anterior. Los permisos se vuelven a comprobar al acceder al expediente o archivo.
+En el expediente se adjunta cifrado y vinculado a la cuenta. Si generas el PDF antes
+de guardar o descargar, queda dentro del paquete actualizado en esa misma
+interacción, con su huella, y puede descargarse al retomar. Adjuntarlo crea una revisión
+nueva e invalida las revisiones anteriores conforme a la operación existente.
+Recalcular crea una ejecución nueva; no sobrescribe la anterior. Los permisos se
+vuelven a comprobar al acceder al expediente o archivo.
 
 El paquete descargado contiene los insumos originales y requiere la misma custodia. Sus huellas comprueban correspondencia entre archivos; no son una firma del proveedor ni acreditan que un documento externo sea auténtico. La versión guardada permite ver el resumen y recuperar entradas; si cambió el motor se informa antes del nuevo cálculo. Los derechos deben seguir siendo válidos para ejecutar otra investigación.
 

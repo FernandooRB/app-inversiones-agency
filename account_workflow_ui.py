@@ -751,6 +751,9 @@ def _results(flow, store, principal, state, account):
                 "se mantienen iguales entre alternativas; el cargo fijo se distribuye mensualmente."
             )
     with tabs[3]:
+        st.caption("Genera el PDF antes de descargar o guardar el paquete para incluirlo.")
+        if st.button("Generar PDF de esta ejecución"):
+            completed["pdf"] = account_pdf(result, settings, run_id=completed["run_id"], selected=selected)
         manifest, bundle = make_run_bundle(
             completed["files"],
             settings,
@@ -803,8 +806,6 @@ def _results(flow, store, principal, state, account):
             "El paquete descargado contiene los insumos y debe custodiarse como el "
             "documento original. En Expedientes se conserva cifrado."
         )
-        if st.button("Generar PDF de esta ejecución"):
-            completed["pdf"] = account_pdf(result, settings, run_id=completed["run_id"], selected=selected)
         if completed.get("pdf"):
             st.download_button(
                 "Descargar comparativo de cuenta PDF",
