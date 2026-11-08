@@ -2,6 +2,13 @@
 
 Base: rama `codex/portfolio-operations-9-16`, entrega 1–8 conservada en `8b70012`.
 
+**Actualización del 8 de noviembre de 2026:** el usuario eligió presupuesto USD 0.
+El despliegue vigente es [Streamlit Community Cloud](free_pilot.md), con Google y
+almacenamiento por sesión. Se reutilizó la app existente y se verificaron análisis
+ficticio, descargas y reapertura. La propuesta Render de esta entrega es histórica;
+el plan de pago quedó cancelado antes de contratar. Expedientes permanentes y
+trabajador programado no están habilitados en el alojamiento gratuito.
+
 | Punto | Entrega que se verificará |
 | --- | --- |
 | 9 | Contenedor y configuración Render con disco persistente, comprobación de configuración, respaldo/restauración y una versión revisable |
@@ -16,8 +23,8 @@ Base: rama `codex/portfolio-operations-9-16`, entrega 1–8 conservada en `8b700
 También se incorporarán nombres y fechas legibles de ejecuciones, selección reciente, borradores
 cifrados, conservación de navegación y medidas operativas sin contenido privado.
 
-El destino recomendado es Render con cómputo de 1 CPU/2 GB y disco persistente. El despliegue real
-requiere la cuenta de alojamiento, secretos OIDC y autorización del costo concreto. El piloto elegido
+La propuesta inicial de esta entrega era Render con cómputo de 1 CPU/2 GB y disco persistente.
+Quedó sustituida por el piloto gratuito indicado arriba. El piloto elegido
 es la cuenta propia GBM BMV. Los originales se localizaron en la carpeta autorizada por el usuario
 y se revisaron dos cortes consecutivos y un CFDI, sin incorporarlos a Git. El informe privado
 conserva las diferencias y los pendientes de revisión humana. El despliegue real y la aceptación
@@ -39,4 +46,5 @@ Validación local de la entrega:
   reinicio y respaldo/restauración. El motor local de Docker permanece detenido.
 - La exportación de propuestas rechaza etiquetas con fórmulas y columnas no revisadas;
   su prueba final y el módulo de operación correspondiente también aprobaron.
-- No se ha activado un alojamiento ni enviado documentación real a servicios externos.
+- En el momento de esta validación local no se había activado un alojamiento ni enviado
+  documentación real a servicios externos. El despliegue gratuito posterior se registra arriba.

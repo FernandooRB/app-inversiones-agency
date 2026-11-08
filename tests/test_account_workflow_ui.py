@@ -1,6 +1,8 @@
 """Synthetic end-to-end account research and lazy reports in Streamlit's test runtime."""
 
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
@@ -10,6 +12,8 @@ APP = Path(__file__).resolve().parents[1] / "app_inversiones.py"
 
 
 def test_account_demo_calculates_only_on_request_and_pdf_is_lazy(monkeypatch):
+    import streamlit as st
+
     import access
     import account_workflow
     import workspace_ui
@@ -29,6 +33,14 @@ def test_account_demo_calculates_only_on_request_and_pdf_is_lazy(monkeypatch):
         return original(*args, **kwargs)
 
     monkeypatch.setattr(account_workflow, "calculate_allocation", counted)
+    downloads = {}
+    original_download = st.download_button
+
+    def capture_download(label, data, *args, **kwargs):
+        downloads[label] = data
+        return original_download(label, data, *args, **kwargs)
+
+    monkeypatch.setattr(st, "download_button", capture_download)
     app = AppTest.from_file(
         Path(__file__).resolve().parents[1] / "app_inversiones.py", default_timeout=30
     ).run()
@@ -45,12 +57,20 @@ def test_account_demo_calculates_only_on_request_and_pdf_is_lazy(monkeypatch):
     assert len(calls) == 1
     completed = app.session_state["_account_flow"]["completed"]
     assert not completed.get("pdf")
+    with ZipFile(BytesIO(downloads["Descargar paquete para retomar"])) as archive:
+        assert "report.pdf" not in archive.namelist()
     next(item for item in app.selectbox if item.label == "Agrupar exposición").set_value("Sector").run()
     assert len(calls) == 1
     next(item for item in app.button if item.label == "Generar PDF de esta ejecución").click().run()
     assert not app.exception
     assert not app.error
-    assert app.session_state["_account_flow"]["completed"]["pdf"].startswith(b"%PDF")
+    pdf = app.session_state["_account_flow"]["completed"]["pdf"]
+    assert pdf.startswith(b"%PDF")
+    bundle = downloads["Descargar paquete para retomar"]
+    manifest, _, _ = account_workflow.read_run_bundle(bundle)
+    with ZipFile(BytesIO(bundle)) as archive:
+        assert archive.read("report.pdf") == pdf
+    assert manifest["run_id"] == completed["run_id"]
     assert len(calls) == 1
     next(item for item in app.number_input if item.label == "Tasa libre de riesgo MXN · % anual").set_value(
         4.0

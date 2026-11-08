@@ -675,7 +675,46 @@ def _documents(context):
                     f"huella {draft['sha256'][:12]}"
                 )
                 st.dataframe(pd.DataFrame(draft["positions"]), hide_index=True, width="stretch")
-                st.dataframe(pd.DataFrame(draft["movement_candidates"]), hide_index=True, width="stretch")
+                review = pd.DataFrame(draft["cash_review"])
+                st.write("**Conciliación del efectivo por fila**")
+                controls = review["ControlAritmetico"].value_counts()
+                st.caption(
+                    f"{controls.get('EXACTO', 0)} transiciones exactas · "
+                    f"{controls.get('DIFERENCIA_CENTAVO', 0)} con diferencia de un centavo · "
+                    f"{controls.get('DIFERENCIA_MAYOR', 0)} con diferencia mayor. "
+                    f"Saldo inicial cotejado con la portada: {float(review.iloc[0]['SaldoImpreso']):,.2f}."
+                )
+                money = ("NetoImpreso", "SaldoAnteriorImpreso", "SaldoEsperado", "SaldoImpreso", "Diferencia")
+                display = review.iloc[1:][
+                    ["Pagina", "Fila", "Sentido", *money, "ControlAritmetico", "EstadoRevision"]
+                ].copy()
+                for column in money:
+                    display[column] = pd.to_numeric(display[column])
+                display["ControlAritmetico"] = display["ControlAritmetico"].replace(
+                    {"EXACTO": "Cuadra", "DIFERENCIA_CENTAVO": "Difiere un centavo",
+                     "DIFERENCIA_MAYOR": "Diferencia mayor"}
+                )
+                display["EstadoRevision"] = "Pendiente"
+                display["Sentido"] = display["Sentido"].str.capitalize()
+                st.dataframe(
+                    display.style.format({column: "{:,.2f}" for column in money}, na_rep="—"),
+                    column_config={
+                        "Pagina": "Página", "Sentido": "Movimiento", "NetoImpreso": "Neto · MXN",
+                        "SaldoAnteriorImpreso": "Anterior · MXN", "SaldoEsperado": "Esperado · MXN",
+                        "SaldoImpreso": "Impreso · MXN", "Diferencia": "Diferencia · MXN",
+                        "ControlAritmetico": "Comprobación", "EstadoRevision": "Revisión",
+                    },
+                    hide_index=True,
+                    width="stretch",
+                )
+                st.caption(
+                    "Diferencia = saldo anterior + abono o − cargo − saldo impreso. "
+                    "Moneda MXN por confirmar. Cada fila conserva su revisión pendiente."
+                )
+                with st.expander("Texto original de los movimientos"):
+                    st.dataframe(
+                        pd.DataFrame(draft["movement_candidates"]), hide_index=True, width="stretch"
+                    )
                 for warning in draft["warnings"]:
                     st.warning(warning)
                 st.caption(

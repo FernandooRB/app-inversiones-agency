@@ -3,6 +3,7 @@
 import sqlite3
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
+from hashlib import sha256
 
 import numpy as np
 import pandas as pd
@@ -276,6 +277,9 @@ def test_pdf_draft_keeps_provenance_and_requires_confirmation():
     draft = read_statement(raw)
     assert draft["positions"][0]["Cantidad"] == "2"
     assert draft["positions"][0]["Pagina"] == 2 and draft["movement_candidates"]
+    assert len(draft["cash_review"]) == draft["checks"]["cash_rows_checked"]
+    assert all(row["EstadoRevision"] == "PENDIENTE" for row in draft["cash_review"])
+    assert draft["cash_review"][0]["ControlAritmetico"] == "APERTURA_COTEJADA"
     with pytest.raises(IntakeError):
         confirm_statement(
             draft,
@@ -284,6 +288,60 @@ def test_pdf_draft_keeps_provenance_and_requires_confirmation():
             differences_accepted=False,
             mapping={"SYMA": "SIM.MX"},
         )
+
+
+def test_cash_review_preserves_cent_discrepancies_and_original_balances():
+    from gbm_documents import _cash_review
+
+    lines = [
+        "01/01 SALDO INICIAL EN EFECTIVO 0.00 0.00 0.00 0.00 100.00",
+        "02/02 DEPOSITO 0.00 0.00 0.00 10.00 110.01",
+        "03/03 COMPRA 0.00 0.00 0.00 5.00 105.01",
+    ]
+    candidates = [
+        {"Pagina": 2, "Fila": i + 1, "Texto": line, "sha256": sha256(line.encode()).hexdigest()}
+        for i, line in enumerate(lines)
+    ]
+    review = _cash_review(candidates, "a" * 64)
+    assert review[1]["SaldoEsperado"] == "110.00"
+    assert review[1]["SaldoImpreso"] == "110.01"
+    assert review[1]["Diferencia"] == "-0.01"
+    assert review[1]["ControlAritmetico"] == "DIFERENCIA_CENTAVO"
+    assert review[2]["SaldoAnteriorImpreso"] == "110.01"
+    assert review[2]["SaldoEsperado"] == "105.01"
+    assert review[2]["Diferencia"] == "0.00"
+    assert review[2]["TextoOriginal"] == lines[2]
+    assert all(row["EstadoRevision"] == "PENDIENTE" for row in review)
+    assert len({row["ID"] for row in review}) == len(review)
+    assert _cash_review(candidates, "b" * 64)[0]["ID"] != review[0]["ID"]
+
+
+def test_private_review_packets_keep_values_and_refuse_public_output(tmp_path, monkeypatch):
+    import json
+
+    from test_gbm_intake import _gbm_quantity_pdf
+
+    from scripts import run_private_pilot as pilot
+
+    monkeypatch.setattr(pilot, "__file__", str(tmp_path / "scripts" / "run_private_pilot.py"))
+    source = tmp_path / "synthetic.pdf"
+    raw = _gbm_quantity_pdf()
+    source.write_bytes(raw)
+    with pytest.raises(ValueError, match="data/private"):
+        pilot.write_review_packets([source], tmp_path / "public")
+    assert not (tmp_path / "public").exists()
+    destination = tmp_path / "data" / "private" / "review"
+    result = pilot.write_review_packets([source], destination)
+    assert result["status"] == "REQUIERE_REVISION_HUMANA"
+    packet = result["packets"][0]
+    draft = json.loads((destination / packet["json"]).read_text(encoding="utf-8"))
+    assert packet["rows"] == len(draft["cash_review"])
+    assert sum(packet["controls"].values()) == packet["rows"]
+    assert draft["sha256"] == sha256(raw).hexdigest()
+    assert source.read_bytes() == raw
+    report = (destination / packet["markdown"]).read_text(encoding="utf-8")
+    assert "no es un paquete de análisis" in report
+    assert all(row["TextoOriginal"] in report for row in draft["cash_review"])
 
 
 def test_drafts_roundtrip_and_archives_newest_first():
