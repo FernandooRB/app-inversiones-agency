@@ -33,8 +33,11 @@ KINDS = {
     "ASSET_OUT",
     "FX_IN",
     "FX_OUT",
+    "OPEN_REPO",
+    "REPO_START",
+    "REPO_MATURITY",
 }
-COLUMNS = (
+LEGACY_COLUMNS = (
     "ID",
     "Fecha",
     "Liquidacion",
@@ -49,6 +52,9 @@ COLUMNS = (
     "Referencia",
     "MomentoFlujo",
 )
+COLUMNS = (*LEGACY_COLUMNS, "Interes")
+REPO_KINDS = {"OPEN_REPO", "REPO_START", "REPO_MATURITY"}
+REPO_VALUE_COLUMNS = ("Fecha", "Referencia", "Moneda", "Valor", "Fuente")
 ZERO = Decimal(0)
 
 
@@ -77,9 +83,10 @@ class Event:
     tax: Decimal = ZERO
     reference: str = ""
     timing: str = "UNKNOWN"
+    interest: Decimal = ZERO  # included in amount at REPO_MATURITY, never added twice
 
     def __post_init__(self):
-        for name in ("quantity", "price", "amount", "fee", "tax"):
+        for name in ("quantity", "price", "amount", "fee", "tax", "interest"):
             object.__setattr__(self, name, decimal(getattr(self, name)))
         if self.kind not in KINDS or self.currency not in {"MXN", "USD"}:
             raise PortfolioError("Tipo de movimiento o moneda fuera del alcance MXN/USD.")
@@ -91,7 +98,7 @@ class Event:
             if not isinstance(value, str) or len(value) > 160 or any(ord(c) < 32 for c in value):
                 raise PortfolioError("Identificador de movimiento inválido.")
         if not self.id or any(
-            getattr(self, key) < 0 for key in ("quantity", "price", "amount", "fee", "tax")
+            getattr(self, key) < 0 for key in ("quantity", "price", "amount", "fee", "tax", "interest")
         ):
             raise PortfolioError("Los movimientos requieren ID e importes no negativos.")
         positions = {"BUY", "SELL", "OPEN_POSITION", "ASSET_IN", "ASSET_OUT", "SPLIT"}
@@ -114,12 +121,23 @@ class Event:
                 raise PortfolioError("Una transferencia o conversión requiere referencia verificable.")
         if self.kind == "SELL" and self.fee + self.tax > self.amount:
             raise PortfolioError("Los cargos de una venta exceden su importe.")
+        if self.kind in REPO_KINDS:
+            if not self.reference.strip() or self.amount <= self.interest:
+                raise PortfolioError("Un reporto requiere referencia única y capital positivo.")
+            if self.kind != "REPO_MATURITY" and self.interest:
+                raise PortfolioError("El interés cobrado del reporto se declara sólo al vencimiento.")
+            if self.kind == "OPEN_REPO" and (self.day != self.settled or self.fee or self.tax):
+                raise PortfolioError("El reporto inicial no mueve efectivo ni admite liquidación futura.")
+            if self.kind == "REPO_MATURITY" and self.fee + self.tax > self.amount:
+                raise PortfolioError("Los cargos del reporto exceden su cobro bruto.")
+        elif self.interest:
+            raise PortfolioError("Interes se usa sólo para desglosar el cobro de REPO_MATURITY.")
 
     @property
     def cash(self) -> Decimal:
-        if self.kind in {"OPEN_POSITION", "SPLIT", "ASSET_IN", "ASSET_OUT"}:
+        if self.kind in {"OPEN_POSITION", "SPLIT", "ASSET_IN", "ASSET_OUT", "OPEN_REPO"}:
             return ZERO
-        debit = self.kind in {"BUY", "WITHDRAWAL", "FEE", "TAX", "TRANSFER_OUT", "FX_OUT"}
+        debit = self.kind in {"BUY", "WITHDRAWAL", "FEE", "TAX", "TRANSFER_OUT", "FX_OUT", "REPO_START"}
         return (-self.amount if debit else self.amount) - self.fee - self.tax
 
 
@@ -150,7 +168,29 @@ def merge_events(*batches) -> tuple[Event, ...]:
                 "Una conversión requiere dos patas en monedas distintas con la misma fecha y referencia."
             )
     # Same-day row order is the declared event sequence; IDs are not timestamps.
-    return tuple(sorted(result.values(), key=lambda row: row.day))
+    ordered = tuple(sorted(result.values(), key=lambda row: row.day))
+    repos, matured = {}, set()
+    for event in ordered:
+        if event.kind not in REPO_KINDS:
+            continue
+        ref = event.reference
+        if event.kind in {"OPEN_REPO", "REPO_START"}:
+            if ref in repos or ref in matured:
+                raise PortfolioError("Cada reporto requiere una referencia única, incluso tras vencer.")
+            repos[ref] = event
+        else:
+            origin = repos.get(ref)
+            if origin is None:
+                raise PortfolioError("El vencimiento de reporto requiere una apertura previa y única.")
+            if event.currency != origin.currency or event.asset != origin.asset:
+                raise PortfolioError("La moneda y el instrumento del reporto deben conservarse al vencer.")
+            if event.day < origin.settled:
+                raise PortfolioError("Un reporto no puede vencer antes de liquidar su apertura.")
+            if event.amount - event.interest != origin.amount:
+                raise PortfolioError("El cobro bruto menos interés no reproduce el capital del reporto.")
+            del repos[ref]
+            matured.add(ref)
+    return ordered
 
 
 def read_ledger(raw: bytes) -> tuple[Event, ...]:
@@ -158,12 +198,22 @@ def read_ledger(raw: bytes) -> tuple[Event, ...]:
         raise PortfolioError("El libro está vacío o excede 8 MB.")
     try:
         reader = csv.DictReader(StringIO(raw.decode("utf-8-sig")))
-        if tuple(reader.fieldnames or ()) != COLUMNS:
+        headers = tuple(reader.fieldnames or ())
+        if headers not in {COLUMNS, LEGACY_COLUMNS}:
             raise PortfolioError("Los encabezados no corresponden al libro normalizado.")
+        if headers == LEGACY_COLUMNS:
+            # Legacy books remain valid; repos require an explicit interest column.
+            repo_columns = False
+        else:
+            repo_columns = True
         events = []
         for row in reader:
             if len(events) >= 20000 or None in row or any(value is None for value in row.values()):
                 raise PortfolioError("El libro tiene filas o columnas fuera del formato.")
+            if row["Tipo"] in REPO_KINDS and not repo_columns:
+                raise PortfolioError("Los reportos requieren la plantilla con la columna Interes.")
+            if row["Tipo"] == "REPO_MATURITY" and not row.get("Interes", "").strip():
+                raise PortfolioError("Declara Interes al vencer un reporto; usa 0 si está documentado.")
             events.append(
                 Event(
                     row["ID"],
@@ -178,6 +228,7 @@ def read_ledger(raw: bytes) -> tuple[Event, ...]:
                     ),
                     row["Referencia"],
                     row["MomentoFlujo"],
+                    decimal(row.get("Interes") or "0"),
                 )
             )
         if not events:
@@ -192,10 +243,15 @@ def read_ledger(raw: bytes) -> tuple[Event, ...]:
 def book_at(events, cutoff: date) -> dict:
     """Positions on trade date; cash on settlement date, with signed receivables/payables."""
     positions, cash, pending = defaultdict(lambda: ZERO), defaultdict(lambda: ZERO), defaultdict(lambda: ZERO)
+    repos = {}
     for event in merge_events(events):
         if event.day > cutoff:
             continue
         key = (event.asset, event.currency)
+        if event.kind in {"OPEN_REPO", "REPO_START"}:
+            repos[(event.reference, event.currency)] = event.amount
+        elif event.kind == "REPO_MATURITY":
+            del repos[(event.reference, event.currency)]
         if event.kind in {"BUY", "OPEN_POSITION", "ASSET_IN"}:
             positions[key] += event.quantity
         elif event.kind in {"SELL", "ASSET_OUT"}:
@@ -212,10 +268,46 @@ def book_at(events, cutoff: date) -> dict:
         target[event.currency] += event.cash
     # Drop placeholder keys produced by pure cash events.
     positions = {key: value for key, value in positions.items() if key[0] and value}
-    return {"positions": positions, "cash": dict(cash), "pending": dict(pending)}
+    return {"positions": positions, "cash": dict(cash), "pending": dict(pending), "repos": repos}
 
 
-def value_book(book: dict, quotes: dict, fx: dict, *, base="MXN", raw_prices_confirmed=False) -> dict:
+def read_repo_values(raw: bytes, cutoff: date) -> dict:
+    """Documented total values, not collateral unit prices or inferred accruals."""
+    if not 0 < len(raw) <= 2_000_000:
+        raise PortfolioError("La valuación de reportos está vacía o excede 2 MB.")
+    try:
+        reader = csv.DictReader(StringIO(raw.decode("utf-8-sig")))
+        if tuple(reader.fieldnames or ()) != REPO_VALUE_COLUMNS:
+            raise PortfolioError("La valuación de reportos requiere Fecha,Referencia,Moneda,Valor,Fuente.")
+        values = {}
+        for row in reader:
+            if (
+                len(values) >= 20000 or None in row or any(v is None for v in row.values())
+                or row["Fecha"] != cutoff.isoformat() or row["Moneda"] not in {"MXN", "USD"}
+                or not row["Referencia"].strip() or not row["Fuente"].strip()
+            ):
+                raise PortfolioError(
+                    "Cada valuación de reporto requiere referencia, moneda, fuente y fecha del cierre."
+                )
+            key = (row["Referencia"], row["Moneda"])
+            if key in values:
+                raise PortfolioError("Hay valuaciones duplicadas para un reporto.")
+            value = decimal(row["Valor"])
+            if value <= 0:
+                raise PortfolioError("La valuación de un reporto vigente debe ser positiva.")
+            values[key] = value
+        if not values:
+            raise PortfolioError("La valuación de reportos no contiene filas.")
+        return values
+    except (UnicodeError, csv.Error, ValueError) as exc:
+        if isinstance(exc, PortfolioError):
+            raise
+        raise PortfolioError("No se pudo leer la valuación de reportos.") from exc
+
+
+def value_book(
+    book: dict, quotes: dict, fx: dict, *, base="MXN", raw_prices_confirmed=False, repo_values=None,
+) -> dict:
     """Exact-cut quotes/FX must be selected and validated by the caller; no silent fill."""
     if base not in {"MXN", "USD"} or raw_prices_confirmed is not True:
         raise PortfolioError("Confirma cotizaciones sin ajuste y una moneda base MXN/USD.")
@@ -226,6 +318,17 @@ def value_book(book: dict, quotes: dict, fx: dict, *, base="MXN", raw_prices_con
         values.append((asset, currency, quantity * decimal(quotes[(asset, currency)])))
     for kind in ("cash", "pending"):
         values.extend((kind, currency, amount) for currency, amount in book[kind].items())
+    repos = book.get("repos", {})
+    repo_values = {} if repo_values is None else repo_values
+    if set(repo_values) != set(repos):
+        raise PortfolioError("Falta la valuación documentada de cada reporto vigente o sobran referencias.")
+    for ref, currency in repos:
+        value = decimal(repo_values[(ref, currency)])
+        if value <= 0:
+            raise PortfolioError("La valuación de un reporto vigente debe ser positiva.")
+        # Total carrying value at the cutoff, including documented accrued interest.
+        # Neither collateral prices nor principal alone establish this value.
+        values.append((f"Reporto · {ref}", currency, value))
     total = ZERO
     detail = []
     for asset, currency, value in values:
