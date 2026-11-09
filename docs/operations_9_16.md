@@ -42,6 +42,11 @@ dividendos en efectivo con precios ajustados duplicaría su efecto económico.
 Las cotizaciones del libro y de implementación permanecen separadas de los precios
 ajustados empleados por el modelo de investigación.
 
+La [base de precios](price_basis.md) distingue precio de valuación, cierre oficial
+y series reexpresadas. En particular, `Close` de Yahoo con `auto_adjust=False`
+no acredita un precio histórico sin ajuste por splits. Verifica esa base antes
+de multiplicarlo por las cantidades históricas del libro.
+
 El rendimiento histórico utiliza cierres conciliados y flujos confirmados:
 
 - TWR encadena subperiodos ajustados por flujos. Cada flujo necesita valuación en
