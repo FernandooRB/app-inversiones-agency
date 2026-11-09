@@ -35,6 +35,10 @@ Carga cierres locales ajustados MXN con `Fecha` y una columna por instrumento. L
 
 La identidad/ISIN es opcional para investigación interna y su ausencia queda como pendiente. Los proxies de origen se mantienen en Análisis avanzado. Este recorrido no incorpora automáticamente una segunda fuente independiente; lo declara entre los pendientes.
 
+El [criterio de base de precios](price_basis.md) separa la serie ajustada del modelo
+del precio usado para conciliar las cantidades del estado. Una discrepancia entre
+cierres requiere revisar convención y eventos antes de sustituir un valor.
+
 ## Comparar alternativas
 
 Se calculan sobre el mismo universo, muestra y estimador:
