@@ -1,7 +1,7 @@
 """Cash-flow-aware historical performance. No inference of flows from NAV changes."""
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,98 @@ class Flow:
     day: date
     amount: float  # positive contribution to account, negative withdrawal
     timing: str = "UNKNOWN"
+
+
+def valuation_requirements(start: date, end: date, flows: list[Flow], *, available_dates=()) -> dict:
+    """Calendar coverage for this engine's TWR convention, not approval of NAV or flows.
+
+    Amounts, currencies and FX are not assessed here. UNKNOWN timing never becomes
+    BOD/EOD merely because a convenient closing value is available.
+    """
+    if any(not isinstance(day, date) or isinstance(day, datetime) for day in (start, end)) or start >= end:
+        raise PortfolioError("El calendario requiere dos fechas de cierre distintas y ordenadas, sin hora.")
+    if any(
+        not isinstance(flow, Flow)
+        or not isinstance(flow.day, date)
+        or isinstance(flow.day, datetime)
+        or flow.timing not in {"BOD", "EOD", "UNKNOWN"}
+        for flow in flows
+    ):
+        raise PortfolioError("Hay flujos con fecha o momento inválidos.")
+    if any(flow.day <= start or flow.day > end for flow in flows):
+        raise PortfolioError("Los flujos deben ser posteriores al cierre inicial y hasta el cierre final.")
+    known = set()
+    try:
+        for value in available_dates:
+            if not isinstance(value, (str, date, np.datetime64)):
+                raise ValueError
+            parsed = pd.Timestamp(value)
+            if pd.isna(parsed) or parsed.tzinfo is not None or parsed != parsed.normalize():
+                raise ValueError
+            known.add(parsed.date())
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise PortfolioError("Las fechas disponibles deben ser cierres sin hora ni zona horaria.") from exc
+    planned = {}
+
+    def add(day, reason, *, required=True):
+        row = planned.setdefault(day, {"required": False, "reasons": set()})
+        row["required"] |= required
+        row["reasons"].add(reason)
+
+    add(start, "Cierre inicial")
+    add(end, "Cierre final")
+    for flow in flows:
+        add(flow.day, "Cierre en fecha de flujo")
+        if flow.timing == "BOD":
+            add(flow.day - timedelta(days=1), "Cierre anterior a flujo BOD")
+        elif flow.timing == "UNKNOWN":
+            add(flow.day - timedelta(days=1), "Necesario si el flujo se confirma BOD", required=False)
+    rows = [
+        {
+            "date": day.isoformat(),
+            "required": row["required"],
+            "available": day in known,
+            "reasons": sorted(row["reasons"]),
+        }
+        for day, row in sorted(planned.items())
+    ]
+    unknown = sum(flow.timing == "UNKNOWN" for flow in flows)
+    missing = [row["date"] for row in rows if row["required"] and not row["available"]]
+    conditional = [row["date"] for row in rows if not row["required"] and not row["available"]]
+    return {
+        "schema": 1,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "rows": rows,
+        "unknown_flow_count": unknown,
+        "unknown_flow_dates": sorted({f.day.isoformat() for f in flows if f.timing == "UNKNOWN"}),
+        "missing_required_dates": missing,
+        "missing_conditional_dates": conditional,
+        "twr_coverage_ready": not missing and not unknown,
+    }
+
+
+def normalize_valuations(valuations: pd.Series) -> pd.Series:
+    """Validate closing NAV without filling dates or shifting time zones."""
+    if not isinstance(valuations, pd.Series):
+        raise PortfolioError("Las valuaciones deben ser una serie de cierres fechados.")
+    nav = valuations.copy()
+    try:
+        nav.index = pd.to_datetime(nav.index)
+        nav = nav.astype(float).sort_index()
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise PortfolioError("Las valuaciones deben tener fecha e importe numérico.") from exc
+    if (
+        len(nav) < 2
+        or nav.index.has_duplicates
+        or nav.index.hasnans
+        or not np.isfinite(nav).all()
+        or (nav <= 0).any()
+    ):
+        raise PortfolioError("Se requieren cierres positivos, finitos y sin fechas vacías o duplicadas.")
+    if nav.index.tz is not None or not nav.index.equals(nav.index.normalize()):
+        raise PortfolioError("Usa fechas de cierre sin hora ni zona horaria en las valuaciones.")
+    return nav
 
 
 def xirr(cashflows: list[tuple[date, float]]) -> dict:
@@ -56,39 +148,16 @@ def performance(valuations: pd.Series, flows: list[Flow]) -> dict:
     requires that day's post-flow closing value. Unknown timing blocks TWR,
     while dated flows can still support XIRR. This is not a GIPS compliance claim.
     """
-    nav = valuations.copy()
-    try:
-        nav.index = pd.to_datetime(nav.index)
-        nav = nav.astype(float).sort_index()
-    except (ValueError, TypeError) as exc:
-        raise PortfolioError("Las valuaciones deben tener fecha e importe numérico.") from exc
-    if len(nav) < 2 or nav.index.has_duplicates or not np.isfinite(nav).all() or (nav <= 0).any():
-        raise PortfolioError("Se requieren cierres positivos, finitos y sin fechas duplicadas.")
-    if any(moment.time().isoformat() != "00:00:00" for moment in nav.index):
-        raise PortfolioError("Usa fechas de cierre sin hora en las valuaciones.")
+    nav = normalize_valuations(valuations)
     first, last = nav.index[0].date(), nav.index[-1].date()
-    if any(
-        not isinstance(flow.day, date)
-        or not np.isfinite(flow.amount)
-        or flow.timing not in {"BOD", "EOD", "UNKNOWN"}
-        for flow in flows
-    ):
+    requirements = valuation_requirements(first, last, flows, available_dates=nav.index)
+    if any(not np.isfinite(flow.amount) for flow in flows):
         raise PortfolioError("Hay flujos con fecha, importe o momento inválidos.")
-    if any(flow.day <= first or flow.day > last for flow in flows):
-        raise PortfolioError("Los flujos deben ser posteriores al cierre inicial y hasta el cierre final.")
     mw = xirr(
         [(first, -float(nav.iloc[0])), *[(f.day, -f.amount) for f in flows], (last, float(nav.iloc[-1]))]
     )
-    known_days = {moment.date() for moment in nav.index}
-    missing = [
-        flow
-        for flow in flows
-        if flow.timing == "UNKNOWN"
-        or flow.day not in known_days
-        or (flow.timing == "BOD" and flow.day - timedelta(days=1) not in known_days)
-    ]
     twr = None
-    if not missing:
+    if requirements["twr_coverage_ready"]:
         linked = 1.0
         for index in range(1, len(nav)):
             day = nav.index[index].date()
@@ -111,4 +180,5 @@ def performance(valuations: pd.Series, flows: list[Flow]) -> dict:
         "net_flow": net_flow,
         "gain": float(nav.iloc[-1] - nav.iloc[0] - net_flow),
         "days": (last - first).days,
+        "valuation_requirements": requirements,
     }
