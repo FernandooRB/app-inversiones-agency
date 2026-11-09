@@ -23,7 +23,7 @@ from multi_currency_wealth import consolidate_wealth, consolidated_performance, 
 from operations_jobs import refresh_subscription
 from portfolio_core import PortfolioError
 from realized_performance import Flow, performance
-from transaction_ledger import COLUMNS, book_at, read_ledger, value_book
+from transaction_ledger import COLUMNS, REPO_VALUE_COLUMNS, book_at, read_ledger, read_repo_values, value_book
 
 
 def _key(name):
@@ -107,6 +107,11 @@ def _ledger(context):
     st.subheader("Movimientos y rendimiento histórico")
     st.caption("Títulos a fecha de operación, efectivo a liquidación y pendientes separados. MXN y USD.")
     _template("Plantilla de libro normalizado", COLUMNS, "ledger_template")
+    with st.expander("Cómo registrar reportos"):
+        st.write(
+            "OPEN_REPO registra el capital inicial sin mover efectivo; REPO_START invierte capital; "
+            "REPO_MATURITY cobra el bruto, con Interes ya incluido. Usa una referencia única por reporto."
+        )
     source = st.file_uploader("Libro normalizado de movimientos", type=["csv"], key=_key("ops_ledger"))
     if not source:
         st.info(
@@ -133,6 +138,7 @@ def _ledger(context):
             "tax": "Impuesto",
             "reference": "Referencia",
             "timing": "Momento del flujo",
+            "interest": "Interés incluido en bruto",
         }
     )
     st.dataframe(
@@ -143,11 +149,38 @@ def _ledger(context):
                 "Importe bruto": "{:,.2f}",
                 "Comisión": "{:,.2f}",
                 "Impuesto": "{:,.2f}",
+                "Interés incluido en bruto": "{:,.2f}",
             }
         ),
         hide_index=True,
         width="stretch",
     )
+    repo_file = None
+    if book["repos"]:
+        st.write("**Reportos vigentes**")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"Referencia": ref, "Moneda": currency, "Capital": amount}
+                    for (ref, currency), amount in book["repos"].items()
+                ]
+            ).style.format({"Capital": "{:,.2f}"}).set_properties(
+                subset=["Capital"], **{"text-align": "right"}
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        _template("Plantilla de valuación de reportos", REPO_VALUE_COLUMNS, "repo_values_template")
+        repo_file = st.file_uploader(
+            "Valuación de reportos al cierre: Fecha,Referencia,Moneda,Valor,Fuente",
+            ["csv"], key=_key("ops_repo_values"),
+        )
+        if not repo_file:
+            st.info(
+                "Valuación pendiente: carga el valor total documentado de cada reporto al cierre, "
+                "incluidos los intereses devengados que correspondan. El capital no sustituye esa valuación."
+            )
+    repo_values = read_repo_values(repo_file.getvalue(), cutoff) if repo_file else None
     st.write("**Efectivo liquidado y pendientes**")
     st.dataframe(
         pd.DataFrame(
@@ -155,7 +188,7 @@ def _ledger(context):
                 {"Moneda": c, "Liquidado": book["cash"].get(c, 0), "Pendiente": book["pending"].get(c, 0)}
                 for c in sorted(set(book["cash"]) | set(book["pending"]))
             ]
-        ),
+        ).style.format({"Liquidado": "{:,.2f}", "Pendiente": "{:,.2f}"}),
         hide_index=True,
     )
     quotes_file = st.file_uploader(
@@ -166,11 +199,13 @@ def _ledger(context):
     )
     base = st.selectbox("Moneda del rendimiento y valuación", ["MXN", "USD"])
     raw_confirmed = st.checkbox(
-        "Confirmé cotizaciones sin ajuste y sus fechas contra la fuente del cierre",
+        "Confirmé las cotizaciones sin ajuste y las valuaciones contra las fuentes del cierre",
         key=_key("raw_confirmation"),
     )
-    if quotes_file and raw_confirmed:
-        quotes = _csv(quotes_file)
+    if (quotes_file or not book["positions"]) and raw_confirmed and (not book["repos"] or repo_file):
+        quotes = _csv(quotes_file) if quotes_file else pd.DataFrame(
+            columns=["Fecha", "Instrumento", "Moneda", "Precio"]
+        )
         if not {"Fecha", "Instrumento", "Moneda", "Precio"}.issubset(quotes):
             raise PortfolioError("Las cotizaciones requieren fecha, instrumento, moneda y precio.")
         if (
@@ -182,7 +217,10 @@ def _ledger(context):
         fx = _csv(fx_file) if fx_file else pd.DataFrame()
         if not fx.empty:
             # Reuse exact-cut validation, including source and duplicate-rate rejection.
-            currencies = sorted(set(book["cash"]) | {c for _, c in book["positions"]} | set(book["pending"]))
+            currencies = sorted(
+                set(book["cash"]) | {c for _, c in book["positions"]}
+                | set(book["pending"]) | {c for _, c in book["repos"]}
+            )
             dummy = pd.DataFrame(
                 [
                     {
@@ -198,9 +236,16 @@ def _ledger(context):
             )
             consolidate_wealth(dummy, fx, cutoff=cutoff, base=base)
         rates = {(row["Moneda"], row["Base"]): row["Tasa"] for row in fx.to_dict("records")}
-        valued = value_book(book, quote_map, rates, base=base, raw_prices_confirmed=True)
+        valued = value_book(
+            book, quote_map, rates, base=base, raw_prices_confirmed=True, repo_values=repo_values,
+        )
         st.metric(f"Patrimonio neto al cierre · {base}", f"{valued['nav']:,.2f}")
-        st.dataframe(pd.DataFrame(valued["detail"]), hide_index=True, width="stretch")
+        st.dataframe(
+            pd.DataFrame(valued["detail"]).style.format(
+                {"ValorOrigen": "{:,.2f}", "FX": "{:,.6g}", "ValorBase": "{:,.2f}"}
+            ),
+            hide_index=True, width="stretch",
+        )
     nav_file = st.file_uploader("Valuaciones históricas verificadas: Fecha,NAV", ["csv"], key=_key("ops_nav"))
     flow_fx_file = st.file_uploader(
         "FX por fecha de cada flujo: Fecha,Moneda,Base,Tasa,Fuente", ["csv"], key=_key("ops_flow_fx")
@@ -261,6 +306,7 @@ def _ledger(context):
                 "ledger": base64.b64encode(source.getvalue()).decode(),
                 "valuations": base64.b64encode(nav_file.getvalue()).decode(),
                 "flow_fx": base64.b64encode(flow_fx_file.getvalue()).decode() if flow_fx_file else None,
+                "repo_values": base64.b64encode(repo_file.getvalue()).decode() if repo_file else None,
             },
         )
 

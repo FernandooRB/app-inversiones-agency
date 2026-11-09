@@ -10,13 +10,15 @@ de ejecuciones con corte y objetivo. Los originales y el piloto real permanecen 
 La plantilla descargable tiene estas columnas, en este orden:
 
 ```text
-ID,Fecha,Liquidacion,Tipo,Instrumento,Moneda,Cantidad,Precio,Importe,Comision,Impuesto,Referencia,MomentoFlujo
+ID,Fecha,Liquidacion,Tipo,Instrumento,Moneda,Cantidad,Precio,Importe,Comision,Impuesto,Referencia,MomentoFlujo,Interes
 ```
 
 Las fechas usan `AAAA-MM-DD`. `Importe` es el bruto positivo; comisión e impuesto se
 registran por separado. Las cantidades y los importes se calculan con Decimal.
 El mismo ID y contenido se importa una vez; un ID con contenido distinto se rechaza.
 Las filas de un mismo día deben seguir el orden económico de las operaciones.
+Los libros anteriores de 13 columnas siguen admitiéndose para los tipos anteriores;
+los reportos requieren la plantilla con `Interes`, incluso cuando sea cero.
 
 Tipos admitidos:
 
@@ -31,6 +33,14 @@ Tipos admitidos:
 | ASSET_IN / ASSET_OUT | Transferencias de títulos; precio unitario documenta el flujo externo |
 | TRANSFER_IN / TRANSFER_OUT | Transferencias con referencia, candidatas a eliminación entre cuentas |
 | FX_IN / FX_OUT | Dos patas con misma referencia y fecha, en monedas distintas |
+| OPEN_REPO | Capital de un reporto ya existente al iniciar el libro, sin nueva salida de efectivo |
+| REPO_START | Salida de capital y alta del derecho de cobro, sin sumar el colateral a las posiciones |
+| REPO_MATURITY | Cobro bruto que ya incluye `Interes`; baja del capital y cargos por separado |
+
+El [sublibro de reportos](repo_ledger.md) exige una referencia única por operación,
+conserva los pendientes de liquidación y comprueba la devolución exacta del capital.
+Para un reporto vigente, el patrimonio requiere su valor total documentado al corte;
+el libro no infiere devengos ni usa automáticamente el principal como valuación.
 
 Los eventos corporativos complejos deben desglosarse y revisarse mediante sus patas
 de títulos y efectivo; el sistema no infiere fusiones, derechos o bases fiscales.
