@@ -76,6 +76,11 @@ def test_currencies_are_not_netted_and_repo_principal_is_not_a_valuation():
     assert sum(r["Diferencia"] for r in result["rows"]) == 0  # not a criterion for a match
 
 
+def test_decimal_underflow_cannot_turn_an_unmatched_holding_into_an_arithmetic_match():
+    with pytest.raises(PortfolioError, match="precisión"):
+        reconcile_book({}, [control("POSITION", "1e-10000000", "SIM-A")], cutoff=D)
+
+
 @pytest.mark.parametrize(
     "kwargs", [
         {"kind": "UNKNOWN"}, {"currency": "EUR"}, {"source": " "},

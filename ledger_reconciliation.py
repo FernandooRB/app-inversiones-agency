@@ -105,11 +105,16 @@ def reconcile_book(book: dict, controls, *, cutoff: date) -> dict:
         actual = modeled.get(key, decimal(0))
         expected = control.balance if control else None
         difference = actual - expected if control else None
+        if control is not None and difference == 0 and actual != expected:
+            raise PortfolioError(
+                "La precisión de un saldo excede la comparación disponible; revisa el control."
+            )
+        status = "SIN_CONTROL" if control is None else "COINCIDE" if actual == expected else "DIFERENCIA"
         rows.append({
             "Tipo": kind, "InstrumentoReferencia": item, "Moneda": currency,
             "Unidad": "títulos" if kind == "POSITION" else currency,
             "Libro": actual, "Control": expected, "Diferencia": difference,
-            "Estado": "SIN_CONTROL" if control is None else "COINCIDE" if difference == 0 else "DIFERENCIA",
+            "Estado": status,
             "Fuente": control.source if control else "",
         })
     differences = sum(row["Estado"] == "DIFERENCIA" for row in rows)
