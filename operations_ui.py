@@ -24,8 +24,10 @@ from ledger_reconciliation import read_closing_controls, reconcile_book
 from multi_currency_wealth import consolidate_wealth, consolidated_performance, match_internal_flows
 from operations_jobs import refresh_subscription
 from portfolio_core import PortfolioError
-from realized_performance import Flow, performance
+from realized_performance import Flow, normalize_valuations, performance, valuation_requirements
 from transaction_ledger import COLUMNS, REPO_VALUE_COLUMNS, book_at, read_ledger, read_repo_values, value_book
+
+EXTERNAL_EVENT_KINDS = {"DEPOSIT", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT", "ASSET_IN", "ASSET_OUT"}
 
 
 def _key(name):
@@ -163,6 +165,49 @@ def _closing_reconciliation(context, book, cutoff, ledger_bytes):
         )
         _save_evidence(context, "Conservar conciliación de cierre", payload)
         return payload
+
+
+def _native_flow_amount(event):
+    value = event.quantity * event.price if event.kind.startswith("ASSET_") else event.amount
+    return float(value) * (-1 if event.kind in {"WITHDRAWAL", "TRANSFER_OUT", "ASSET_OUT"} else 1)
+
+
+def _valuation_calendar(start, end, flows, available_dates=()):
+    with st.expander("Valuaciones necesarias para TWR"):
+        if start >= end:
+            st.info("Selecciona un cierre posterior a la apertura del libro para planear el periodo.")
+            return None
+        result = valuation_requirements(start, end, flows, available_dates=available_dates)
+        st.caption(f"Periodo del plan: {start.isoformat()} a {end.isoformat()}.")
+        if result["twr_coverage_ready"]:
+            st.success("Las fechas y los momentos declarados cubren el calendario de TWR.")
+        else:
+            st.warning(
+                "Calendario pendiente · Cierres obligatorios faltantes: "
+                f"{len(result['missing_required_dates'])} "
+                f"· Flujos sin momento: {result['unknown_flow_count']}."
+            )
+        view = pd.DataFrame([
+            {
+                "Fecha": row["date"],
+                "Requisito": "Obligatorio" if row["required"] else "Si el flujo se confirma BOD",
+                "Fecha en CSV": "Aportada" if row["available"] else "Falta",
+                "Motivo": "; ".join(row["reasons"]),
+            }
+            for row in result["rows"]
+        ])
+        st.dataframe(view, hide_index=True, width="stretch")
+        st.caption(
+            "BOD requiere el cierre del día calendario anterior; EOD usa el cierre de la fecha del flujo. "
+            "UNKNOWN conserva ambos escenarios pendientes. El plan sólo revisa fechas: no aprueba "
+            "saldos, clasificación de flujos, FX ni eventos corporativos."
+        )
+        st.download_button(
+            "Descargar plan de valuaciones", view.to_csv(index=False).encode("utf-8-sig"),
+            f"plan_valuaciones_{start}_{end}.csv", "text/csv",
+            key=_key("valuation_calendar_download"), on_click="ignore",
+        )
+        return result
 
 
 def _ledger(context):
@@ -310,6 +355,25 @@ def _ledger(context):
             hide_index=True, width="stretch",
         )
     nav_file = st.file_uploader("Valuaciones históricas verificadas: Fecha,NAV", ["csv"], key=_key("ops_nav"))
+    nav = None
+    if nav_file:
+        frame = _csv(nav_file)
+        if not {"Fecha", "NAV"}.issubset(frame):
+            raise PortfolioError("Las valuaciones requieren Fecha y NAV.")
+        nav = normalize_valuations(frame.set_index("Fecha")["NAV"])
+        start, end = nav.index[0].date(), nav.index[-1].date()
+    else:
+        start = min((event.day for event in events if event.day <= cutoff), default=cutoff)
+        end = cutoff
+    period_events = [
+        event for event in events
+        if event.kind in EXTERNAL_EVENT_KINDS and start < event.settled <= end
+    ]
+    _valuation_calendar(
+        start, end,
+        [Flow(event.settled, _native_flow_amount(event), event.timing) for event in period_events],
+        available_dates=nav.index if nav is not None else (),
+    )
     flow_fx_file = st.file_uploader(
         "FX por fecha de cada flujo: Fecha,Moneda,Base,Tasa,Fuente", ["csv"], key=_key("ops_flow_fx")
     )
@@ -318,20 +382,10 @@ def _ledger(context):
         key=_key("flows_confirmation"),
     )
     if nav_file and verified:
-        frame = _csv(nav_file)
-        if not {"Fecha", "NAV"}.issubset(frame):
-            raise PortfolioError("Las valuaciones requieren Fecha y NAV.")
-        nav = frame.set_index("Fecha")["NAV"]
-        start, end = min(map(date.fromisoformat, nav.index)), max(map(date.fromisoformat, nav.index))
         fx_frame = _csv(flow_fx_file) if flow_fx_file else pd.DataFrame()
         flows = []
-        external = {"DEPOSIT", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT", "ASSET_IN", "ASSET_OUT"}
-        for event in events:
-            if event.kind not in external or not start < event.settled <= end:
-                continue
-            amount = float(event.quantity * event.price if event.kind.startswith("ASSET_") else event.amount)
-            if event.kind in {"WITHDRAWAL", "TRANSFER_OUT", "ASSET_OUT"}:
-                amount *= -1
+        for event in period_events:
+            amount = _native_flow_amount(event)
             if event.currency != base:
                 needed = {"Fecha", "Moneda", "Base", "Tasa", "Fuente"}
                 if not needed.issubset(fx_frame):
