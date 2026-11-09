@@ -42,6 +42,12 @@ conserva los pendientes de liquidación y comprueba la devolución exacta del ca
 Para un reporto vigente, el patrimonio requiere su valor total documentado al corte;
 el libro no infiere devengos ni usa automáticamente el principal como valuación.
 
+La [conciliación de saldos al cierre](ledger_reconciliation.md) permite cargar
+controles de efectivo, pendientes, títulos y capital de reportos. Compara en las
+unidades originales, conserva centavos y controles ausentes como pendientes y
+ofrece una descarga con las diferencias y huellas. No reinicia el libro con el
+saldo del siguiente mes ni genera movimientos de ajuste.
+
 Los eventos corporativos complejos deben desglosarse y revisarse mediante sus patas
 de títulos y efectivo; el sistema no infiere fusiones, derechos o bases fiscales.
 Una venta sin títulos previos se rechaza. Un saldo de efectivo negativo debe revisarse;

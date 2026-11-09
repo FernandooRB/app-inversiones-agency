@@ -19,6 +19,8 @@ from case_workspace import WorkspaceError
 from executable_allocation import cost_aware_target, executable_plan
 from gbm_documents import read_cfdi_evidence, read_statement
 from implementation_costs import ImplementationCostAssumptions
+from ledger_reconciliation import COLUMNS as CONTROL_COLUMNS
+from ledger_reconciliation import read_closing_controls, reconcile_book
 from multi_currency_wealth import consolidate_wealth, consolidated_performance, match_internal_flows
 from operations_jobs import refresh_subscription
 from portfolio_core import PortfolioError
@@ -77,6 +79,7 @@ def _save_evidence(context, label, payload):
         if st.button(label):
             modules = (
                 "transaction_ledger.py",
+                "ledger_reconciliation.py",
                 "realized_performance.py",
                 "executable_allocation.py",
                 "multi_currency_wealth.py",
@@ -101,6 +104,65 @@ def _save_evidence(context, label, payload):
             st.success(
                 "Evidencia cifrada y versionada en el expediente; requiere las revisiones correspondientes."
             )
+
+
+def _closing_reconciliation(context, book, cutoff, ledger_bytes):
+    with st.expander("Conciliar contra el estado de cuenta"):
+        st.caption(
+            "Compara CASH (efectivo liquidado), PENDING (efectivo pendiente), POSITION (títulos) "
+            "y REPO (capital por referencia). Usa saldos y fuentes del mismo cierre y cuenta."
+        )
+        _template("Plantilla de controles de cierre", CONTROL_COLUMNS, "closing_controls_template")
+        source = st.file_uploader("Controles de cierre", ["csv"], key=_key("ops_closing_controls"))
+        if not source:
+            st.info("Carga los saldos de control para contrastarlos con el libro, sin ajustar movimientos.")
+            return None
+        controls = read_closing_controls(source.getvalue(), cutoff)
+        result = reconcile_book(book, controls, cutoff=cutoff)
+        if result["status"] == "COINCIDENCIA_ARITMETICA":
+            st.success(f"Controles con coincidencia aritmética: {result['exact']}.")
+        else:
+            st.warning(
+                f"Revisión pendiente · Con diferencia: {result['differences']} "
+                f"· Sin control: {result['missing']}."
+            )
+        view = pd.DataFrame(result["rows"]).rename(
+            columns={"InstrumentoReferencia": "Instrumento / referencia"}
+        )
+        view["Tipo"] = view["Tipo"].replace({
+            "CASH": "Efectivo liquidado", "PENDING": "Efectivo pendiente",
+            "POSITION": "Títulos", "REPO": "Capital de reporto",
+        })
+        view["Estado"] = view["Estado"].replace({
+            "COINCIDE": "Coincide", "SIN_CONTROL": "Sin control", "DIFERENCIA": "Diferencia",
+        })
+        st.dataframe(
+            view.style.format(
+                {"Libro": "{:,.12g}", "Control": "{:,.12g}",
+                 "Diferencia": lambda value: f"{value:+,.12g}" if value else "0"}, na_rep="—",
+            ).set_properties(subset=["Libro", "Control", "Diferencia"], **{"text-align": "right"}),
+            hide_index=True, width="stretch",
+        )
+        st.caption(
+            "Cada saldo conserva su unidad y moneda. Un control ausente sigue pendiente; "
+            "la coincidencia aritmética no acredita integridad del estado ni aprobación de la cuenta."
+        )
+        payload = {
+            **result, "ledger_sha256": sha256(ledger_bytes).hexdigest(),
+            "controls_sha256": sha256(source.getvalue()).hexdigest(),
+            "code_sha256": {
+                name: sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+                for name in ("transaction_ledger.py", "ledger_reconciliation.py")
+            },
+        }
+        st.download_button(
+            "Descargar conciliación de cierre",
+            json.dumps(payload, ensure_ascii=False, default=str).encode(),
+            f"conciliacion_cierre_{cutoff}.json", "application/json",
+            key=_key("closing_reconciliation_download"), on_click="ignore",
+        )
+        _save_evidence(context, "Conservar conciliación de cierre", payload)
+        return payload
 
 
 def _ledger(context):
@@ -191,6 +253,7 @@ def _ledger(context):
         ).style.format({"Liquidado": "{:,.2f}", "Pendiente": "{:,.2f}"}),
         hide_index=True,
     )
+    reconciliation = _closing_reconciliation(context, book, cutoff, source.getvalue())
     quotes_file = st.file_uploader(
         "Cotizaciones de cierre: Fecha,Instrumento,Moneda,Precio", ["csv"], key=_key("ops_raw")
     )
@@ -307,6 +370,7 @@ def _ledger(context):
                 "valuations": base64.b64encode(nav_file.getvalue()).decode(),
                 "flow_fx": base64.b64encode(flow_fx_file.getvalue()).decode() if flow_fx_file else None,
                 "repo_values": base64.b64encode(repo_file.getvalue()).decode() if repo_file else None,
+                "closing_reconciliation": reconciliation,
             },
         )
 
