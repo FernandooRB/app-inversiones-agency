@@ -531,7 +531,7 @@ def _ledger(context):
                 "closing_reconciliation": reconciliation,
             },
         )
-    download_review(context, files, cutoff=cutoff, base=base)
+    _checked_input("Paquete de movimientos", download_review, context, files, cutoff=cutoff, base=base)
 
 
 def _implementation(context):

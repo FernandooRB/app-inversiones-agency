@@ -121,7 +121,11 @@ let browser;
   await restored.getByText(/El paquete de movimientos no supera/).waitFor({state:'visible'});
   assert.equal(await movements(restored).getByTestId('stDateInput').locator('input').inputValue(),'2026-01-10');
   await restored.getByRole('button',{name:'Remove invalid.zip',exact:true}).click();
+  await restored.getByText(/El paquete de movimientos no supera/).waitFor({state:'detached'});
+  // The preceding removal rebuilds the upload controls. Wait for that UI transition.
+  await restored.waitForTimeout(350);
   await input(restored,'Valuaciones históricas verificadas:').setInputFiles(path.join(out,'nav_bad.csv'));
+  await restored.getByRole('button',{name:'Remove nav_bad.csv',exact:true}).waitFor({state:'visible'});
   const validationError=movements(restored).getByText('Revisa Valuaciones históricas.',{exact:true});
   await validationError.waitFor({state:'visible'});
   await movements(restored).getByText('Se requieren cierres positivos, finitos y sin fechas vacías o duplicadas.',{exact:true}).waitFor({state:'visible'});

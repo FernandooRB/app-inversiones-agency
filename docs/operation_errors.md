@@ -21,7 +21,8 @@ ese registro de error.
 El libro se reconstruye con los insumos actuales antes de que otra pestaña pueda
 usar sus cantidades. Si falla la revisión activa de Movimientos, se retira esa
 referencia de la sesión. No se conserva un saldo anterior como si procediera del
-CSV nuevo. También se retiran los rendimientos de la vista fallida.
+CSV nuevo. Una valuación histórica rechazada retira los rendimientos de la
+ejecución anterior de esa vista.
 
 Cambiar el CSV del libro, su corte o abrir otra revisión recuperada exige confirmar
 de nuevo las cantidades para seguimiento. Explorar la pantalla con el mismo libro
