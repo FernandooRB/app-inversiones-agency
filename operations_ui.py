@@ -23,6 +23,14 @@ from ledger_reconciliation import COLUMNS as CONTROL_COLUMNS
 from ledger_reconciliation import read_closing_controls, reconcile_book
 from multi_currency_wealth import consolidate_wealth, consolidated_performance, match_internal_flows
 from operations_jobs import refresh_subscription
+from operations_review_ui import (
+    download_review,
+    open_review,
+    reset_confirmation,
+    review_defaults,
+    review_key,
+    review_upload,
+)
 from portfolio_core import PortfolioError
 from realized_performance import Flow, normalize_valuations, performance, valuation_requirements
 from transaction_ledger import COLUMNS, REPO_VALUE_COLUMNS, book_at, read_ledger, read_repo_values, value_book
@@ -108,14 +116,16 @@ def _save_evidence(context, label, payload):
             )
 
 
-def _closing_reconciliation(context, book, cutoff, ledger_bytes):
+def _closing_reconciliation(context, book, cutoff, ledger_bytes, files=None):
     with st.expander("Conciliar contra el estado de cuenta"):
         st.caption(
             "Compara CASH (efectivo liquidado), PENDING (efectivo pendiente), POSITION (títulos) "
             "y REPO (capital por referencia). Usa saldos y fuentes del mismo cierre y cuenta."
         )
         _template("Plantilla de controles de cierre", CONTROL_COLUMNS, "closing_controls_template")
-        source = st.file_uploader("Controles de cierre", ["csv"], key=_key("ops_closing_controls"))
+        source = review_upload("Controles de cierre", "controls", key="ops_closing_controls")
+        if files is not None:
+            files["controls"] = source
         if not source:
             st.info("Carga los saldos de control para contrastarlos con el libro, sin ajustar movimientos.")
             return None
@@ -213,21 +223,28 @@ def _valuation_calendar(start, end, flows, available_dates=()):
 def _ledger(context):
     st.subheader("Movimientos y rendimiento histórico")
     st.caption("Títulos a fecha de operación, efectivo a liquidación y pendientes separados. MXN y USD.")
+    open_review(context)
     _template("Plantilla de libro normalizado", COLUMNS, "ledger_template")
     with st.expander("Cómo registrar reportos"):
         st.write(
             "OPEN_REPO registra el capital inicial sin mover efectivo; REPO_START invierte capital; "
             "REPO_MATURITY cobra el bruto, con Interes ya incluido. Usa una referencia única por reporto."
         )
-    source = st.file_uploader("Libro normalizado de movimientos", type=["csv"], key=_key("ops_ledger"))
+    source = review_upload("Libro normalizado de movimientos", "ledger", key="ops_ledger")
     if not source:
+        st.session_state.pop(_key("_ops_last_book"), None)
         st.info(
             "Importa el libro para revisar saldos y flujos. "
             "Las compras, ventas y dividendos son movimientos internos."
         )
         return
     events = read_ledger(source.getvalue())
-    cutoff = st.date_input("Cierre del libro", value=date.today(), max_value=date.today())
+    defaults = review_defaults()
+    cutoff = st.date_input(
+        "Cierre del libro", value=date.fromisoformat(defaults["cutoff"]) if defaults else date.today(),
+        max_value=date.today(), key=review_key("ops_cutoff"),
+    )
+    files = {"ledger": source}
     book = book_at(events, cutoff)
     st.session_state[_key("_ops_last_book")] = {"book": book, "cutoff": cutoff.isoformat()}
     ledger_view = pd.DataFrame([asdict(event) for event in events]).rename(
@@ -278,9 +295,9 @@ def _ledger(context):
             width="stretch",
         )
         _template("Plantilla de valuación de reportos", REPO_VALUE_COLUMNS, "repo_values_template")
-        repo_file = st.file_uploader(
+        repo_file = review_upload(
             "Valuación de reportos al cierre: Fecha,Referencia,Moneda,Valor,Fuente",
-            ["csv"], key=_key("ops_repo_values"),
+            "repo_values", key="ops_repo_values",
         )
         if not repo_file:
             st.info(
@@ -298,17 +315,26 @@ def _ledger(context):
         ).style.format({"Liquidado": "{:,.2f}", "Pendiente": "{:,.2f}"}),
         hide_index=True,
     )
-    reconciliation = _closing_reconciliation(context, book, cutoff, source.getvalue())
-    quotes_file = st.file_uploader(
-        "Cotizaciones de cierre: Fecha,Instrumento,Moneda,Precio", ["csv"], key=_key("ops_raw")
+    files["repo_values"] = repo_file
+    reconciliation = _closing_reconciliation(context, book, cutoff, source.getvalue(), files)
+    quotes_file = review_upload(
+        "Cotizaciones de cierre: Fecha,Instrumento,Moneda,Precio", "quotes", key="ops_raw"
     )
-    fx_file = st.file_uploader(
-        "FX del cierre: Fecha,Moneda,Base,Tasa,Fuente", ["csv"], key=_key("ops_book_fx")
+    fx_file = review_upload(
+        "FX del cierre: Fecha,Moneda,Base,Tasa,Fuente", "fx", key="ops_book_fx"
     )
-    base = st.selectbox("Moneda del rendimiento y valuación", ["MXN", "USD"])
+    base = st.selectbox(
+        "Moneda del rendimiento y valuación", ["MXN", "USD"],
+        index=1 if defaults.get("base") == "USD" else 0, key=review_key("ops_base"),
+    )
+    files.update(quotes=quotes_file, fx=fx_file)
+    reset_confirmation("raw_confirmation", [
+        source.getvalue(), cutoff, base,
+        *(file.getvalue() if file else b"" for file in (repo_file, quotes_file, fx_file)),
+    ])
     raw_confirmed = st.checkbox(
         "Confirmé las cotizaciones sin ajuste y las valuaciones contra las fuentes del cierre",
-        key=_key("raw_confirmation"),
+        key=review_key("raw_confirmation"),
     )
     if (quotes_file or not book["positions"]) and raw_confirmed and (not book["repos"] or repo_file):
         quotes = _csv(quotes_file) if quotes_file else pd.DataFrame(
@@ -354,7 +380,7 @@ def _ledger(context):
             ),
             hide_index=True, width="stretch",
         )
-    nav_file = st.file_uploader("Valuaciones históricas verificadas: Fecha,NAV", ["csv"], key=_key("ops_nav"))
+    nav_file = review_upload("Valuaciones históricas verificadas: Fecha,NAV", "nav", key="ops_nav")
     nav = None
     if nav_file:
         frame = _csv(nav_file)
@@ -374,12 +400,16 @@ def _ledger(context):
         [Flow(event.settled, _native_flow_amount(event), event.timing) for event in period_events],
         available_dates=nav.index if nav is not None else (),
     )
-    flow_fx_file = st.file_uploader(
-        "FX por fecha de cada flujo: Fecha,Moneda,Base,Tasa,Fuente", ["csv"], key=_key("ops_flow_fx")
+    flow_fx_file = review_upload(
+        "FX por fecha de cada flujo: Fecha,Moneda,Base,Tasa,Fuente", "flow_fx", key="ops_flow_fx"
     )
+    files.update(nav=nav_file, flow_fx=flow_fx_file)
+    reset_confirmation("flows_confirmation", [
+        cutoff, base, *(file.getvalue() if file else b"" for file in files.values()),
+    ])
     verified = st.checkbox(
         "Concilié todos los flujos externos y las valuaciones del periodo en la moneda elegida",
-        key=_key("flows_confirmation"),
+        key=review_key("flows_confirmation"),
     )
     if nav_file and verified:
         fx_frame = _csv(flow_fx_file) if flow_fx_file else pd.DataFrame()
@@ -427,6 +457,7 @@ def _ledger(context):
                 "closing_reconciliation": reconciliation,
             },
         )
+    download_review(context, files, cutoff=cutoff, base=base)
 
 
 def _implementation(context):
