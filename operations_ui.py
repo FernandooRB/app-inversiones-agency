@@ -126,7 +126,7 @@ def _status_panel(context):
             # A replacement may shrink the list; bound the view before constructing its widget.
             page_key = _key("status_page")
             st.session_state[page_key] = min(max(st.session_state.get(page_key, 1), 1), pages)
-            page = st.number_input("Página de pendientes", 1, pages, key=page_key)
+            page = st.number_input("Página de pendientes", 1, pages, key=page_key) if pages > 1 else 1
             start, end = (page - 1) * 10, min(page * 10, len(issues))
             st.caption(f"Pendientes {start + 1} a {end} de {len(issues)}.")
         for item in issues[start:end]:
@@ -136,7 +136,17 @@ def _status_panel(context):
                 short_evidence = re.sub(r"(SHA-256 )([a-f0-9]{64})", lambda m: m[1] + m[2][:12] + "…",
                                         item["evidence"])
                 st.text("Evidencia: " + short_evidence)
-                st.caption(item["action"] + " · " + item["area"])
+                if item["id"] == first["id"]:
+                    st.caption(item["action"] + " · " + item["area"])
+                else:
+                    label = {"controls": "Ver control", "calendar": "Ver calendario",
+                             "valuation": "Ver valuación"}.get(item["step"], "Ver etapa")
+                    if item["area"] == "Originales GBM":
+                        label = "Ver original"
+                    elif item["area"] == "Patrimonio":
+                        label = "Ver patrimonio"
+                    st.button(label, key=_key("status_item_" + sha256(item["id"].encode()).hexdigest()[:12]),
+                              on_click=_open_review_step, args=(item["area"], item["step"]))
         if not issues:
             st.write("Sin pendientes detectados por estas comprobaciones. "
                      "La aprobación humana sigue pendiente.")

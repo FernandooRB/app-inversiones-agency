@@ -96,9 +96,12 @@ class OperationStatus:
                 add("fx", LABELS["fx"], "Falta dato", "La conversión requiere FX fechado y fuente.",
                     self.evidence("fx"), "Revisar valuación al cierre", step="valuation")
             if not self.raw_confirmed:
+                role = "quotes" if self.book["positions"] else (
+                    "controls" if "controls" in self.inputs else "ledger"
+                )
                 add("prices-confirmation", "Fuentes de la valuación al cierre", "Por confirmar",
-                    "Revisa precios sin ajuste, FX y valores de reportos antes de confirmar las fuentes.",
-                    self.evidence("quotes"), "Revisar valuación al cierre", step="valuation")
+                    "Revisa los saldos y, cuando correspondan, precios sin ajuste, FX y valores de reportos.",
+                    self.evidence(role), "Revisar valuación al cierre", step="valuation")
             if "nav" not in self.inputs:
                 add("nav", LABELS["nav"], "Falta dato",
                     "Aporta cierres históricos para revisar el rendimiento.",

@@ -135,6 +135,10 @@ def test_panel_actions_select_the_real_tool_and_preserve_data_and_checks():
     assert any(e.label == "Conciliar contra el estado de cuenta" and e.proto.expanded for e in app.expander)
     assert snapshot_from(app)[0]["inputs"] == snapshot["inputs"]
     assert not app.metric
+    next(button for button in app.button if button.label == "Ver calendario").click().run()
+    assert not app.exception and not app.error
+    assert app.session_state["_ops_focus_step_" + scope] == "calendar"
+    assert any(e.label == "Valuaciones necesarias para TWR" and e.proto.expanded for e in app.expander)
 
 
 def test_replacing_invalid_nav_refreshes_panel_without_stale_balances_or_return():
