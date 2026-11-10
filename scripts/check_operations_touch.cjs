@@ -21,15 +21,18 @@ const tap=async(locator,label)=>{
   await locator.scrollIntoViewIfNeeded();
   const box=await locator.evaluate(el=>{const target=el.closest('label')||el;const r=target.getBoundingClientRect();return {width:r.width,height:r.height};});
   metrics.push({label,...box});
+  await fs.writeFile(out+'/touch_targets.json',JSON.stringify(metrics,null,2)+'\n');
   await locator.tap();
 };
 const chooser=async(pp,ff,panel,label,file)=>{
   await settle(pp,ff);
   const area=panel.getByTestId('stFileUploader').filter({hasText:label});
   const trigger=area.getByRole('button',{name:/^(Upload|Browse files)$/}).first();
-  const pending=pp.waitForEvent('filechooser',{timeout:20000});
-  await tap(trigger,'Seleccionar archivo: '+label);
-  const selected=await pending;await selected.setFiles(folder+'/'+file);
+  const [selected]=await Promise.all([
+    pp.waitForEvent('filechooser',{timeout:20000}),
+    tap(trigger,'Seleccionar archivo: '+label),
+  ]);
+  await selected.setFiles(folder+'/'+file);
   await panel.getByRole('button',{name:'Remove '+file,exact:true}).waitFor({state:'visible'});
   await settle(pp,ff);
 };
