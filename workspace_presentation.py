@@ -30,6 +30,18 @@ def render_shell(
       .sig-scope {font-size:12px;color:#5b5b5b;margin-left:auto;}
       @media(max-width:640px){
         [data-testid="stMainBlockContainer"] {padding-left:1rem;padding-right:1rem;}
+        [data-testid="stButton"] button,
+        [data-testid="stDownloadButton"] button,
+        [data-testid="stLinkButton"] a,
+        [data-testid="stFileUploader"] button,
+        [data-testid="stMain"] [role="tab"],
+        .st-key-workspace_area [role="radio"],
+        [data-testid="stExpander"] summary,
+        [data-testid="stCheckbox"] label {min-height:44px;}
+        [data-testid="stButton"] button,
+        [data-testid="stDownloadButton"] button,
+        [data-testid="stLinkButton"] a,
+        [data-testid="stFileUploader"] button {min-width:44px;}
         .sig-scope {display:none;}
       }
     </style>
