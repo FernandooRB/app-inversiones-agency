@@ -1,5 +1,6 @@
 """Restoring a draft must reset consent, preserve scope, and permit replacing recovered inputs."""
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 LEDGER = (
@@ -26,10 +27,15 @@ with patch.object(st,"file_uploader",return_value=None):
 ''', default_timeout=40).run()
 
 
-def test_recovered_inputs_restore_date_currency_and_calendar_without_approval():
-    app = screen('st.session_state.setdefault("flows_confirmation_temporary",True)')
+@pytest.mark.parametrize("base", ["MXN", "USD"])
+def test_recovered_inputs_restore_date_currency_and_calendar_without_approval(base):
+    app = screen(
+        'st.session_state.setdefault("flows_confirmation_temporary",True)\n'
+        f'st.session_state["_ops_review_temporary"]["settings"]["base"]={base!r}'
+    )
     assert not app.error and not app.exception and not app.metric
     assert app.date_input[0].value.isoformat() == "2026-01-10"
+    assert app.selectbox[0].value == base
     assert all(not item.value for item in app.checkbox)
     assert any("Revisión recuperada" in item.value for item in app.info)
     assert any(item.proto.label == "Descargar paquete de movimientos" for item in app.get("download_button"))
