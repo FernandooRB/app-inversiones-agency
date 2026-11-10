@@ -90,14 +90,17 @@ let browser;
   }
   await restored.getByText(flowLabel,{exact:true}).click();
   await restored.getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('0.00%',{exact:true}).waitFor({state:'visible'});
-  await restored.getByTestId('stSelectbox').filter({hasText:'Moneda del rendimiento y valuación'}).getByRole('button',{name:'Open',exact:true}).click();
-  await restored.getByRole('option',{name:'USD',exact:true}).click();
+  const currency=restored.getByRole('combobox',{name:'Moneda del rendimiento y valuación',exact:true});
+  await restored.waitForTimeout(250);
+  await currency.fill('USD');await currency.press('ArrowDown');await currency.press('Enter');
   await restored.getByTestId('stMetric').first().waitFor({state:'detached'});
   assert.equal(await restored.getByLabel(flowLabel,{exact:true}).isChecked(),false);
   await input(restored,'Valuaciones históricas verificadas:').setInputFiles(path.join(out,'nav_changed.csv'));
+  await restored.getByText('Recuperado: Valuaciones históricas.',{exact:true}).waitFor({state:'detached'});
   await restored.getByRole('button',{name:'Remove nav_changed.csv',exact:true}).click();
   assert.equal(await restored.getByText('Recuperado: Valuaciones históricas.',{exact:true}).count(),0);
   await input(restored,'Paquete de movimientos ZIP').setInputFiles(path.join(out,'invalid.zip'));
+  await restored.getByRole('button',{name:'Remove invalid.zip',exact:true}).waitFor({state:'visible'});
   await restored.getByRole('button',{name:'Retomar movimientos',exact:true}).click();
   await restored.getByText(/El paquete de movimientos no supera/).waitFor({state:'visible'});
   assert.equal(await restored.getByTestId('stDateInput').locator('input').inputValue(),'2026-01-10');
@@ -109,8 +112,11 @@ let browser;
   console.log('Operations browser verification passed with fictional data');
 })().catch(async e=>{
   console.error(e.message);
-  if(browser){let n=0;for(const context of browser.contexts())for(const page of context.pages())
-    await page.screenshot({path:path.join(out,`failure-${n++}.png`)}).catch(()=>{});}
+  if(browser){let n=0;for(const context of browser.contexts())for(const page of context.pages()){
+    await page.screenshot({path:path.join(out,`failure-${n}.png`)}).catch(()=>{});
+    await page.locator('body').ariaSnapshot().then(text=>fs.writeFileSync(path.join(out,`failure-${n}.txt`),text)).catch(()=>{});
+    n++;
+  }}
   process.exitCode=1;
 }).finally(async()=>{
   if(browser)await browser.close();
