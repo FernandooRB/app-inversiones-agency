@@ -108,9 +108,12 @@ def _status_panel(context):
     st.text(f"{scope}\nCorte del libro: {status.cutoff or '—'} · Moneda: {status.base or '—'}")
     if status.calendar is not None:
         st.caption(f"Periodo del rendimiento: {status.calendar['start']} a {status.calendar['end']}.")
-    st.write(f"**{snapshot['issue_count']} pendientes de revisión** · "
-             f"{snapshot['conditional_count']} condicionales · "
-             f"{snapshot['input_count']} archivos CSV incluidos")
+    pending_label = "pendiente" if snapshot["issue_count"] == 1 else "pendientes"
+    conditional_label = "condicional" if snapshot["conditional_count"] == 1 else "condicionales"
+    files_label = "archivo CSV incluido" if snapshot["input_count"] == 1 else "archivos CSV incluidos"
+    st.write(f"**{snapshot['issue_count']} {pending_label} de revisión** · "
+             f"{snapshot['conditional_count']} {conditional_label} · "
+             f"{snapshot['input_count']} {files_label}")
     if status.failed_ledger:
         st.caption("La revisión de Movimientos falló; se retiraron sus saldos y resultados de este resumen.")
     issues = snapshot["issues"]
