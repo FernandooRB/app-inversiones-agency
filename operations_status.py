@@ -65,14 +65,16 @@ class OperationStatus:
             states.update(calendar="Sin validar", flows="Sin validar", returns="No disponible")
             title, detail, action = (
                 "Corregir el insumo rechazado",
-                "Revisa el motivo del rechazo en Movimientos. Los saldos y resultados anteriores se retiraron.",
+                "Revisa el motivo del rechazo en Movimientos. "
+                "Los saldos y resultados anteriores se retiraron.",
                 "Abrir Movimientos",
             )
         elif self.book is not None:
             if "nav" not in self.inputs:
                 step, title, detail, action = (
                     "calendar", "Cargar las valuaciones históricas",
-                    "En Movimientos, aporta el CSV de Valuaciones históricas verificadas y revisa el calendario.",
+                    "En Movimientos, aporta el CSV de Valuaciones históricas verificadas "
+                    "y revisa el calendario.",
                     "Abrir calendario de valuaciones",
                 )
             elif not calendar_ready:

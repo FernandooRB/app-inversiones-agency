@@ -619,7 +619,9 @@ def _ledger(context, *, demo=False):
         )
         status.flows_confirmed = verified
         if nav_file and verified:
-            fx_frame = _checked_input("FX de los flujos", _csv, flow_fx_file) if flow_fx_file else pd.DataFrame()
+            fx_frame = (
+                _checked_input("FX de los flujos", _csv, flow_fx_file) if flow_fx_file else pd.DataFrame()
+            )
             flows = []
             for event in period_events:
                 amount = _native_flow_amount(event)
@@ -645,7 +647,8 @@ def _ledger(context, *, demo=False):
             a, b, c = st.columns(3)
             a.metric("Ganancia separada de flujos", f"{result['gain']:,.2f} {base}")
             b.metric("TWR del periodo", f"{result['twr']:.2%}" if result["twr"] is not None else "Pendiente")
-            c.metric("XIRR anualizada", f"{result['xirr']:.2%}" if result["xirr"] is not None else "Pendiente")
+            c.metric("XIRR anualizada",
+                     f"{result['xirr']:.2%}" if result["xirr"] is not None else "Pendiente")
             st.caption(
                 f"TWR: {result['twr_status']} · XIRR: {result['xirr_status']}. "
                 "TWR requiere valuación en cada flujo y momento BOD/EOD confirmado."
