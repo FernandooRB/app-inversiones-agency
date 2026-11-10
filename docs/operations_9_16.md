@@ -7,6 +7,11 @@ de ejecuciones con corte y objetivo. Los originales y el piloto real permanecen 
 
 ## Movimientos y rendimiento
 
+El [paquete de revisión de movimientos](operations_review_package.md) permite
+guardar los CSV, corte y moneda y retomarlos en la sesión gratuita. Conserva los
+datos originales, recalcula las vistas y exige renovar las confirmaciones; no
+guarda resultados aprobados ni crea almacenamiento permanente.
+
 La plantilla descargable tiene estas columnas, en este orden:
 
 ```text

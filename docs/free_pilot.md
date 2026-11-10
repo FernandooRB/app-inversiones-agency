@@ -25,6 +25,7 @@ revisión del piloto GBM propio ni habilita entrega de reportes a clientes.
 | Análisis de cartera, costos, metas, escenarios y reportes | Disponible por sesión | Disponible |
 | Retomar insumos y resultados | Descargar/abrir paquete ZIP | ZIP o expediente configurado |
 | Revisión de PDF/XML y operaciones por archivos | Disponible por sesión | Disponible |
+| Retomar revisión de movimientos | ZIP de CSV, corte y moneda; confirmaciones nuevas | Mismo ZIP o expediente configurado |
 | Expedientes, borradores y auditoría permanentes | Desactivados en disco temporal | Disponibles con registro cifrado |
 | Seguimiento y bitácoras guardadas | Requieren base externa | Disponibles con SQLite local |
 | Revisiones programadas y respaldos de servidor | Desactivados | Requieren ejecutar el trabajador configurado |
@@ -38,6 +39,11 @@ No convierte el contenido del expediente en almacenamiento permanente en la nube
 Descarga el paquete del análisis al terminar. Consérvalo como el documento original,
 porque incluye insumos privados. Puede reabrirse con **Retomar paquete**. Una sesión
 o un archivo temporal del servidor puede desaparecer al reiniciar o cerrar la app.
+
+En **Operación → Movimientos** hay un [paquete de revisión independiente](operations_review_package.md)
+para descargar y retomar los CSV del libro y sus controles, corte y moneda. No
+guarda confirmaciones ni resultados aprobados; las vistas se recalculan al abrirlo.
+Los PDF/XML de Originales GBM quedan fuera de ese paquete.
 
 ## Publicación
 
