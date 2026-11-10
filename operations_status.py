@@ -180,7 +180,9 @@ class OperationStatus:
 
 def status_text(snapshot):
     """Readable plain text: uploaded identifiers are never treated as HTML, Markdown or formulas."""
-    lines = ["Resumen de revisión de Operación", snapshot["notice"], "",
+    title = ("DEMO · Resumen de práctica de Operación" if snapshot.get("demo")
+             else "Resumen de revisión de Operación")
+    lines = [title, snapshot["notice"], "",
              f"Alcance: {snapshot['scope']}", f"Corte: {snapshot['cutoff'] or '—'}",
              f"Moneda: {snapshot['base'] or '—'}", f"Archivos CSV incluidos: {snapshot['input_count']}",
              f"Pendientes: {snapshot['issue_count']} · Condicionales: {snapshot['conditional_count']}", "",

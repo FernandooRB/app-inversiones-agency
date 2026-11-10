@@ -92,6 +92,13 @@ LOGGER = logging.getLogger(__name__)
 st.set_page_config(page_title="SIG | Análisis y seguimiento de portafolios", layout="wide")
 require_access()
 
+if st.query_params.get("demo_operacion") == "1":
+    from operations_ui import render_account_operations
+
+    render_shell(areas=("Operación",))
+    render_account_operations(demo=True)
+    st.stop()
+
 work_area = render_shell()
 if work_area == "Operación":
     from operations_ui import render_account_operations
