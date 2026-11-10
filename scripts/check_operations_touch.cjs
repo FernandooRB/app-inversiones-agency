@@ -19,7 +19,7 @@ const settle=async(pp,ff)=>{await pp.waitForTimeout(250);await ff.locator('[data
 const metrics=[];
 const tap=async(locator,label)=>{
   await locator.scrollIntoViewIfNeeded();
-  const box=await locator.evaluate(el=>{const target=el.closest('label')||el;const r=target.getBoundingClientRect();return {width:r.width,height:r.height};});
+  const box=await locator.evaluate(el=>{const target=el.closest('button,a,label,summary,[role="tab"]')||el;const r=target.getBoundingClientRect();return {width:r.width,height:r.height};});
   metrics.push({label,...box});
   await fs.writeFile(out+'/touch_targets.json',JSON.stringify(metrics,null,2)+'\n');
   await locator.tap();
@@ -27,7 +27,7 @@ const tap=async(locator,label)=>{
 const chooser=async(pp,ff,panel,label,file)=>{
   await settle(pp,ff);
   const area=panel.getByTestId('stFileUploader').filter({hasText:label});
-  const trigger=area.getByRole('button',{name:/^(Upload|Browse files)$/}).first();
+  const trigger=area.getByRole('button',{name:/Upload|Browse files/}).first();
   const [selected]=await Promise.all([
     pp.waitForEvent('filechooser',{timeout:20000}),
     tap(trigger,'Seleccionar archivo: '+label),
@@ -115,6 +115,7 @@ await origin.getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByTe
 ensure(await origin.getByRole('button',{name:'Remove operations.zip',exact:true}).count()===1,'Original file changed');
 await tap(origin.getByRole('button',{name:'Quitar archivo recuperado · Libro de movimientos',exact:true}),'Retirar libro ficticio de prueba');
 await origin.getByText('Importa el libro para revisar saldos y flujos',{exact:false}).waitFor({state:'visible'});
+ensure(metrics.every(x=>x.width>=43.9&&x.height>=43.9),'Touch target below 44px: '+JSON.stringify(metrics.filter(x=>x.width<43.9||x.height<43.9)));
 await p.close();
 const evidence={reference_commit:meta.commit,checked_at_utc:new Date().toISOString(),viewport:geometry,
   browser:'Chromium/Edge touch emulation',physical_device:false,human_test:false,
