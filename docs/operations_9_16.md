@@ -7,6 +7,11 @@ de ejecuciones con corte y objetivo. Los originales y el piloto real permanecen 
 
 ## Movimientos y rendimiento
 
+Los [errores por insumo y pestaña](operation_errors.md) permiten corregir un archivo
+en Movimientos y seguir consultando las herramientas independientes. Una revisión
+activa fallida retira la referencia del libro para seguimiento; los problemas de
+acceso al expediente detienen el área sin mostrar detalles privados.
+
 El [paquete de revisión de movimientos](operations_review_package.md) permite
 guardar los CSV, corte y moneda y retomarlos en la sesión gratuita. Conserva los
 datos originales, recalcula las vistas y exige renovar las confirmaciones; no
@@ -163,6 +168,10 @@ referencia del análisis de la misma cuenta. Exige MXN, instrumentos coincidente
 liquidación revisada y cotizaciones sin ajuste de un cierre común. Compara los pesos
 invertidos, excluyendo efectivo. Las cantidades deben actualizarse después de operar.
 Se avisa al cruzar la tolerancia o al faltar información compatible, sin notificaciones externas.
+
+Cambiar el libro, su corte o retomar otra revisión invalida la confirmación de
+cantidades para seguimiento. Un archivo inválido no publica una referencia nueva
+ni sustituye las que ya estaban guardadas en las programaciones.
 
 Borradores, suscripciones, datos recibidos y alertas se cifran con la clave del
 expediente, ligados a cuenta y propietario. Cada lectura comprueba acceso vigente.

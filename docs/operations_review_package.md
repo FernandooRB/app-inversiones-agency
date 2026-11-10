@@ -18,6 +18,10 @@ Las confirmaciones de precios y flujos empiezan desmarcadas. Un cambio de insumo
 corte o moneda invalida las confirmaciones correspondientes y retira el resultado
 anterior hasta que se revise de nuevo.
 
+Retomar una revisión también exige renovar la confirmación de cantidades para
+seguimiento, si está habilitado. Los [errores de insumos](operation_errors.md)
+identifican la etapa afectada y permiten consultar las otras pestañas.
+
 Cada archivo recuperado se identifica junto a su carga. Puede quitarse o
 reemplazarse; quitar el reemplazo no hace reaparecer el archivo anterior. Quitar
 el libro también retira el saldo que otras operaciones usan como referencia.

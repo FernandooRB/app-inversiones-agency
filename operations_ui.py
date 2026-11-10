@@ -2,6 +2,7 @@
 
 import base64
 import json
+import logging
 from dataclasses import asdict
 from datetime import date
 from hashlib import sha256
@@ -36,10 +37,74 @@ from realized_performance import Flow, normalize_valuations, performance, valuat
 from transaction_ledger import COLUMNS, REPO_VALUE_COLUMNS, book_at, read_ledger, read_repo_values, value_book
 
 EXTERNAL_EVENT_KINDS = {"DEPOSIT", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT", "ASSET_IN", "ASSET_OUT"}
+LOGGER = logging.getLogger(__name__)
 
 
 def _key(name):
     return name + "_" + st.session_state.get("_ops_context_key", "temporary")
+
+
+class _OperationInputError(PortfolioError):
+    def __init__(self, stage, error):
+        self.stage = stage
+        self.error = error
+        # Unexpected exception text may contain uploaded values or private paths.
+        message = str(error) if isinstance(error, PortfolioError) else "No se pudo validar este insumo."
+        super().__init__(message)
+
+
+def _checked_input(stage, function, *args, **kwargs):
+    try:
+        return function(*args, **kwargs)
+    except (WorkspaceError, MemoryError, _OperationInputError):
+        raise
+    except Exception as error:
+        raise _OperationInputError(stage, error) from None
+
+
+def _forget_book_reference():
+    st.session_state.pop(_key("_ops_last_book"), None)
+    st.session_state.pop(_key("_ops_book_signature"), None)
+
+
+def _remember_book(book, cutoff, source):
+    signature = analysis_key({
+        "ledger": sha256(source).hexdigest(), "cutoff": cutoff.isoformat(),
+        "review": review_key("book_source"),
+    })
+    if st.session_state.get(_key("_ops_book_signature")) != signature:
+        # The monitor checkbox is rendered later, in Fuentes y alertas.
+        st.session_state[_key("monitor_confirmation")] = False
+    st.session_state[_key("_ops_book_signature")] = signature
+    st.session_state[_key("_ops_last_book")] = {"book": book, "cutoff": cutoff.isoformat()}
+
+
+def _show_operation_error(area, label, error, *, public_validation=True):
+    stage = error.stage if isinstance(error, _OperationInputError) else label
+    original = error.error if isinstance(error, _OperationInputError) else error
+    if public_validation and isinstance(original, PortfolioError):
+        st.error(f"Revisa {stage}.")
+        # Plain text prevents uploaded identifiers being interpreted as Markdown.
+        st.text(str(original))
+    else:
+        reference = uuid4().hex[:12]
+        LOGGER.error(
+            "Unexpected operation error area=%s type=%s reference=%s",
+            area, type(original).__name__, reference,
+        )
+        st.error(f"No se pudo completar {stage}.")
+        st.caption(f"Vuelve a intentarlo. Si persiste, conserva esta referencia: {reference}.")
+
+
+def _render_operation_area(context, area, label, render):
+    try:
+        render(context)
+    except (WorkspaceError, MemoryError):
+        raise
+    except Exception as error:
+        if area == "ledger":
+            _forget_book_reference()
+        _show_operation_error(area, label, error)
 
 
 def _csv(upload):
@@ -51,6 +116,13 @@ def _csv(upload):
         return pd.read_csv(BytesIO(upload.getvalue()), keep_default_na=False)
     except (ValueError, UnicodeError, pd.errors.ParserError):
         raise PortfolioError("No se pudo leer el CSV con encabezados.") from None
+
+
+def _read_nav(upload):
+    frame = _csv(upload)
+    if not {"Fecha", "NAV"}.issubset(frame):
+        raise PortfolioError("Las valuaciones requieren Fecha y NAV.")
+    return normalize_valuations(frame.set_index("Fecha")["NAV"])
 
 
 def _template(label, columns, key):
@@ -129,8 +201,8 @@ def _closing_reconciliation(context, book, cutoff, ledger_bytes, files=None):
         if not source:
             st.info("Carga los saldos de control para contrastarlos con el libro, sin ajustar movimientos.")
             return None
-        controls = read_closing_controls(source.getvalue(), cutoff)
-        result = reconcile_book(book, controls, cutoff=cutoff)
+        controls = _checked_input("Controles de cierre", read_closing_controls, source.getvalue(), cutoff)
+        result = _checked_input("Controles de cierre", reconcile_book, book, controls, cutoff=cutoff)
         if result["status"] == "COINCIDENCIA_ARITMETICA":
             st.success(f"Controles con coincidencia aritmética: {result['exact']}.")
         else:
@@ -221,6 +293,8 @@ def _valuation_calendar(start, end, flows, available_dates=()):
 
 
 def _ledger(context):
+    # Rebuild the reference from current inputs before another tab may use it.
+    st.session_state.pop(_key("_ops_last_book"), None)
     st.subheader("Movimientos y rendimiento histórico")
     st.caption("Títulos a fecha de operación, efectivo a liquidación y pendientes separados. MXN y USD.")
     open_review(context)
@@ -232,21 +306,21 @@ def _ledger(context):
         )
     source = review_upload("Libro normalizado de movimientos", "ledger", key="ops_ledger")
     if not source:
-        st.session_state.pop(_key("_ops_last_book"), None)
+        _forget_book_reference()
         st.info(
             "Importa el libro para revisar saldos y flujos. "
             "Las compras, ventas y dividendos son movimientos internos."
         )
         return
-    events = read_ledger(source.getvalue())
+    events = _checked_input("Libro de movimientos", read_ledger, source.getvalue())
     defaults = review_defaults()
     cutoff = st.date_input(
         "Cierre del libro", value=date.fromisoformat(defaults["cutoff"]) if defaults else date.today(),
         max_value=date.today(), key=review_key("ops_cutoff"),
     )
     files = {"ledger": source}
-    book = book_at(events, cutoff)
-    st.session_state[_key("_ops_last_book")] = {"book": book, "cutoff": cutoff.isoformat()}
+    book = _checked_input("Cierre del libro", book_at, events, cutoff)
+    _remember_book(book, cutoff, source.getvalue())
     ledger_view = pd.DataFrame([asdict(event) for event in events]).rename(
         columns={
             "id": "ID",
@@ -304,7 +378,9 @@ def _ledger(context):
                 "Valuación pendiente: carga el valor total documentado de cada reporto al cierre, "
                 "incluidos los intereses devengados que correspondan. El capital no sustituye esa valuación."
             )
-    repo_values = read_repo_values(repo_file.getvalue(), cutoff) if repo_file else None
+    repo_values = _checked_input(
+        "Valuación de reportos", read_repo_values, repo_file.getvalue(), cutoff
+    ) if repo_file else None
     st.write("**Efectivo liquidado y pendientes**")
     st.dataframe(
         pd.DataFrame(
@@ -337,7 +413,7 @@ def _ledger(context):
         key=review_key("raw_confirmation"),
     )
     if (quotes_file or not book["positions"]) and raw_confirmed and (not book["repos"] or repo_file):
-        quotes = _csv(quotes_file) if quotes_file else pd.DataFrame(
+        quotes = _checked_input("Cotizaciones de cierre", _csv, quotes_file) if quotes_file else pd.DataFrame(
             columns=["Fecha", "Instrumento", "Moneda", "Precio"]
         )
         if not {"Fecha", "Instrumento", "Moneda", "Precio"}.issubset(quotes):
@@ -348,7 +424,7 @@ def _ledger(context):
         ):
             raise PortfolioError("Las cotizaciones deben ser únicas y corresponder al cierre elegido.")
         quote_map = {(row["Instrumento"], row["Moneda"]): row["Precio"] for row in quotes.to_dict("records")}
-        fx = _csv(fx_file) if fx_file else pd.DataFrame()
+        fx = _checked_input("FX del cierre", _csv, fx_file) if fx_file else pd.DataFrame()
         if not fx.empty:
             # Reuse exact-cut validation, including source and duplicate-rate rejection.
             currencies = sorted(
@@ -368,10 +444,11 @@ def _ledger(context):
                     for c in currencies
                 ]
             )
-            consolidate_wealth(dummy, fx, cutoff=cutoff, base=base)
+            _checked_input("FX del cierre", consolidate_wealth, dummy, fx, cutoff=cutoff, base=base)
         rates = {(row["Moneda"], row["Base"]): row["Tasa"] for row in fx.to_dict("records")}
-        valued = value_book(
-            book, quote_map, rates, base=base, raw_prices_confirmed=True, repo_values=repo_values,
+        valued = _checked_input(
+            "Valuación al cierre", value_book, book, quote_map, rates,
+            base=base, raw_prices_confirmed=True, repo_values=repo_values,
         )
         st.metric(f"Patrimonio neto al cierre · {base}", f"{valued['nav']:,.2f}")
         st.dataframe(
@@ -383,10 +460,7 @@ def _ledger(context):
     nav_file = review_upload("Valuaciones históricas verificadas: Fecha,NAV", "nav", key="ops_nav")
     nav = None
     if nav_file:
-        frame = _csv(nav_file)
-        if not {"Fecha", "NAV"}.issubset(frame):
-            raise PortfolioError("Las valuaciones requieren Fecha y NAV.")
-        nav = normalize_valuations(frame.set_index("Fecha")["NAV"])
+        nav = _checked_input("Valuaciones históricas", _read_nav, nav_file)
         start, end = nav.index[0].date(), nav.index[-1].date()
     else:
         start = min((event.day for event in events if event.day <= cutoff), default=cutoff)
@@ -412,7 +486,7 @@ def _ledger(context):
         key=review_key("flows_confirmation"),
     )
     if nav_file and verified:
-        fx_frame = _csv(flow_fx_file) if flow_fx_file else pd.DataFrame()
+        fx_frame = _checked_input("FX de los flujos", _csv, flow_fx_file) if flow_fx_file else pd.DataFrame()
         flows = []
         for event in period_events:
             amount = _native_flow_amount(event)
@@ -433,7 +507,7 @@ def _ledger(context):
                     raise PortfolioError("Un flujo no tiene un único FX positivo y documentado.")
                 amount *= float(match.iloc[0]["Tasa"])
             flows.append(Flow(event.settled, amount, event.timing))
-        result = performance(nav, flows)
+        result = _checked_input("Rendimiento histórico", performance, nav, flows)
         a, b, c = st.columns(3)
         a.metric("Ganancia separada de flujos", f"{result['gain']:,.2f} {base}")
         b.metric("TWR del periodo", f"{result['twr']:.2%}" if result["twr"] is not None else "Pendiente")
@@ -946,18 +1020,25 @@ def render_account_operations():
                 )
             ).encode()
         ).hexdigest()[:16]
-        tabs = st.tabs(
-            ["Movimientos", "Implementación", "Fuentes y alertas", "Patrimonio", "Originales GBM"],
-            key="operations_tabs",
+        areas = (
+            ("ledger", "Movimientos", _ledger), ("implementation", "Implementación", _implementation),
+            ("feeds", "Fuentes y alertas", _feeds), ("wealth", "Patrimonio", _wealth),
+            ("documents", "Originales GBM", _documents),
         )
-        for tab, render in zip(tabs, (_ledger, _implementation, _feeds, _wealth, _documents), strict=True):
+        tabs = st.tabs([label for _, label, _ in areas], key="operations_tabs")
+        for tab, (area, label, render) in zip(tabs, areas, strict=True):
             with tab:
-                render(context)
+                _render_operation_area(context, area, label, render)
         st.caption(
             f"Preparación de la vista: {monotonic() - started:.2f} s. "
             "Los cálculos se ejecutan al solicitarlos."
         )
-    except (PortfolioError, WorkspaceError, ValueError, KeyError, TypeError):
+    except WorkspaceError:
+        _forget_book_reference()
         st.error(
-            "No se pudo completar esta etapa. Revisa formato, fechas, fuentes y correspondencia de cuenta."
+            "No se pudo abrir o guardar en el expediente. "
+            "Actualiza el estado de la cuenta y revisa tu acceso."
         )
+    except Exception as error:
+        _forget_book_reference()
+        _show_operation_error("workspace", "Operación", error, public_validation=False)
