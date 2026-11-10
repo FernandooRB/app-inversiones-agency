@@ -1,5 +1,8 @@
 # Estado y pendientes de la revisión
 
+**Probar con datos ficticios** abre un [caso demo](operations_demo.md) en otra
+pestaña para practicar este recorrido conservando la revisión de origen.
+
 Operación abre con el alcance de la sesión o cuenta, el corte del libro, la moneda
 y el periodo del rendimiento cuando existe calendario. El panel reúne los
 pendientes detectados por las comprobaciones actuales; la acción principal abre

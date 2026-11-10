@@ -18,7 +18,7 @@ st.set_page_config(page_title="SIG | Revisión portable ficticia", layout="wide"
 render_shell(areas=("Operación",))
 st.caption("Cuenta ficticia SIM-REVISION · comprobación local")
 with patch("operations_ui._context",return_value=(None,None,None,None)):
-    render_account_operations()
+    render_account_operations(demo=st.query_params.get("demo_operacion")=="1")
 `);
 const server=spawn(process.env.SIG_PYTHON||'python',['-u','-m','streamlit','run',appFile,
   '--server.address','127.0.0.1','--server.port',String(port),'--server.fileWatcherType','none',
@@ -71,6 +71,7 @@ let browser;
     const button=p.getByRole('button',{name:'Descargar resumen de revisión',exact:true});
     if(!await button.isVisible())await p.getByText('Archivos y resumen descargable',{exact:true}).click();
     const [download]=await Promise.all([p.waitForEvent('download'),button.click()]);
+    if(name.startsWith('demo_'))assert(download.suggestedFilename().startsWith('demo_resumen_revision_'));
     await download.saveAs(path.join(out,name));
     return fs.readFileSync(path.join(out,name),'utf8');
   };
@@ -89,6 +90,58 @@ let browser;
   await movements(page).getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('0.00%',{exact:true}).waitFor({state:'visible'});
   await page.getByText('Guardar revisión de movimientos',{exact:true}).click();
   await savePackage(page,'operations.zip');
+  const [demo]=await Promise.all([page.waitForEvent('popup'),page.getByRole('link',{name:'Probar con datos ficticios',exact:true}).click()]);
+  demo.on('pageerror',e=>errors.push(e.message));
+  await demo.getByRole('heading',{name:'Demo de revisión',exact:true}).waitFor({state:'visible'});await settle(demo);
+  assert.equal(new URL(demo.url()).origin,new URL(page.url()).origin);
+  assert.equal(new URL(demo.url()).searchParams.get('demo_operacion'),'1');
+  assert.equal(await movements(demo).getByTestId('stMetric').count(),0);
+  assert.equal(await demo.getByLabel(flowLabel,{exact:true}).isChecked(),false);
+  assert.equal(await demo.getByLabel(rawLabel,{exact:true}).isChecked(),false);
+  assert.equal(await demo.getByText('Descargar paquete de movimientos',{exact:true}).count(),0);
+  for(const width of [1440,768,390]){
+    await demo.setViewportSize({width,height:width===390?844:900});
+    await demo.evaluate(()=>document.querySelector('[data-testid="stMain"]').scrollTop=0);
+    await demo.waitForTimeout(250);await demo.screenshot({path:path.join(out,`demo-start-${width}.png`)});
+    assert.equal(await demo.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+  }
+  await demo.setViewportSize({width:1440,height:900});
+  await movements(demo).getByText(flowLabel,{exact:true}).click();await settle(demo);
+  await movements(demo).getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('Pendiente',{exact:true}).waitFor({state:'visible'});
+  await demo.getByText('Guía de práctica',{exact:true}).click();
+  const [correction]=await Promise.all([demo.waitForEvent('download'),demo.getByRole('button',{name:'Descargar valuaciones completas del demo',exact:true}).click()]);
+  assert.equal(correction.suggestedFilename(),'valuaciones_demo_completas.csv');
+  await correction.saveAs(path.join(out,'demo_nav_complete.csv'));
+  assert.equal(fs.readFileSync(path.join(out,'demo_nav_complete.csv'),'utf8'),'Fecha,NAV\n2026-01-01,100\n2026-01-05,150\n2026-01-10,150\n');
+  await selectFile(demo,'Valuaciones históricas verificadas:','demo_nav_complete.csv');
+  assert.equal(await demo.getByLabel(flowLabel,{exact:true}).isChecked(),false);
+  assert.equal(await movements(demo).getByTestId('stMetric').count(),0);
+  await movements(demo).getByText(flowLabel,{exact:true}).click();await settle(demo);
+  await movements(demo).getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('0.00%',{exact:true}).waitFor({state:'visible'});
+  const demoSummary=await saveSummary(demo,'demo_review_summary.txt');
+  assert(demoSummary.startsWith('DEMO · Resumen de práctica de Operación'));
+  assert(demoSummary.includes('Alcance: DEMO · datos de práctica SIG · sin cuenta vinculada'));
+  assert(demoSummary.includes('Diferencia libro − control: -0.01 MXN.'));
+  assert(demoSummary.includes('TWR del periodo: 0.00%'));
+  assert(demoSummary.includes('operations_demo.py'));
+  await demo.getByText('Guía de práctica',{exact:true}).click();
+  for(const width of [1440,768,390]){
+    await demo.setViewportSize({width,height:width===390?844:900});
+    await demo.evaluate(()=>document.querySelector('[data-testid="stMain"]').scrollTop=0);
+    await demo.waitForTimeout(250);await demo.screenshot({path:path.join(out,`demo-complete-${width}.png`)});
+    assert.equal(await demo.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+  }
+  await demo.setViewportSize({width:1440,height:900});
+  await demo.getByText('Guía de práctica',{exact:true}).click();
+  await demo.getByRole('button',{name:'Reiniciar datos de práctica',exact:true}).click();await settle(demo);
+  assert.equal(await demo.getByLabel(flowLabel,{exact:true}).isChecked(),false);
+  assert.equal(await movements(demo).getByTestId('stMetric').count(),0);
+  assert.equal(await demo.getByRole('button',{name:'Remove demo_nav_complete.csv',exact:true}).count(),0);
+  await demo.close();
+  assert.equal(await page.getByLabel(rawLabel,{exact:true}).isChecked(),true);
+  assert.equal(await page.getByLabel(flowLabel,{exact:true}).isChecked(),true);
+  assert.equal(await movements(page).getByRole('button',{name:'Remove ledger.csv',exact:true}).count(),1);
+  await movements(page).getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('0.00%',{exact:true}).waitFor({state:'visible'});
   const restored=await browser.newPage({viewport:{width:1440,height:900}});
   restored.on('pageerror',e=>errors.push(e.message));
   await restored.goto(`http://127.0.0.1:${port}/`);

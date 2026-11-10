@@ -24,6 +24,7 @@ from implementation_costs import ImplementationCostAssumptions
 from ledger_reconciliation import COLUMNS as CONTROL_COLUMNS
 from ledger_reconciliation import read_closing_controls, reconcile_book
 from multi_currency_wealth import consolidate_wealth, consolidated_performance, match_internal_flows
+from operations_demo import DEMO_CONTEXT, DEMO_NAV_COMPLETE, DEMO_NAV_INVALID, demo_operations, demo_url
 from operations_jobs import refresh_subscription
 from operations_review_ui import (
     download_review,
@@ -94,7 +95,7 @@ def _open_review_step(area, step):
     st.session_state[_key("_ops_focus_step")] = step
 
 
-def _status_panel(context):
+def _status_panel(context, *, demo=False):
     status = st.session_state.get(_key("_ops_status"))
     if status is None:
         return
@@ -103,7 +104,14 @@ def _status_panel(context):
     scope = "Sesión temporal · sin cuenta vinculada"
     if chosen:
         scope = f"{state['alias']} · {chosen['portfolio']} · {chosen['product']} · {chosen['currency']}"
+    if demo:
+        scope = "DEMO · datos de práctica SIG · sin cuenta vinculada"
     snapshot = status.snapshot(scope)
+    snapshot["demo"] = demo
+    if demo:
+        snapshot["code_sha256"]["operations_demo.py"] = sha256(
+            Path(__file__).with_name("operations_demo.py").read_bytes().replace(b"\r\n", b"\n")
+        ).hexdigest()
     st.subheader("Estado de la revisión")
     st.text(f"{scope}\nCorte del libro: {status.cutoff or '—'} · Moneda: {status.base or '—'}")
     if status.calendar is not None:
@@ -162,7 +170,8 @@ def _status_panel(context):
         st.caption("Los archivos aportados conservan la validación y las confirmaciones de su etapa. "
                    "El resumen contiene datos privados de la sesión actual y las huellas completas.")
         st.download_button("Descargar resumen de revisión", status_text(snapshot),
-                           f"resumen_revision_{status.cutoff or 'sin_corte'}.txt", "text/plain",
+                           f"{'demo_' if demo else ''}resumen_revision_{status.cutoff or 'sin_corte'}.txt",
+                           "text/plain",
                            key=_key("status_download"), on_click="ignore")
 
 
@@ -386,14 +395,15 @@ def _valuation_calendar(start, end, flows, available_dates=()):
         return result
 
 
-def _ledger(context):
+def _ledger(context, *, demo=False):
     status = OperationStatus()
     st.session_state[_key("_ops_status")] = status
     # Rebuild the reference from current inputs before another tab may use it.
     st.session_state.pop(_key("_ops_last_book"), None)
     st.subheader("Movimientos y rendimiento histórico")
     st.caption("Títulos a fecha de operación, efectivo a liquidación y pendientes separados. MXN y USD.")
-    open_review(context)
+    if not demo:
+        open_review(context)
     _template("Plantilla de libro normalizado", COLUMNS, "ledger_template")
     with st.expander("Cómo registrar reportos"):
         st.write(
@@ -635,7 +645,8 @@ def _ledger(context):
                 "closing_reconciliation": reconciliation,
             },
         )
-    _checked_input("Paquete de movimientos", download_review, context, files, cutoff=cutoff, base=base)
+    if not demo:
+        _checked_input("Paquete de movimientos", download_review, context, files, cutoff=cutoff, base=base)
 
 
 def _implementation(context):
@@ -1122,13 +1133,56 @@ def _documents(context):
             )
 
 
-def render_account_operations():
-    st.title("Operación por cuenta")
-    st.caption("Revisa movimientos y fuentes, prepara cambios y reúne el patrimonio con sus datos de origen.")
+def _reset_demo():
+    files, settings = demo_operations()
+    st.session_state["_ops_review_" + DEMO_CONTEXT] = {
+        "token": uuid4().hex, "files": files, "settings": settings, "code_changed": False,
+    }
+    for name in ("_ops_last_book", "_ops_book_signature", "_ops_status", "_ops_focus_step"):
+        st.session_state.pop(name + "_" + DEMO_CONTEXT, None)
+    st.session_state["operations_tabs"] = "Movimientos"
+
+
+def _demo_guide():
+    st.caption("Datos de práctica en esta pestaña. Tu revisión sigue abierta en la pestaña de origen.")
+    with st.expander("Guía de práctica"):
+        st.write("El libro parte de 100 MXN y registra una aportación de 50 MXN al final del 5 de enero. "
+                 "Revisa el control de cierre sin modificar importes para cuadrarlo.")
+        st.write("Consulta el calendario: el CSV inicial omite un cierre. Descarga el archivo completo "
+                 "y cárgalo en Valuaciones históricas verificadas, dentro de Movimientos.")
+        st.download_button("Descargar valuaciones completas del demo", DEMO_NAV_COMPLETE,
+                           "valuaciones_demo_completas.csv", "text/csv",
+                           key="demo_nav_complete", on_click="ignore")
+        st.write("Después revisa y confirma los flujos del periodo. Descarga el TXT en Archivos y resumen "
+                 "descargable. El control con diferencia conserva su revisión pendiente.")
+        with st.expander("Practicar un archivo rechazado"):
+            st.write("Este ejemplo contiene una fecha inválida. Puedes cargarlo y después reemplazarlo "
+                     "por las valuaciones completas para comprobar la recuperación.")
+            st.download_button("Descargar ejemplo con fecha inválida", DEMO_NAV_INVALID,
+                               "valuaciones_demo_invalidas.csv", "text/csv",
+                               key="demo_nav_invalid", on_click="ignore")
+        st.button("Reiniciar datos de práctica", key="demo_reset", on_click=_reset_demo)
+        st.caption("El demo no guarda en expedientes ni exporta paquetes ZIP. "
+                   "Para volver a tu revisión, cierra esta pestaña.")
+
+
+def render_account_operations(*, demo=False):
+    if demo:
+        st.title("Demo de revisión")
+        st.caption("Practica el cierre, completa una valuación y guarda el resumen con datos ficticios.")
+    else:
+        title, action = st.columns([3, 2], vertical_alignment="center")
+        with title:
+            st.title("Operación por cuenta")
+        with action:
+            st.link_button("Probar con datos ficticios", demo_url(st.context.url),
+                           help="Abre una pestaña de práctica; tu revisión permanece en esta pestaña.")
+        st.caption("Revisa movimientos y fuentes, prepara cambios y reúne el patrimonio "
+                   "con sus datos de origen.")
     started = monotonic()
     try:
-        context = _context()
-        st.session_state["_ops_context_key"] = sha256(
+        context = (None, None, None, None) if demo else _context()
+        st.session_state["_ops_context_key"] = DEMO_CONTEXT if demo else sha256(
             str(
                 (
                     context[1].actor if context[1] else None,
@@ -1137,6 +1191,10 @@ def render_account_operations():
                 )
             ).encode()
         ).hexdigest()[:16]
+        if demo:
+            if "_ops_review_" + DEMO_CONTEXT not in st.session_state:
+                _reset_demo()
+            _demo_guide()
         st.session_state.pop(_key("_ops_status"), None)
         overview = st.container()
         areas = (
@@ -1147,9 +1205,14 @@ def render_account_operations():
         tabs = st.tabs([label for _, label, _ in areas], key="operations_tabs", on_change="rerun")
         for tab, (area, label, render) in zip(tabs, areas, strict=True):
             with tab:
-                _render_operation_area(context, area, label, render)
+                if demo and area != "ledger":
+                    st.info("Esta práctica se realiza en Movimientos. "
+                            "Tu revisión continúa en la pestaña de origen.")
+                else:
+                    renderer = (lambda ctx: _ledger(ctx, demo=True)) if demo else render
+                    _render_operation_area(context, area, label, renderer)
         with overview:
-            _status_panel(context)
+            _status_panel(context, demo=demo)
         st.caption(
             f"Preparación de la vista: {monotonic() - started:.2f} s. "
             "Los cálculos se ejecutan al solicitarlos."
