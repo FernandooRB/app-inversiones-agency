@@ -41,7 +41,7 @@ def _scope(context):
 
 
 def open_review(context):
-    with st.expander("Abrir paquete de movimientos"):
+    with st.expander("Abrir paquete de movimientos", key=_context_key("ops_review_open_panel")):
         package = st.file_uploader(
             "Paquete de movimientos ZIP", type=["zip"], key=_context_key("ops_review_zip")
         )
@@ -99,7 +99,7 @@ def download_review(context, files, *, cutoff, base):
     _manifest, contents = build_operations_review(
         present, cutoff=cutoff.isoformat(), base=base, **_scope(context)
     )
-    with st.expander("Guardar revisión de movimientos"):
+    with st.expander("Guardar revisión de movimientos", key=review_key("ops_review_save_panel")):
         st.caption(
             "Al retomarlo se recalculan las vistas y se renuevan las confirmaciones. "
             "El ZIP contiene datos privados sin cifrar; guárdalo como el documento original."
