@@ -175,8 +175,10 @@ def test_document_findings_keep_source_and_do_not_link_the_original_to_the_ledge
     status = review()
     status.documents = [{"name": "<script>.pdf", "sha256": "a" * 64, "notice": "Vincular original",
                          "differences": [{"Pagina": 2, "Fila": 3, "Diferencia": "-0.01"}]}]
+    status.documents.append({**status.documents[0], "name": "Mismos bytes con otro nombre.pdf"})
     rows = [row for row in status.issues() if row["area"] == "Originales GBM"]
     assert len(rows) == 2 and all("<script>.pdf" in row["evidence"] for row in rows)
+    assert len({row["id"] for row in status.issues()}) == len(status.issues())
     assert rows[0]["state"] == "Diferencia" and "Página 2 · fila 3" in rows[0]["reason"]
     assert status.snapshot("Ficticia")["human_approval"] is None
 

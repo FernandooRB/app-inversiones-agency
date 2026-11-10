@@ -135,8 +135,12 @@ class OperationStatus:
             if self.returns is not None and self.returns["xirr"] is None:
                 add("xirr", "XIRR anualizada", "Revisar", self.returns["xirr_status"],
                     self.evidence("nav"), "Revisar rendimiento histórico", step="calendar")
+        seen_documents = set()
         for document in self.documents:
             digest = document["sha256"]
+            if digest in seen_documents:
+                continue
+            seen_documents.add(digest)
             for index, row in enumerate(document.get("differences", [])):
                 add(f"document:{digest}:{index}", "Diferencia en original GBM", "Diferencia",
                     f"Página {row['Pagina']} · fila {row['Fila']} · diferencia: {row['Diferencia']} "
