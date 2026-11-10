@@ -32,6 +32,7 @@ from operations_review_ui import (
     review_key,
     review_upload,
 )
+from operations_status import OperationStatus, status_text
 from portfolio_core import PortfolioError
 from realized_performance import Flow, normalize_valuations, performance, valuation_requirements
 from transaction_ledger import COLUMNS, REPO_VALUE_COLUMNS, book_at, read_ledger, read_repo_values, value_book
@@ -79,6 +80,67 @@ def _remember_book(book, cutoff, source):
     st.session_state[_key("_ops_last_book")] = {"book": book, "cutoff": cutoff.isoformat()}
 
 
+def _status_upload(label, role, *, key):
+    source = review_upload(label, role, key=key)
+    status = st.session_state.get(_key("_ops_status"))
+    if status is not None:
+        status.input(role, source)
+    return source
+
+
+def _open_review_step(area, step):
+    st.session_state["operations_tabs"] = area
+    st.session_state[_key("_ops_focus_step")] = step
+
+
+def _status_panel(context):
+    status = st.session_state.get(_key("_ops_status"))
+    if status is None:
+        return
+    _store, _principal, state, account = context
+    chosen = next((row for row in state["accounts"] if row["id"] == account), None) if state else None
+    scope = "Sesión temporal · sin cuenta vinculada"
+    if chosen:
+        scope = f"{state['alias']} · {chosen['portfolio']} · {chosen['product']} · {chosen['currency']}"
+    snapshot = status.snapshot(scope)
+    st.subheader("Estado de la revisión")
+    st.text(f"{scope}\nCorte del libro: {status.cutoff or '—'} · Moneda: {status.base or '—'}")
+    if status.calendar is not None:
+        st.caption(f"Periodo del rendimiento: {status.calendar['start']} a {status.calendar['end']}.")
+    st.write(f"**{snapshot['issue_count']} pendientes de revisión** · "
+             f"{snapshot['conditional_count']} condicionales · "
+             f"{snapshot['input_count']} archivos CSV incluidos")
+    if status.failed_ledger:
+        st.caption("La revisión de Movimientos falló; se retiraron sus saldos y resultados de este resumen.")
+    issues = snapshot["issues"]
+    if issues:
+        first = issues[0]
+        st.button(first["action"], key=_key("status_next"), on_click=_open_review_step,
+                  args=(first["area"], first["step"]))
+    with st.expander("Pendientes y evidencia", expanded=not st.session_state.get(_key("_ops_focus_step"))):
+        show_all = len(issues) > 3 and st.checkbox("Ver todos los pendientes", key=_key("status_show_all"))
+        for item in issues if show_all else issues[:3]:
+            with st.container(border=True):
+                st.write(f"**{item['title']}** · {item['state']}")
+                st.text(item["reason"])
+                st.text("Evidencia: " + item["evidence"])
+                st.caption(item["action"] + " · " + item["area"])
+        if not issues:
+            st.write("Sin pendientes detectados por estas comprobaciones. "
+                     "La aprobación humana sigue pendiente.")
+        st.caption(snapshot["notice"])
+    with st.expander("Archivos y resumen descargable"):
+        for source in status.inputs.values():
+            st.text(f"{source['label']} · {source['bytes']:,} bytes · SHA-256 {source['sha256']}")
+        if not status.inputs:
+            st.write("Sin archivos CSV aportados en esta revisión.")
+        st.caption("Los archivos aportados conservan la validación y las confirmaciones de su etapa. "
+                   "El resumen contiene datos privados de la sesión actual.")
+        st.download_button("Descargar resumen de revisión", status_text(snapshot),
+                           f"resumen_revision_{status.cutoff or 'sin_corte'}.txt", "text/plain",
+                           key=_key("status_download"), on_click="ignore")
+
+
 def _show_operation_error(area, label, error, *, public_validation=True):
     stage = error.stage if isinstance(error, _OperationInputError) else label
     original = error.error if isinstance(error, _OperationInputError) else error
@@ -86,6 +148,7 @@ def _show_operation_error(area, label, error, *, public_validation=True):
         st.error(f"Revisa {stage}.")
         # Plain text prevents uploaded identifiers being interpreted as Markdown.
         st.text(str(original))
+        reason = str(original)
     else:
         reference = uuid4().hex[:12]
         LOGGER.error(
@@ -94,6 +157,10 @@ def _show_operation_error(area, label, error, *, public_validation=True):
         )
         st.error(f"No se pudo completar {stage}.")
         st.caption(f"Vuelve a intentarlo. Si persiste, conserva esta referencia: {reference}.")
+        reason = f"No se pudo completar esta etapa. Referencia de soporte: {reference}."
+    status = st.session_state.get(_key("_ops_status"))
+    if status is not None and area != "workspace":
+        status.fail(area, stage, reason)
 
 
 def _render_operation_area(context, area, label, render):
@@ -189,13 +256,14 @@ def _save_evidence(context, label, payload):
 
 
 def _closing_reconciliation(context, book, cutoff, ledger_bytes, files=None):
-    with st.expander("Conciliar contra el estado de cuenta"):
+    with st.expander("Conciliar contra el estado de cuenta",
+                     expanded=st.session_state.get(_key("_ops_focus_step")) == "controls"):
         st.caption(
             "Compara CASH (efectivo liquidado), PENDING (efectivo pendiente), POSITION (títulos) "
             "y REPO (capital por referencia). Usa saldos y fuentes del mismo cierre y cuenta."
         )
         _template("Plantilla de controles de cierre", CONTROL_COLUMNS, "closing_controls_template")
-        source = review_upload("Controles de cierre", "controls", key="ops_closing_controls")
+        source = _status_upload("Controles de cierre", "controls", key="ops_closing_controls")
         if files is not None:
             files["controls"] = source
         if not source:
@@ -255,7 +323,8 @@ def _native_flow_amount(event):
 
 
 def _valuation_calendar(start, end, flows, available_dates=()):
-    with st.expander("Valuaciones necesarias para TWR"):
+    with st.expander("Valuaciones necesarias para TWR",
+                     expanded=st.session_state.get(_key("_ops_focus_step")) == "calendar"):
         if start >= end:
             st.info("Selecciona un cierre posterior a la apertura del libro para planear el periodo.")
             return None
@@ -293,6 +362,8 @@ def _valuation_calendar(start, end, flows, available_dates=()):
 
 
 def _ledger(context):
+    status = OperationStatus()
+    st.session_state[_key("_ops_status")] = status
     # Rebuild the reference from current inputs before another tab may use it.
     st.session_state.pop(_key("_ops_last_book"), None)
     st.subheader("Movimientos y rendimiento histórico")
@@ -304,7 +375,7 @@ def _ledger(context):
             "OPEN_REPO registra el capital inicial sin mover efectivo; REPO_START invierte capital; "
             "REPO_MATURITY cobra el bruto, con Interes ya incluido. Usa una referencia única por reporto."
         )
-    source = review_upload("Libro normalizado de movimientos", "ledger", key="ops_ledger")
+    source = _status_upload("Libro normalizado de movimientos", "ledger", key="ops_ledger")
     if not source:
         _forget_book_reference()
         st.info(
@@ -320,6 +391,7 @@ def _ledger(context):
     )
     files = {"ledger": source}
     book = _checked_input("Cierre del libro", book_at, events, cutoff)
+    status.cutoff, status.book = cutoff.isoformat(), book
     _remember_book(book, cutoff, source.getvalue())
     ledger_view = pd.DataFrame([asdict(event) for event in events]).rename(
         columns={
@@ -369,7 +441,7 @@ def _ledger(context):
             width="stretch",
         )
         _template("Plantilla de valuación de reportos", REPO_VALUE_COLUMNS, "repo_values_template")
-        repo_file = review_upload(
+        repo_file = _status_upload(
             "Valuación de reportos al cierre: Fecha,Referencia,Moneda,Valor,Fuente",
             "repo_values", key="ops_repo_values",
         )
@@ -393,10 +465,11 @@ def _ledger(context):
     )
     files["repo_values"] = repo_file
     reconciliation = _closing_reconciliation(context, book, cutoff, source.getvalue(), files)
-    quotes_file = review_upload(
+    status.reconciliation = reconciliation
+    quotes_file = _status_upload(
         "Cotizaciones de cierre: Fecha,Instrumento,Moneda,Precio", "quotes", key="ops_raw"
     )
-    fx_file = review_upload(
+    fx_file = _status_upload(
         "FX del cierre: Fecha,Moneda,Base,Tasa,Fuente", "fx", key="ops_book_fx"
     )
     base = st.selectbox(
@@ -404,6 +477,7 @@ def _ledger(context):
         index=1 if defaults.get("base") == "USD" else 0, key=review_key("ops_base"),
     )
     files.update(quotes=quotes_file, fx=fx_file)
+    status.base = base
     reset_confirmation("raw_confirmation", [
         source.getvalue(), cutoff, base,
         *(file.getvalue() if file else b"" for file in (repo_file, quotes_file, fx_file)),
@@ -412,6 +486,7 @@ def _ledger(context):
         "Confirmé las cotizaciones sin ajuste y las valuaciones contra las fuentes del cierre",
         key=review_key("raw_confirmation"),
     )
+    status.raw_confirmed = raw_confirmed
     if (quotes_file or not book["positions"]) and raw_confirmed and (not book["repos"] or repo_file):
         quotes = _checked_input("Cotizaciones de cierre", _csv, quotes_file) if quotes_file else pd.DataFrame(
             columns=["Fecha", "Instrumento", "Moneda", "Precio"]
@@ -450,6 +525,7 @@ def _ledger(context):
             "Valuación al cierre", value_book, book, quote_map, rates,
             base=base, raw_prices_confirmed=True, repo_values=repo_values,
         )
+        status.valuation = valued
         st.metric(f"Patrimonio neto al cierre · {base}", f"{valued['nav']:,.2f}")
         st.dataframe(
             pd.DataFrame(valued["detail"]).style.format(
@@ -457,7 +533,7 @@ def _ledger(context):
             ),
             hide_index=True, width="stretch",
         )
-    nav_file = review_upload("Valuaciones históricas verificadas: Fecha,NAV", "nav", key="ops_nav")
+    nav_file = _status_upload("Valuaciones históricas verificadas: Fecha,NAV", "nav", key="ops_nav")
     nav = None
     if nav_file:
         nav = _checked_input("Valuaciones históricas", _read_nav, nav_file)
@@ -469,12 +545,13 @@ def _ledger(context):
         event for event in events
         if event.kind in EXTERNAL_EVENT_KINDS and start < event.settled <= end
     ]
-    _valuation_calendar(
+    status.events = period_events
+    status.calendar = _valuation_calendar(
         start, end,
         [Flow(event.settled, _native_flow_amount(event), event.timing) for event in period_events],
         available_dates=nav.index if nav is not None else (),
     )
-    flow_fx_file = review_upload(
+    flow_fx_file = _status_upload(
         "FX por fecha de cada flujo: Fecha,Moneda,Base,Tasa,Fuente", "flow_fx", key="ops_flow_fx"
     )
     files.update(nav=nav_file, flow_fx=flow_fx_file)
@@ -485,6 +562,7 @@ def _ledger(context):
         "Concilié todos los flujos externos y las valuaciones del periodo en la moneda elegida",
         key=review_key("flows_confirmation"),
     )
+    status.flows_confirmed = verified
     if nav_file and verified:
         fx_frame = _checked_input("FX de los flujos", _csv, flow_fx_file) if flow_fx_file else pd.DataFrame()
         flows = []
@@ -508,6 +586,7 @@ def _ledger(context):
                 amount *= float(match.iloc[0]["Tasa"])
             flows.append(Flow(event.settled, amount, event.timing))
         result = _checked_input("Rendimiento histórico", performance, nav, flows)
+        status.returns = result
         a, b, c = st.columns(3)
         a.metric("Ganancia separada de flujos", f"{result['gain']:,.2f} {base}")
         b.metric("TWR del periodo", f"{result['twr']:.2%}" if result["twr"] is not None else "Pendiente")
@@ -939,6 +1018,15 @@ def _documents(context):
                     analysis_key(raw, code_fingerprint()),
                     lambda raw=raw: read_statement(raw),
                 )
+                status = st.session_state.get(_key("_ops_status"))
+                if status is not None:
+                    status.documents.append({
+                        "name": file.name, "sha256": draft["sha256"],
+                        "differences": [row for row in draft["cash_review"][1:]
+                                        if row["ControlAritmetico"] != "EXACTO"],
+                        "notice": "Confirma cuenta, moneda, periodo y clasificación contra el original. "
+                                  "Las filas exactas también conservan revisión humana pendiente.",
+                    })
                 st.caption(
                     f"Corte {draft['end']} · {len(draft['positions'])} posiciones · "
                     f"huella {draft['sha256'][:12]}"
@@ -991,6 +1079,10 @@ def _documents(context):
                 )
             else:
                 evidence = read_cfdi_evidence(raw)
+                status = st.session_state.get(_key("_ops_status"))
+                if status is not None:
+                    status.documents.append({"name": file.name, "sha256": evidence["sha256"],
+                                             "notice": evidence["notice"]})
                 st.write(evidence["notice"])
                 st.dataframe(pd.DataFrame([evidence["checks"]]), hide_index=True)
             st.download_button(
@@ -1020,25 +1112,31 @@ def render_account_operations():
                 )
             ).encode()
         ).hexdigest()[:16]
+        st.session_state.pop(_key("_ops_status"), None)
+        overview = st.container()
         areas = (
             ("ledger", "Movimientos", _ledger), ("implementation", "Implementación", _implementation),
             ("feeds", "Fuentes y alertas", _feeds), ("wealth", "Patrimonio", _wealth),
             ("documents", "Originales GBM", _documents),
         )
-        tabs = st.tabs([label for _, label, _ in areas], key="operations_tabs")
+        tabs = st.tabs([label for _, label, _ in areas], key="operations_tabs", on_change="rerun")
         for tab, (area, label, render) in zip(tabs, areas, strict=True):
             with tab:
                 _render_operation_area(context, area, label, render)
+        with overview:
+            _status_panel(context)
         st.caption(
             f"Preparación de la vista: {monotonic() - started:.2f} s. "
             "Los cálculos se ejecutan al solicitarlos."
         )
     except WorkspaceError:
         _forget_book_reference()
+        st.session_state.pop(_key("_ops_status"), None)
         st.error(
             "No se pudo abrir o guardar en el expediente. "
             "Actualiza el estado de la cuenta y revisa tu acceso."
         )
     except Exception as error:
         _forget_book_reference()
+        st.session_state.pop(_key("_ops_status"), None)
         _show_operation_error("workspace", "Operación", error, public_validation=False)

@@ -7,6 +7,10 @@ de ejecuciones con corte y objetivo. Los originales y el piloto real permanecen 
 
 ## Movimientos y rendimiento
 
+El [panel de estado y pendientes](operations_status.md) reúne alcance, corte,
+moneda, evidencia y siguiente acción. Su resumen descargable usa los mismos
+hallazgos de la ejecución actual, sin volver a calcular ni aprobar diferencias.
+
 Los [errores por insumo y pestaña](operation_errors.md) permiten corregir un archivo
 en Movimientos y seguir consultando las herramientas independientes. Una revisión
 activa fallida retira la referencia del libro para seguimiento; los problemas de
