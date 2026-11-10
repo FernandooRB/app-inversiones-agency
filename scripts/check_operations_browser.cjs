@@ -106,6 +106,7 @@ let browser;
     assert.equal(await demo.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
   }
   await demo.setViewportSize({width:1440,height:900});
+  await movements(demo).getByText('Revisión de flujos y resultado',{exact:true}).click();
   await movements(demo).getByText(flowLabel,{exact:true}).click();await settle(demo);
   await movements(demo).getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('Pendiente',{exact:true}).waitFor({state:'visible'});
   await demo.getByText('Guía de práctica',{exact:true}).click();
@@ -116,7 +117,20 @@ let browser;
   await selectFile(demo,'Valuaciones históricas verificadas:','demo_nav_complete.csv');
   assert.equal(await demo.getByLabel(flowLabel,{exact:true}).isChecked(),false);
   assert.equal(await movements(demo).getByTestId('stMetric').count(),0);
+  await demo.getByText('Guía de práctica',{exact:true}).click();
+  await demo.getByRole('button',{name:'Abrir revisión de flujos',exact:true}).click();await settle(demo);
+  assert.equal(await demo.getByLabel(flowLabel,{exact:true}).isChecked(),false);
+  await demo.getByText('Calendario: Completo · Flujos: Por confirmar · TWR: Pendiente',{exact:true}).waitFor({state:'visible'});
+  for(const width of [1440,768,390]){
+    await demo.setViewportSize({width,height:width===390?844:900});
+    await demo.evaluate(()=>document.querySelector('[data-testid="stMain"]').scrollTop=0);
+    await demo.waitForTimeout(250);await demo.screenshot({path:path.join(out,`demo-ready-${width}.png`)});
+    assert.equal(await demo.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+  }
+  await demo.setViewportSize({width:1440,height:900});
   await movements(demo).getByText(flowLabel,{exact:true}).click();await settle(demo);
+  await demo.getByRole('button',{name:'Abrir resumen descargable',exact:true}).click();await settle(demo);
+  await demo.getByRole('button',{name:'Descargar resumen de revisión',exact:true}).waitFor({state:'visible'});
   await movements(demo).getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('0.00%',{exact:true}).waitFor({state:'visible'});
   const demoSummary=await saveSummary(demo,'demo_review_summary.txt');
   assert(demoSummary.startsWith('DEMO · Resumen de práctica de Operación'));
@@ -124,7 +138,8 @@ let browser;
   assert(demoSummary.includes('Diferencia libro − control: -0.01 MXN.'));
   assert(demoSummary.includes('TWR del periodo: 0.00%'));
   assert(demoSummary.includes('operations_demo.py'));
-  await demo.getByText('Guía de práctica',{exact:true}).click();
+  assert(demoSummary.includes('Siguiente paso: Guardar el resumen de revisión'));
+  assert(demoSummary.includes('Calendario: Completo')&&demoSummary.includes('Flujos: Confirmación registrada'));
   for(const width of [1440,768,390]){
     await demo.setViewportSize({width,height:width===390?844:900});
     await demo.evaluate(()=>document.querySelector('[data-testid="stMain"]').scrollTop=0);
@@ -241,7 +256,7 @@ let browser;
   await restored.getByRole('button',{name:'Quitar archivo recuperado · Libro de movimientos',exact:true}).click();
   await restored.getByText(/Importa el libro para revisar saldos y flujos/).waitFor({state:'visible'});
   assert.equal(errors.length,0);assert.equal(await restored.getByTestId('stException').count(),0);
-  fs.writeFileSync(path.join(out,'browser_verification.json'),JSON.stringify({fictional_only:true,native_zip_download:true,new_session_reopen:true,cutoff_and_currency_restored:true,nondefault_usd_restored:true,confirmations_reset:true,cent_difference_preserved:true,eod_neutral_twr_zero:true,currency_change_invalidates_consent:true,replacement_removal_does_not_resurrect:true,bad_zip_keeps_current_review:true,ledger_removal_clears_screen:true,validation_names_input:true,bad_nav_has_no_stale_return:true,other_tabs_work_after_bad_nav:true,removing_bad_nav_recovers:true,widths:[1440,768,390],page_errors:errors},null,2));
+  fs.writeFileSync(path.join(out,'browser_verification.json'),JSON.stringify({fictional_only:true,next_step_guidance:true,calendar_does_not_confirm_flows:true,summary_action_preserves_pending:true,native_zip_download:true,new_session_reopen:true,cutoff_and_currency_restored:true,nondefault_usd_restored:true,confirmations_reset:true,cent_difference_preserved:true,eod_neutral_twr_zero:true,currency_change_invalidates_consent:true,replacement_removal_does_not_resurrect:true,bad_zip_keeps_current_review:true,ledger_removal_clears_screen:true,validation_names_input:true,bad_nav_has_no_stale_return:true,other_tabs_work_after_bad_nav:true,removing_bad_nav_recovers:true,widths:[1440,768,390],page_errors:errors},null,2));
   console.log('Operations browser verification passed with fictional data');
 })().catch(async e=>{
   console.error(e.message);

@@ -84,6 +84,9 @@ def test_one_click_seed_has_no_imported_consent_and_never_reads_other_account_to
 
 def test_practice_requires_actual_csv_correction_and_new_confirmation_before_zero_twr():
     app = demo_screen()
+    assert app.button(key="guidance_next_" + DEMO_CONTEXT).label == "Abrir calendario de valuaciones"
+    app.button(key="guidance_next_" + DEMO_CONTEXT).click().run()
+    assert any(e.label == "Valuaciones necesarias para TWR" and e.proto.expanded for e in app.expander)
     token = app.session_state["_ops_review_" + DEMO_CONTEXT]["token"]
     key = "flows_confirmation_" + DEMO_CONTEXT + "_" + token
     app.checkbox(key=key).check().run()
@@ -93,12 +96,16 @@ def test_practice_requires_actual_csv_correction_and_new_confirmation_before_zer
     app.run()
     assert not app.exception and not app.error and not app.metric
     assert not app.checkbox(key=key).value
+    assert app.button(key="guidance_next_" + DEMO_CONTEXT).label == "Abrir revisión de flujos"
+    app.button(key="guidance_next_" + DEMO_CONTEXT).click().run()
+    assert not app.checkbox(key=key).value and not app.metric
     app.checkbox(key=key).check().run()
     assert not app.exception and not app.error
     assert next(m.value for m in app.metric if m.label == "TWR del periodo") == "0.00%"
     status = app.session_state["_ops_status_" + DEMO_CONTEXT]
     assert str(status.reconciliation["rows"][0]["Diferencia"]) == "-0.01"
     assert status.snapshot("DEMO")["human_approval"] is None
+    assert app.button(key="guidance_next_" + DEMO_CONTEXT).label == "Abrir resumen descargable"
 
 
 def test_reset_restores_only_demo_bytes_and_requires_confirmation_again():
@@ -113,6 +120,7 @@ def test_reset_restores_only_demo_bytes_and_requires_confirmation_again():
     fresh = app.session_state["_ops_review_" + DEMO_CONTEXT]
     assert not app.exception and not app.error and not app.metric
     assert fresh["token"] != old_token and fresh["files"] == demo_operations()[0]
+    assert app.button(key="guidance_next_" + DEMO_CONTEXT).label == "Abrir calendario de valuaciones"
     assert not app.checkbox(key="flows_confirmation_" + DEMO_CONTEXT + "_" + fresh["token"]).value
     assert app.session_state["_ops_review_real"] == {"files": {"ledger": b"PRIVATE_LEDGER"}, "token": "real"}
     assert app.session_state["_execution_proposal"] == {"private": "PRIVATE_PROPOSAL"}

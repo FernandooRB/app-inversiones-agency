@@ -5,9 +5,29 @@ pestaña para practicar este recorrido conservando la revisión de origen.
 
 Operación abre con el alcance de la sesión o cuenta, el corte del libro, la moneda
 y el periodo del rendimiento cuando existe calendario. El panel reúne los
-pendientes detectados por las comprobaciones actuales; la acción principal abre
-la herramienta del primer pendiente. Los controles de cierre y el calendario
-se despliegan cuando son el destino. Las otras herramientas siguen disponibles.
+pendientes detectados por las comprobaciones actuales. **Siguiente paso** indica
+cómo avanzar en el rendimiento: aportar valuaciones, completar el calendario,
+revisar y confirmar flujos y guardar el resumen. Su acción abre la etapa de
+Movimientos correspondiente. Los controles de cierre y los demás hallazgos
+conservan sus acciones propias; calcular no resuelve esas diferencias.
+
+## Fechas, confirmación y resultado
+
+La guía muestra el estado actual del calendario, la confirmación de flujos y el
+TWR. **Calendario completo** acredita cobertura de fechas y momentos declarados;
+no confirma importes, clasificación de flujos ni fuentes. Una **confirmación
+registrada** refleja la casilla de esa revisión, sin crear aprobación humana.
+**TWR calculado** requiere un resultado disponible; cero es un resultado válido.
+
+La sección **Revisión de flujos y resultado** reúne FX por flujo, la confirmación
+y el cálculo. Se abre al completar el calendario o al elegir su acción. Tras
+calcular, **Abrir resumen descargable** despliega el TXT. El resumen sigue
+disponible antes de calcular, con los pendientes de la ejecución actual.
+
+La guía se deriva de los insumos actuales. Cambiar un CSV renueva la confirmación
+según las reglas existentes; reiniciar el demo vuelve al calendario incompleto.
+Si se rechaza un insumo de Movimientos, la guía pide corregirlo y retira cualquier
+señal de calendario validado o rendimiento disponible de esa ejecución.
 
 La lista muestra motivo, estado, evidencia y siguiente acción. Conserva cada
 diferencia y saldo sin control en su unidad original. Identifica cierres

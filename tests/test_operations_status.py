@@ -75,6 +75,8 @@ def test_unknown_timing_and_conditional_date_never_become_confirmed_from_availab
     assert any(row["id"] == "transfers" for row in issues)
     assert status.snapshot("Ficticia")["conditional_count"] == 1
     assert not status.calendar["twr_coverage_ready"]
+    assert status.guidance()["step"] == "calendar"
+    assert status.guidance()["states"]["calendar"] == "Pendiente"
 
 
 @pytest.mark.parametrize("base,needs_fx", [("MXN", False), ("USD", True)])
@@ -135,10 +137,10 @@ def test_panel_actions_select_the_real_tool_and_preserve_data_and_checks():
     assert any(e.label == "Conciliar contra el estado de cuenta" and e.proto.expanded for e in app.expander)
     assert snapshot_from(app)[0]["inputs"] == snapshot["inputs"]
     assert not app.metric
-    next(button for button in app.button if button.label == "Ver calendario").click().run()
+    next(button for button in app.button if button.label == "Ver revisión de flujos").click().run()
     assert not app.exception and not app.error
-    assert app.session_state["_ops_focus_step_" + scope] == "calendar"
-    assert any(e.label == "Valuaciones necesarias para TWR" and e.proto.expanded for e in app.expander)
+    assert app.session_state["_ops_focus_step_" + scope] == "flows"
+    assert any(e.label == "Revisión de flujos y resultado" and e.proto.expanded for e in app.expander)
 
 
 def test_replacing_invalid_nav_refreshes_panel_without_stale_balances_or_return():
@@ -261,3 +263,65 @@ ui._status_panel((None,None,None,None))
     app.run()
     assert not app.exception and app.number_input[0].value == 2
     assert len([row for row in app.text if row.value.startswith("Fila ficticia")]) == 1
+
+
+def test_complete_dates_do_not_confirm_flows_or_hide_a_difference_and_zero_is_a_result():
+    status = review()
+    status.input("nav", BytesIO(NAV))
+    status.reconciliation = reconcile_book(
+        status.book, [ClosingControl(CUT, "CASH", "", "MXN", "150.01", "Statement")], cutoff=CUT,
+    )
+    status.calendar = valuation_requirements(START, CUT, [Flow(date(2026, 1, 5), 50, "EOD")],
+                                             available_dates=[START, date(2026, 1, 5), CUT])
+    guidance = status.snapshot("Ficticia")["guidance"]
+    assert guidance["step"] == "flows" and guidance["states"]["calendar"] == "Completo"
+    assert guidance["states"]["flows"] == "Por confirmar"
+    assert guidance["states"]["returns"] == "Pendiente"
+    assert not status.flows_confirmed and not status.raw_confirmed
+    status.flows_confirmed = True
+    assert status.guidance()["step"] == "flows"  # An acknowledgement alone is not a calculation.
+    status.returns = {"gain": 0, "twr": 0, "xirr": 0, "twr_status": "CALCULADA", "xirr_status": "CALCULADA"}
+    snapshot = status.snapshot("Ficticia")
+    assert snapshot["guidance"]["step"] == "summary"
+    assert snapshot["guidance"]["states"]["returns"] == "Calculado"
+    assert snapshot["issue_count"] == 2 and "-0.01" in snapshot["issues"][0]["reason"]
+    assert snapshot["human_approval"] is None and snapshot["postings_created"] == 0
+    text = status_text(snapshot).decode()
+    assert "Siguiente paso: Guardar el resumen de revisión" in text
+    assert "Flujos: Confirmación registrada" in text and "TWR: Calculado" in text
+
+
+@pytest.mark.parametrize("scenario,step", [("empty", "ledger"), ("no_nav", "calendar"),
+                                           ("rejected", "ledger")])
+def test_guidance_handles_empty_missing_and_rejected_inputs_without_previous_success(scenario, step):
+    status = OperationStatus() if scenario == "empty" else review()
+    if scenario == "rejected":
+        status.calendar = {"twr_coverage_ready": True}
+        status.flows_confirmed = True
+        status.returns = {"twr": 0}
+        status.fail("ledger", "Valuaciones históricas", "Fecha inválida")
+    guidance = status.guidance()
+    assert guidance["step"] == step
+    assert guidance["states"]["calendar"] != "Completo"
+    assert guidance["states"]["returns"] != "Calculado"
+    assert status.returns is None
+
+
+def test_primary_guide_opens_flows_and_summary_without_granting_or_removing_confirmation():
+    app = screen()
+    before, scope = snapshot_from(app)
+    key = "flows_confirmation_" + scope + "_status-fixture"
+    app.button(key="guidance_next_" + scope).click().run()
+    assert not app.exception and not app.error
+    assert app.session_state["_ops_focus_step_" + scope] == "flows"
+    assert not app.checkbox(key=key).value and not app.metric
+    assert snapshot_from(app)[0]["inputs"] == before["inputs"]
+    assert any(e.label == "Revisión de flujos y resultado" and e.proto.expanded for e in app.expander)
+    app.checkbox(key=key).check().run()
+    assert app.button(key="guidance_next_" + scope).label == "Abrir resumen descargable"
+    app.button(key="guidance_next_" + scope).click().run()
+    after, _ = snapshot_from(app)
+    assert not app.exception and not app.error and app.checkbox(key=key).value
+    assert any(e.label == "Archivos y resumen descargable" and e.proto.expanded for e in app.expander)
+    assert after["returns"]["twr"] == 0 and after["inputs"] == before["inputs"]
+    assert after["issue_count"] == 2 and after["human_approval"] is None
