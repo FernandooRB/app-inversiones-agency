@@ -117,6 +117,7 @@ let browser;
   await selectFile(demo,'Valuaciones históricas verificadas:','demo_nav_complete.csv');
   assert.equal(await demo.getByLabel(flowLabel,{exact:true}).isChecked(),false);
   assert.equal(await movements(demo).getByTestId('stMetric').count(),0);
+  await demo.getByText('Guía de práctica',{exact:true}).click();
   await demo.getByRole('button',{name:'Abrir revisión de flujos',exact:true}).click();await settle(demo);
   assert.equal(await demo.getByLabel(flowLabel,{exact:true}).isChecked(),false);
   await demo.getByText('Calendario: Completo · Flujos: Por confirmar · TWR: Pendiente',{exact:true}).waitFor({state:'visible'});
@@ -139,7 +140,6 @@ let browser;
   assert(demoSummary.includes('operations_demo.py'));
   assert(demoSummary.includes('Siguiente paso: Guardar el resumen de revisión'));
   assert(demoSummary.includes('Calendario: Completo')&&demoSummary.includes('Flujos: Confirmación registrada'));
-  await demo.getByText('Guía de práctica',{exact:true}).click();
   for(const width of [1440,768,390]){
     await demo.setViewportSize({width,height:width===390?844:900});
     await demo.evaluate(()=>document.querySelector('[data-testid="stMain"]').scrollTop=0);

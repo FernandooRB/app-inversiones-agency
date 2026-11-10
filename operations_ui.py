@@ -118,12 +118,12 @@ def _status_panel(context, *, demo=False):
         st.caption(f"Periodo del rendimiento: {status.calendar['start']} a {status.calendar['end']}.")
     guidance = snapshot["guidance"]
     st.write("**Siguiente paso: " + guidance["title"] + "**")
+    st.button(guidance["action"], key=_key("guidance_next"), type="primary",
+              on_click=_open_review_step, args=("Movimientos", guidance["step"]))
     st.caption("Valuaciones → Revisión de flujos → Resultado → Resumen")
     st.text(guidance["detail"])
     st.caption(f"Calendario: {guidance['states']['calendar']} · "
                f"Flujos: {guidance['states']['flows']} · TWR: {guidance['states']['returns']}")
-    st.button(guidance["action"], key=_key("guidance_next"), type="primary",
-              on_click=_open_review_step, args=("Movimientos", guidance["step"]))
     pending_label = "pendiente" if snapshot["issue_count"] == 1 else "pendientes"
     conditional_label = "condicional" if snapshot["conditional_count"] == 1 else "condicionales"
     files_label = "archivo CSV incluido" if snapshot["input_count"] == 1 else "archivos CSV incluidos"
