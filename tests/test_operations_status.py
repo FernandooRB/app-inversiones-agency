@@ -10,7 +10,7 @@ from streamlit.testing.v1 import AppTest
 from ledger_reconciliation import ClosingControl, reconcile_book
 from operations_status import OperationStatus, status_text
 from realized_performance import Flow, valuation_requirements
-from transaction_ledger import Event, book_at
+from transaction_ledger import book_at, read_ledger
 
 CUT = date(2026, 1, 10)
 START = date(2026, 1, 1)
@@ -27,7 +27,7 @@ CONTROLS = (b"Fecha,Tipo,InstrumentoReferencia,Moneda,Saldo,Fuente\n"
 
 def review():
     status = OperationStatus(cutoff=CUT.isoformat(), base="MXN")
-    status.book = book_at([Event("open", START, START, "OPEN_CASH", amount=100)], CUT)
+    status.book = book_at(read_ledger(LEDGER), CUT)
     status.input("ledger", BytesIO(LEDGER))
     return status
 
@@ -35,11 +35,11 @@ def review():
 def test_difference_is_exact_and_does_not_change_the_book_or_approve_anything():
     status = review()
     status.reconciliation = reconcile_book(
-        status.book, [ClosingControl(CUT, "CASH", "", "MXN", "100.01", "Statement")], cutoff=CUT,
+        status.book, [ClosingControl(CUT, "CASH", "", "MXN", "150.01", "Statement")], cutoff=CUT,
     )
     row = next(row for row in status.issues() if row["id"].startswith("control:"))
     assert "-0.01 MXN" in row["reason"] and row["state"] == "Diferencia"
-    assert status.book["cash"]["MXN"] == Decimal(100)
+    assert status.book["cash"]["MXN"] == Decimal(150)
     snapshot = status.snapshot("Ficticia")
     assert snapshot["human_approval"] is None and snapshot["postings_created"] == 0
     assert snapshot["issue_count"] == len(snapshot["issues"])
@@ -52,7 +52,7 @@ def test_missing_control_is_unknown_even_for_zero_balance():
     status = review()
     status.book["cash"]["USD"] = Decimal(0)
     status.reconciliation = reconcile_book(
-        status.book, [ClosingControl(CUT, "CASH", "", "MXN", 100, "Statement")], cutoff=CUT,
+        status.book, [ClosingControl(CUT, "CASH", "", "MXN", 150, "Statement")], cutoff=CUT,
     )
     row = next(row for row in status.issues() if row["id"].startswith("control:"))
     assert row["state"] == "Falta dato" and "no se interpreta como cero" in row["reason"]
@@ -61,14 +61,17 @@ def test_missing_control_is_unknown_even_for_zero_balance():
 
 def test_unknown_timing_and_conditional_date_never_become_confirmed_from_available_nav():
     status = review()
-    status.events = [Event("transfer", date(2026, 1, 5), date(2026, 1, 5), "TRANSFER_IN", amount=50)]
+    changed = LEDGER.replace(b",DEPOSIT,", b",TRANSFER_IN,").replace(b",,EOD,0", b",Ficticia,UNKNOWN,0")
+    status.input("ledger", BytesIO(changed))
+    status.book = book_at(read_ledger(changed), CUT)
+    status.events = [event for event in read_ledger(changed) if event.kind == "TRANSFER_IN"]
     status.input("nav", BytesIO(NAV))
     status.calendar = valuation_requirements(START, CUT, [Flow(date(2026, 1, 5), 50)],
                                              available_dates=[START, date(2026, 1, 5), CUT])
     status.flows_confirmed = True
     issues = status.issues()
     assert next(row for row in issues if row["id"] == "date:2026-01-04")["state"] == "Condicional"
-    assert any(row["id"] == "timing:transfer" for row in issues)
+    assert any(row["id"] == "timing:flow" for row in issues)
     assert any(row["id"] == "transfers" for row in issues)
     assert status.snapshot("Ficticia")["conditional_count"] == 1
     assert not status.calendar["twr_coverage_ready"]
@@ -104,8 +107,10 @@ import operations_ui as ui
 from hashlib import sha256
 scope=sha256(str((None,None,None)).encode()).hexdigest()[:16]
 st.session_state.setdefault("_ops_review_"+scope,{recovery!r})
+def uploaded(*args,**kwargs):
+    return [] if kwargs.get("accept_multiple_files") else None
 with patch.object(ui,"_context",return_value=(None,None,None,None)), \
-     patch.object(st,"file_uploader",return_value=None):
+     patch.object(st,"file_uploader",side_effect=uploaded):
     ui.render_account_operations()
 ''', default_timeout=40).run()
 
@@ -206,8 +211,10 @@ state={{"id":"fictitious-case","alias":"Ficticia","accounts":[
     {{"id":account,"portfolio":account,"product":"Inversiones","currency":"MXN"}}]}}
 scope=sha256(str((None,state["id"],"A")).encode()).hexdigest()[:16]
 st.session_state.setdefault("_ops_review_"+scope,{recovery!r})
+def uploaded(*args,**kwargs):
+    return [] if kwargs.get("accept_multiple_files") else None
 with patch.object(ui,"_context",return_value=(None,None,state,account)), \
-     patch.object(st,"file_uploader",return_value=None):
+     patch.object(st,"file_uploader",side_effect=uploaded):
     ui.render_account_operations()
 st.session_state["current_snapshot"]=st.session_state[ui._key("_ops_status")].snapshot(account)
 ''', default_timeout=40).run()
@@ -218,3 +225,33 @@ st.session_state["current_snapshot"]=st.session_state[ui._key("_ops_status")].sn
     assert not app.exception and snapshot["scope"] == "B"
     assert snapshot["input_count"] == 0 and not snapshot["balances"] and not snapshot["returns"]
     assert len(snapshot["issues"]) == 1 and snapshot["issues"][0]["id"] == "ledger"
+
+
+def test_zero_return_and_missing_xirr_are_distinct_in_the_readable_summary():
+    status = review()
+    status.returns = {"gain": 0, "twr": 0, "xirr": None, "twr_status": "CALCULADA",
+                      "xirr_status": "SIN_RAIZ_EN_RANGO"}
+    text = status_text(status.snapshot("Ficticia")).decode()
+    assert "TWR del periodo: 0.00%" in text
+    assert "XIRR anualizada: Pendiente" in text
+
+
+def test_large_queue_is_bounded_and_a_smaller_replacement_clamps_the_page():
+    app = AppTest.from_string('''
+import streamlit as st
+import operations_ui as ui
+from operations_status import OperationStatus
+status=OperationStatus(inputs={"ledger":{"label":"Libro","sha256":"a"*64,"bytes":1}})
+for i in range(st.session_state.get("count",35)):
+    status.fail("documents","Originales GBM","Fila ficticia "+str(i))
+st.session_state[ui._key("_ops_status")]=status
+ui._status_panel((None,None,None,None))
+''', default_timeout=30).run()
+    app.checkbox(key="status_show_all_temporary").check().run()
+    app.number_input(key="status_page_temporary").set_value(4).run()
+    assert not app.exception and app.number_input[0].value == 4
+    assert len([row for row in app.text if row.value.startswith("Fila ficticia")]) == 5
+    app.session_state["count"] = 11
+    app.run()
+    assert not app.exception and app.number_input[0].value == 2
+    assert len([row for row in app.text if row.value.startswith("Fila ficticia")]) == 1

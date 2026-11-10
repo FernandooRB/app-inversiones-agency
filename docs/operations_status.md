@@ -14,7 +14,8 @@ Si se cargan originales GBM, sus diferencias y revisión documental también
 aparecen en la lista. Esto no vincula automáticamente un original con el libro.
 
 Se muestran primero hasta tres pendientes; **Ver todos los pendientes** permite
-consultar el resto. Un estado de coincidencia aritmética o un cálculo disponible
+consultar el resto en páginas de hasta diez filas. La evidencia muestra una huella
+corta; el resumen descargable conserva los SHA-256 completos. Un estado de coincidencia aritmética o un cálculo disponible
 no sustituyen la revisión humana. No hay un porcentaje de aprobación ni una
 acción que cree ajustes para cuadrar los saldos.
 

@@ -182,6 +182,21 @@ def status_text(snapshot):
         lines.append(f"{row['type']} · {row['item']} · {row['currency']}: {row['value']} {row['unit']}")
     if not snapshot["balances"]:
         lines.append("Sin saldos disponibles en esta revisión.")
+    lines += ["", "Resultados disponibles"]
+    if snapshot["valuation"] is not None:
+        lines.append(f"Patrimonio neto al cierre: {snapshot['valuation']['nav']:,.2f} {snapshot['base']}")
+    else:
+        lines.append("Valuación al cierre: pendiente o no disponible en esta ejecución.")
+    returns = snapshot["returns"]
+    if returns is None:
+        lines.append("Rendimiento: pendiente o no disponible en esta ejecución.")
+    else:
+        lines.append(f"Ganancia separada de flujos: {returns['gain']:,.2f} {snapshot['base']}")
+        for label, key in (("TWR del periodo", "twr"), ("XIRR anualizada", "xirr")):
+            value = f"{returns[key]:.2%}" if returns[key] is not None else "Pendiente"
+            lines.append(f"{label}: {value} · {returns[key + '_status']}")
+    if snapshot["calendar"] is not None:
+        lines.append(f"Periodo: {snapshot['calendar']['start']} a {snapshot['calendar']['end']}")
     lines += ["", "Pendientes de revisión"]
     for row in snapshot["issues"]:
         lines.extend([f"{row['title']} · {row['state']}", row["reason"], "Evidencia: " + row["evidence"],

@@ -108,7 +108,9 @@ let browser;
   assert(summary.includes(createHash('sha256').update(fs.readFileSync(path.join(out,'ledger.csv'))).digest('hex')));
   for(const width of [1440,768,390]){
     await restored.setViewportSize({width,height:width===390?844:900});
-    await restored.evaluate(()=>scrollTo(0,0));await restored.waitForTimeout(250);
+    await restored.evaluate(()=>{document.querySelector('[data-testid="stMain"]').scrollTop=0;});
+    await restored.getByRole('heading',{name:'Operación por cuenta',exact:true}).scrollIntoViewIfNeeded();
+    await restored.waitForTimeout(250);
     await restored.screenshot({path:path.join(out,`status-${width}.png`)});
     assert.equal(await restored.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
   }

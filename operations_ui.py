@@ -3,6 +3,7 @@
 import base64
 import json
 import logging
+import re
 from dataclasses import asdict
 from datetime import date
 from hashlib import sha256
@@ -119,11 +120,22 @@ def _status_panel(context):
                   args=(first["area"], first["step"]))
     with st.expander("Pendientes y evidencia", expanded=not st.session_state.get(_key("_ops_focus_step"))):
         show_all = len(issues) > 3 and st.checkbox("Ver todos los pendientes", key=_key("status_show_all"))
-        for item in issues if show_all else issues[:3]:
+        start, end = 0, min(3, len(issues))
+        if show_all:
+            pages = (len(issues) + 9) // 10
+            # A replacement may shrink the list; bound the view before constructing its widget.
+            page_key = _key("status_page")
+            st.session_state[page_key] = min(max(st.session_state.get(page_key, 1), 1), pages)
+            page = st.number_input("Página de pendientes", 1, pages, key=page_key)
+            start, end = (page - 1) * 10, min(page * 10, len(issues))
+            st.caption(f"Pendientes {start + 1} a {end} de {len(issues)}.")
+        for item in issues[start:end]:
             with st.container(border=True):
                 st.write(f"**{item['title']}** · {item['state']}")
                 st.text(item["reason"])
-                st.text("Evidencia: " + item["evidence"])
+                short_evidence = re.sub(r"(SHA-256 )([a-f0-9]{64})", lambda m: m[1] + m[2][:12] + "…",
+                                        item["evidence"])
+                st.text("Evidencia: " + short_evidence)
                 st.caption(item["action"] + " · " + item["area"])
         if not issues:
             st.write("Sin pendientes detectados por estas comprobaciones. "
@@ -135,7 +147,7 @@ def _status_panel(context):
         if not status.inputs:
             st.write("Sin archivos CSV aportados en esta revisión.")
         st.caption("Los archivos aportados conservan la validación y las confirmaciones de su etapa. "
-                   "El resumen contiene datos privados de la sesión actual.")
+                   "El resumen contiene datos privados de la sesión actual y las huellas completas.")
         st.download_button("Descargar resumen de revisión", status_text(snapshot),
                            f"resumen_revision_{status.cutoff or 'sin_corte'}.txt", "text/plain",
                            key=_key("status_download"), on_click="ignore")
