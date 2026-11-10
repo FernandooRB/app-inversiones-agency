@@ -22,6 +22,9 @@ const tap=async(locator,label)=>{
   const box=await locator.evaluate(el=>{const target=el.closest('button,a,label,summary,[role="tab"]')||el;const r=target.getBoundingClientRect();return {width:r.width,height:r.height};});
   metrics.push({label,...box});
   await fs.writeFile(out+'/touch_targets.json',JSON.stringify(metrics,null,2)+'\n');
+  if(await locator.getAttribute('role')==='tab'){
+    ensure(await locator.evaluate(el=>el.scrollWidth<=el.clientWidth+1),'Tab label is clipped');
+  }
   await locator.tap();
 };
 const chooser=async(pp,ff,panel,label,file)=>{
@@ -108,6 +111,7 @@ await tap(d.getByRole('button',{name:'Reiniciar datos de práctica',exact:true})
 ensure(await panel.getByTestId('stMetric').count()===0,'Reset retained result');
 ensure(!await panel.getByLabel(flowLabel,{exact:true}).isChecked(),'Reset retained consent');
 await d.getByText('4 pendientes de revisión',{exact:true}).waitFor({state:'visible'});
+await capture('touch-reset');
 await demo.close();
 ensure(await origin.getByLabel(flowLabel,{exact:true}).isChecked(),'Original flow confirmation changed');
 ensure(await origin.getByLabel(rawLabel,{exact:true}).isChecked(),'Original source confirmation changed');

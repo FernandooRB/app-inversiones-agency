@@ -37,7 +37,11 @@ def render_shell(
         [data-testid="stMain"] [role="tab"],
         .st-key-workspace_area [role="radio"],
         [data-testid="stExpander"] summary,
-        [data-testid="stCheckbox"] label {min-height:44px;min-width:44px;}
+        [data-testid="stCheckbox"] label {min-height:44px;}
+        [data-testid="stButton"] button,
+        [data-testid="stDownloadButton"] button,
+        [data-testid="stLinkButton"] a,
+        [data-testid="stFileUploader"] button {min-width:44px;}
         .sig-scope {display:none;}
       }
     </style>
