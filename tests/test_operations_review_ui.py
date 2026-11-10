@@ -33,7 +33,7 @@ def test_recovered_inputs_restore_date_currency_and_calendar_without_approval():
     assert all(not item.value for item in app.checkbox)
     assert any("Revisión recuperada" in item.value for item in app.info)
     assert any(item.proto.label == "Descargar paquete de movimientos" for item in app.get("download_button"))
-    assert any("No conserva confirmaciones" in item.value for item in app.caption)
+    assert any("se renuevan las confirmaciones" in item.value for item in app.caption)
 
 
 def test_currency_change_invalidates_both_confirmations_and_old_return_metrics():

@@ -80,7 +80,8 @@ let browser;
   await restored.getByText('Guardar revisión de movimientos',{exact:true}).click();
   for(const width of [1440,768,390]){
     await restored.setViewportSize({width,height:width===390?844:900});
-    await restored.getByText('Guardar revisión de movimientos',{exact:true}).scrollIntoViewIfNeeded();
+    await restored.getByText('Descargar paquete de movimientos',{exact:true}).scrollIntoViewIfNeeded();
+    await restored.waitForTimeout(350);
     await restored.screenshot({path:path.join(out,`restored-${width}.png`)});
     assert.equal(await restored.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
     const cdp=await restored.context().newCDPSession(restored);
@@ -89,7 +90,7 @@ let browser;
   }
   await restored.getByText(flowLabel,{exact:true}).click();
   await restored.getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('0.00%',{exact:true}).waitFor({state:'visible'});
-  await restored.getByTestId('stSelectbox').filter({hasText:'Moneda del rendimiento y valuación'}).getByRole('combobox').click();
+  await restored.getByTestId('stSelectbox').filter({hasText:'Moneda del rendimiento y valuación'}).getByRole('button',{name:'Open',exact:true}).click();
   await restored.getByRole('option',{name:'USD',exact:true}).click();
   await restored.getByTestId('stMetric').first().waitFor({state:'detached'});
   assert.equal(await restored.getByLabel(flowLabel,{exact:true}).isChecked(),false);

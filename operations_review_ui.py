@@ -100,13 +100,12 @@ def download_review(context, files, *, cutoff, base):
         present, cutoff=cutoff.isoformat(), base=base, **_scope(context)
     )
     with st.expander("Guardar revisión de movimientos"):
-        st.write("Incluye: " + ", ".join(ROLE_LABELS[role] for role in present) + ".")
         st.caption(
-            "Conserva los CSV, el corte y la moneda para retomarlos. No conserva confirmaciones ni "
-            "resultados aprobados. El ZIP contiene datos privados sin cifrar; "
-            "guárdalo como el documento original."
+            "Al retomarlo se recalculan las vistas y se renuevan las confirmaciones. "
+            "El ZIP contiene datos privados sin cifrar; guárdalo como el documento original."
         )
         st.download_button(
             "Descargar paquete de movimientos", contents, f"movimientos_{cutoff}.zip", "application/zip",
             key=review_key("ops_review_download"), on_click="ignore",
         )
+        st.write("Incluye: " + ", ".join(ROLE_LABELS[role] for role in present) + ".")
