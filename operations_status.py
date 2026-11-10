@@ -47,6 +47,64 @@ class OperationStatus:
         source = self.inputs.get(role)
         return f"{LABELS[role]} · SHA-256 {source['sha256']}" if source else f"{LABELS[role]} no aportado"
 
+    def guidance(self):
+        """Describe the next performance task without approving inputs or changing confirmations."""
+        calendar_ready = bool(self.calendar and self.calendar["twr_coverage_ready"])
+        calculated = self.returns is not None and self.returns["twr"] is not None
+        states = {
+            "calendar": "Completo" if calendar_ready else "Pendiente",
+            "flows": "Confirmación registrada" if self.flows_confirmed else "Por confirmar",
+            "returns": "Calculado" if calculated else "Pendiente",
+            "summary": "Disponible con el estado actual",
+        }
+        step, title, detail, action = (
+            "ledger", "Cargar el libro de movimientos",
+            "En Movimientos, carga el libro o abre un paquete de revisión.", "Abrir Movimientos",
+        )
+        if self.failed_ledger:
+            states.update(calendar="Sin validar", flows="Sin validar", returns="No disponible")
+            title, detail, action = (
+                "Corregir el insumo rechazado",
+                "Revisa el motivo del rechazo en Movimientos. Los saldos y resultados anteriores se retiraron.",
+                "Abrir Movimientos",
+            )
+        elif self.book is not None:
+            if "nav" not in self.inputs:
+                step, title, detail, action = (
+                    "calendar", "Cargar las valuaciones históricas",
+                    "En Movimientos, aporta el CSV de Valuaciones históricas verificadas y revisa el calendario.",
+                    "Abrir calendario de valuaciones",
+                )
+            elif not calendar_ready:
+                step, title, detail, action = (
+                    "calendar", "Completar el calendario de valuaciones",
+                    "Revisa las fechas faltantes y el momento BOD/EOD de los flujos. "
+                    "Las fechas disponibles no resuelven un momento UNKNOWN.",
+                    "Abrir calendario de valuaciones",
+                )
+            elif not self.flows_confirmed:
+                step, title, detail, action = (
+                    "flows", "Revisar y confirmar los flujos",
+                    "El calendario está completo. En Movimientos → Revisión de flujos y resultado, "
+                    "revisa importes, moneda, momento y fuentes antes de confirmar.",
+                    "Abrir revisión de flujos",
+                )
+            elif not calculated:
+                step, title, detail, action = (
+                    "flows", "Revisar el rendimiento pendiente",
+                    "La confirmación está registrada, pero el TWR sigue pendiente. "
+                    "Consulta el motivo en Revisión de flujos y resultado.",
+                    "Abrir revisión de flujos",
+                )
+            else:
+                step, title, detail, action = (
+                    "summary", "Guardar el resumen de revisión",
+                    "El TWR está calculado. Descarga el resumen con sus resultados, "
+                    "diferencias y confirmaciones pendientes.",
+                    "Abrir resumen descargable",
+                )
+        return {"step": step, "title": title, "detail": detail, "action": action, "states": states}
+
     def issues(self):
         rows = []
 
@@ -131,10 +189,10 @@ class OperationStatus:
             if "nav" in self.inputs and not self.flows_confirmed:
                 add("flows-confirmation", "Flujos y valuaciones del periodo", "Por confirmar",
                     "Revisa el periodo, moneda y todos los flujos externos antes de confirmar.",
-                    self.evidence("nav"), "Revisar flujos y calendario", step="calendar")
+                    self.evidence("nav"), "Revisar flujos del periodo", step="flows")
             if self.returns is not None and self.returns["xirr"] is None:
                 add("xirr", "XIRR anualizada", "Revisar", self.returns["xirr_status"],
-                    self.evidence("nav"), "Revisar rendimiento histórico", step="calendar")
+                    self.evidence("nav"), "Revisar rendimiento histórico", step="flows")
         seen_documents = set()
         for document in self.documents:
             digest = document["sha256"]
@@ -168,6 +226,7 @@ class OperationStatus:
                 "conditional_count": sum(row["state"] == "Condicional" for row in issues),
                 "ledger_failed": self.failed_ledger, "valuation": self.valuation, "returns": self.returns,
                 "calendar": self.calendar, "documents": self.documents,
+                "guidance": self.guidance(),
                 "human_approval": None, "postings_created": 0,
                 "notice": "Comprobaciones parciales de esta sesión; no acreditan aprobación humana ni "
                           "vinculación de los originales con el libro. Los importes no se ajustan.",
@@ -206,6 +265,13 @@ def status_text(snapshot):
             lines.append(f"{label}: {value} · {returns[key + '_status']}")
     if snapshot["calendar"] is not None:
         lines.append(f"Periodo: {snapshot['calendar']['start']} a {snapshot['calendar']['end']}")
+    if guidance := snapshot.get("guidance"):
+        lines += ["", "Recorrido de rendimiento"]
+        for label, key in (("Calendario", "calendar"), ("Flujos", "flows"),
+                           ("TWR", "returns"), ("Resumen", "summary")):
+            lines.append(f"{label}: {guidance['states'][key]}")
+        lines += ["Siguiente paso: " + guidance["title"], guidance["detail"],
+                  "Las fechas completas no acreditan revisión de importes ni aprobación humana."]
     lines += ["", "Pendientes de revisión"]
     for row in snapshot["issues"]:
         lines.extend([f"{row['title']} · {row['state']}", row["reason"], "Evidencia: " + row["evidence"],

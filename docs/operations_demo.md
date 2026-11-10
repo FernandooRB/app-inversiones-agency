@@ -14,9 +14,12 @@ el NAV. Los importes son ficticios y reproducibles; no se consultan cotizaciones
 1. Revisa el panel y la diferencia del control; conserva los importes originales.
 2. En **Guía de práctica**, descarga **Valuaciones completas del demo** y carga
    ese CSV en **Valuaciones históricas verificadas**, dentro de Movimientos.
-3. Revisa y confirma los flujos del periodo. Con el calendario completo, el caso
+3. Cuando el panel indique **Revisar y confirmar los flujos**, abre **Revisión de
+   flujos y resultado** y revisa los datos antes de marcar la confirmación. Tener
+   las fechas completas no confirma los importes. Con el calendario completo, el caso
    produce ganancia de 0 MXN y TWR de 0%: la aportación no se cuenta como ganancia.
-4. En **Archivos y resumen descargable**, descarga el TXT. El archivo y su alcance
+4. **Abrir resumen descargable** despliega **Archivos y resumen descargable**;
+   descarga el TXT. El archivo y su alcance
    indican **DEMO**; el control con diferencia conserva su revisión pendiente.
 
 La guía también incluye un CSV con fecha inválida para practicar el rechazo y

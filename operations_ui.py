@@ -116,6 +116,14 @@ def _status_panel(context, *, demo=False):
     st.text(f"{scope}\nCorte del libro: {status.cutoff or '—'} · Moneda: {status.base or '—'}")
     if status.calendar is not None:
         st.caption(f"Periodo del rendimiento: {status.calendar['start']} a {status.calendar['end']}.")
+    guidance = snapshot["guidance"]
+    st.write("**Siguiente paso: " + guidance["title"] + "**")
+    st.caption("Valuaciones → Revisión de flujos → Resultado → Resumen")
+    st.text(guidance["detail"])
+    st.caption(f"Calendario: {guidance['states']['calendar']} · "
+               f"Flujos: {guidance['states']['flows']} · TWR: {guidance['states']['returns']}")
+    st.button(guidance["action"], key=_key("guidance_next"), type="primary",
+              on_click=_open_review_step, args=("Movimientos", guidance["step"]))
     pending_label = "pendiente" if snapshot["issue_count"] == 1 else "pendientes"
     conditional_label = "condicional" if snapshot["conditional_count"] == 1 else "condicionales"
     files_label = "archivo CSV incluido" if snapshot["input_count"] == 1 else "archivos CSV incluidos"
@@ -127,8 +135,9 @@ def _status_panel(context, *, demo=False):
     issues = snapshot["issues"]
     if issues:
         first = issues[0]
-        st.button(first["action"], key=_key("status_next"), on_click=_open_review_step,
-                  args=(first["area"], first["step"]))
+        if first["action"] != guidance["action"]:
+            st.button(first["action"], key=_key("status_next"), on_click=_open_review_step,
+                      args=(first["area"], first["step"]))
     with st.expander("Pendientes y evidencia", expanded=not st.session_state.get(_key("_ops_focus_step"))):
         show_all = len(issues) > 3 and st.checkbox("Ver todos los pendientes", key=_key("status_show_all"))
         start, end = 0, min(3, len(issues))
@@ -151,6 +160,7 @@ def _status_panel(context, *, demo=False):
                     st.caption(item["action"] + " · " + item["area"])
                 else:
                     label = {"controls": "Ver control", "calendar": "Ver calendario",
+                             "flows": "Ver revisión de flujos",
                              "valuation": "Ver valuación"}.get(item["step"], "Ver etapa")
                     if item["area"] == "Originales GBM":
                         label = "Ver original"
@@ -162,7 +172,8 @@ def _status_panel(context, *, demo=False):
             st.write("Sin pendientes detectados por estas comprobaciones. "
                      "La aprobación humana sigue pendiente.")
         st.caption(snapshot["notice"])
-    with st.expander("Archivos y resumen descargable"):
+    with st.expander("Archivos y resumen descargable",
+                     expanded=st.session_state.get(_key("_ops_focus_step")) == "summary"):
         for source in status.inputs.values():
             st.text(f"{source['label']} · {source['bytes']:,} bytes · SHA-256 {source['sha256']}")
         if not status.inputs:
@@ -366,6 +377,9 @@ def _valuation_calendar(start, end, flows, available_dates=()):
         st.caption(f"Periodo del plan: {start.isoformat()} a {end.isoformat()}.")
         if result["twr_coverage_ready"]:
             st.success("Las fechas y los momentos declarados cubren el calendario de TWR.")
+            st.caption("Calendario completo se refiere a fechas y momentos. "
+                       "Sigue en Revisión de flujos y resultado: revisa importes, moneda y fuentes "
+                       "antes de marcar la confirmación.")
         else:
             st.warning(
                 "Calendario pendiente · Cierres obligatorios faltantes: "
@@ -586,65 +600,71 @@ def _ledger(context, *, demo=False):
         [Flow(event.settled, _native_flow_amount(event), event.timing) for event in period_events],
         available_dates=nav.index if nav is not None else (),
     )
-    flow_fx_file = _status_upload(
-        "FX por fecha de cada flujo: Fecha,Moneda,Base,Tasa,Fuente", "flow_fx", key="ops_flow_fx"
-    )
-    files.update(nav=nav_file, flow_fx=flow_fx_file)
-    reset_confirmation("flows_confirmation", [
-        cutoff, base, *(file.getvalue() if file else b"" for file in files.values()),
-    ])
-    verified = st.checkbox(
-        "Concilié todos los flujos externos y las valuaciones del periodo en la moneda elegida",
-        key=review_key("flows_confirmation"),
-    )
-    status.flows_confirmed = verified
-    if nav_file and verified:
-        fx_frame = _checked_input("FX de los flujos", _csv, flow_fx_file) if flow_fx_file else pd.DataFrame()
-        flows = []
-        for event in period_events:
-            amount = _native_flow_amount(event)
-            if event.currency != base:
-                needed = {"Fecha", "Moneda", "Base", "Tasa", "Fuente"}
-                if not needed.issubset(fx_frame):
-                    raise PortfolioError("Falta FX fechado para convertir los flujos externos.")
-                match = fx_frame[
-                    (fx_frame["Fecha"] == event.settled.isoformat())
-                    & (fx_frame["Moneda"] == event.currency)
-                    & (fx_frame["Base"] == base)
-                ]
-                if (
-                    len(match) != 1
-                    or not str(match.iloc[0]["Fuente"]).strip()
-                    or float(match.iloc[0]["Tasa"]) <= 0
-                ):
-                    raise PortfolioError("Un flujo no tiene un único FX positivo y documentado.")
-                amount *= float(match.iloc[0]["Tasa"])
-            flows.append(Flow(event.settled, amount, event.timing))
-        result = _checked_input("Rendimiento histórico", performance, nav, flows)
-        status.returns = result
-        a, b, c = st.columns(3)
-        a.metric("Ganancia separada de flujos", f"{result['gain']:,.2f} {base}")
-        b.metric("TWR del periodo", f"{result['twr']:.2%}" if result["twr"] is not None else "Pendiente")
-        c.metric("XIRR anualizada", f"{result['xirr']:.2%}" if result["xirr"] is not None else "Pendiente")
-        st.caption(
-            f"TWR: {result['twr_status']} · XIRR: {result['xirr_status']}. "
-            "TWR requiere valuación en cada flujo y momento BOD/EOD confirmado."
+    with st.expander("Revisión de flujos y resultado",
+                     expanded=bool(status.calendar and status.calendar["twr_coverage_ready"])
+                     or st.session_state.get(_key("_ops_focus_step")) == "flows"):
+        st.caption("Revisa los flujos externos, sus importes, moneda y fuentes del periodo. "
+                   "Tener las fechas completas no confirma esos datos. "
+                   "Cambiar un archivo exige renovar esta confirmación.")
+        flow_fx_file = _status_upload(
+            "FX por fecha de cada flujo: Fecha,Moneda,Base,Tasa,Fuente", "flow_fx", key="ops_flow_fx"
         )
-        _save_evidence(
-            context,
-            "Conservar libro y cálculo de rendimiento",
-            {
-                "schema": 1,
-                "result": result,
-                "base": base,
-                "flows": [asdict(f) for f in flows],
-                "ledger": base64.b64encode(source.getvalue()).decode(),
-                "valuations": base64.b64encode(nav_file.getvalue()).decode(),
-                "flow_fx": base64.b64encode(flow_fx_file.getvalue()).decode() if flow_fx_file else None,
-                "repo_values": base64.b64encode(repo_file.getvalue()).decode() if repo_file else None,
-                "closing_reconciliation": reconciliation,
-            },
+        files.update(nav=nav_file, flow_fx=flow_fx_file)
+        reset_confirmation("flows_confirmation", [
+            cutoff, base, *(file.getvalue() if file else b"" for file in files.values()),
+        ])
+        verified = st.checkbox(
+            "Concilié todos los flujos externos y las valuaciones del periodo en la moneda elegida",
+            key=review_key("flows_confirmation"),
         )
+        status.flows_confirmed = verified
+        if nav_file and verified:
+            fx_frame = _checked_input("FX de los flujos", _csv, flow_fx_file) if flow_fx_file else pd.DataFrame()
+            flows = []
+            for event in period_events:
+                amount = _native_flow_amount(event)
+                if event.currency != base:
+                    needed = {"Fecha", "Moneda", "Base", "Tasa", "Fuente"}
+                    if not needed.issubset(fx_frame):
+                        raise PortfolioError("Falta FX fechado para convertir los flujos externos.")
+                    match = fx_frame[
+                        (fx_frame["Fecha"] == event.settled.isoformat())
+                        & (fx_frame["Moneda"] == event.currency)
+                        & (fx_frame["Base"] == base)
+                    ]
+                    if (
+                        len(match) != 1
+                        or not str(match.iloc[0]["Fuente"]).strip()
+                        or float(match.iloc[0]["Tasa"]) <= 0
+                    ):
+                        raise PortfolioError("Un flujo no tiene un único FX positivo y documentado.")
+                    amount *= float(match.iloc[0]["Tasa"])
+                flows.append(Flow(event.settled, amount, event.timing))
+            result = _checked_input("Rendimiento histórico", performance, nav, flows)
+            status.returns = result
+            a, b, c = st.columns(3)
+            a.metric("Ganancia separada de flujos", f"{result['gain']:,.2f} {base}")
+            b.metric("TWR del periodo", f"{result['twr']:.2%}" if result["twr"] is not None else "Pendiente")
+            c.metric("XIRR anualizada", f"{result['xirr']:.2%}" if result["xirr"] is not None else "Pendiente")
+            st.caption(
+                f"TWR: {result['twr_status']} · XIRR: {result['xirr_status']}. "
+                "TWR requiere valuación en cada flujo y momento BOD/EOD confirmado."
+            )
+            _save_evidence(
+                context,
+                "Conservar libro y cálculo de rendimiento",
+                {
+                    "schema": 1,
+                    "result": result,
+                    "base": base,
+                    "flows": [asdict(f) for f in flows],
+                    "ledger": base64.b64encode(source.getvalue()).decode(),
+                    "valuations": base64.b64encode(nav_file.getvalue()).decode(),
+                    "flow_fx": base64.b64encode(flow_fx_file.getvalue()).decode() if flow_fx_file else None,
+                    "repo_values": base64.b64encode(repo_file.getvalue()).decode() if repo_file else None,
+                    "closing_reconciliation": reconciliation,
+                },
+            )
     if not demo:
         _checked_input("Paquete de movimientos", download_review, context, files, cutoff=cutoff, base=base)
 
