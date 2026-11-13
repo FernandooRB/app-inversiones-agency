@@ -14,6 +14,62 @@ RECOVERY = {"token": "seed", "files": {"ledger": LEDGER, "nav": NAV},
             "settings": {"cutoff": "2026-01-10", "base": "MXN"}, "code_changed": False}
 
 
+@pytest.mark.parametrize("token", [None, "seed"])
+def test_clearing_moves_discards_only_current_inputs_and_rotates_both_upload_generations(monkeypatch, token):
+    from types import SimpleNamespace
+
+    import operations_review_ui as ui
+
+    state = {"_ops_context_key": "account-a", "_ops_review_account-a": {**RECOVERY, "token": token},
+             "_ops_open_token_account-a": "prior-open", "_ops_review_account-b": RECOVERY.copy(),
+             "_account_flow": {"keep": "analysis"}, "ops_docs_account-a": b"keep originals",
+             "ops_catalogue_account-a": b"keep catalogue", "_execution_proposal": {"keep": True}}
+    monkeypatch.setattr(ui, "st", SimpleNamespace(session_state=state))
+    names = (*ui.ROLE_WIDGETS, "ops_cutoff", "ops_base", "raw_confirmation", "flows_confirmation",
+             "signature_raw_confirmation", "signature_flows_confirmation", "ops_review_save_panel",
+             "ops_review_download", *("remove_" + role for role in ui.ROLE_LABELS))
+    old_keys = {ui.review_key(name) for name in names}
+    old_keys.update(ui._open_key(name) for name in ("ops_review_open_panel", "ops_review_zip", "ops_review_open"))
+    old_keys.update(ui._context_key(name) for name in (
+        "_ops_last_book", "_ops_book_signature", "_ops_status", "_ops_focus_step", "monitor_confirmation"))
+    for key in old_keys:
+        state[key] = b"discard current input"
+    state["ops_ledger_account-a-other"] = b"keep another exact context"
+    ui.clear_review()
+    assert not old_keys.intersection(state)
+    assert state["_ops_review_account-a"]["files"] == {}
+    assert state["_ops_review_account-a"]["settings"] == {}
+    assert state["_ops_review_account-a"]["token"] != token
+    assert ui._open_key("ops_review_zip") not in old_keys
+    assert state["_ops_review_account-b"] == RECOVERY
+    assert state["_account_flow"] == {"keep": "analysis"}
+    assert state["ops_docs_account-a"] == b"keep originals"
+    assert state["ops_catalogue_account-a"] == b"keep catalogue"
+    assert state["_execution_proposal"] == {"keep": True}
+    assert state["ops_ledger_account-a-other"] == b"keep another exact context"
+
+
+@pytest.mark.parametrize("ledger", [LEDGER, b"invalid ledger"])
+def test_new_review_clears_valid_or_rejected_inputs_and_stays_empty_after_reruns(ledger):
+    app = review_screen({**RECOVERY, "files": {"ledger": ledger, "nav": NAV}})
+    assert not app.exception
+    token_key = next(k for k in app.session_state.filtered_state if k.startswith("_ops_review_"))
+    prior_token = app.session_state[token_key]["token"]
+    if ledger == LEDGER:
+        flow = next(c for c in app.checkbox if c.label.startswith("Concilié todos los flujos"))
+        flow.check().run()
+        assert app.metric
+    app.button(key=next(b.key for b in app.button if b.label == "Vaciar movimientos y empezar")).click().run()
+    assert not app.exception and not app.error and not app.metric and not app.date_input
+    assert app.session_state[token_key]["token"] != prior_token
+    assert app.session_state[token_key]["files"] == {} and app.session_state[token_key]["settings"] == {}
+    assert any("Revisión de movimientos vacía" in item.value for item in app.success)
+    assert not any("Revisión recuperada" in item.value for item in app.info)
+    app.run()
+    assert not app.metric and not app.date_input
+    assert app.session_state[token_key]["files"] == {}
+
+
 def screen(extra=""):
     return AppTest.from_string(f'''
 from io import BytesIO

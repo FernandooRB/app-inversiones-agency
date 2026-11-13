@@ -81,6 +81,7 @@ def test_one_click_seed_has_no_imported_consent_and_never_reads_other_account_to
     assert not any(button.label == "Guardar para continuar después" for button in app.button)
     assert not any(button.label.startswith("Conservar ") for button in app.button)
     assert not any(expander.label == "Abrir paquete de movimientos" for expander in app.expander)
+    assert not any(button.label == "Vaciar movimientos y empezar" for button in app.button)
 
 
 def test_practice_requires_actual_csv_correction_and_new_confirmation_before_zero_twr():
