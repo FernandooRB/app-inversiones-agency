@@ -93,6 +93,8 @@ def _status_upload(label, role, *, key):
 def _open_review_step(area, step):
     st.session_state["operations_tabs"] = area
     st.session_state[_key("_ops_focus_step")] = step
+    if step == "save":
+        st.session_state[review_key("ops_review_save_panel")] = True
 
 
 def _status_panel(context, *, demo=False, review_available=False):

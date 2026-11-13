@@ -100,7 +100,7 @@ def download_review(context, files, *, cutoff, base):
         present, cutoff=cutoff.isoformat(), base=base, **_scope(context)
     )
     with st.expander("Guardar revisión de movimientos", key=review_key("ops_review_save_panel"),
-                     expanded=st.session_state.get(_context_key("_ops_focus_step")) == "save"):
+                     on_change="rerun"):
         st.caption(
             "Descarga este ZIP y comprueba que quedó guardado en tu dispositivo antes de cerrar. "
             "Para continuar, abre Abrir paquete de movimientos, carga el ZIP y pulsa Retomar movimientos. "

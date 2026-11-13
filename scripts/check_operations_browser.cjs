@@ -90,6 +90,10 @@ let browser;
   const saveShortcut=page.getByRole('button',{name:'Guardar para continuar después',exact:true});
   await saveShortcut.focus();await saveShortcut.press('Enter');await settle(page);
   await movements(page).getByRole('button',{name:'Descargar paquete de movimientos',exact:true}).waitFor({state:'visible'});
+  await movements(page).getByText('Guardar revisión de movimientos',{exact:true}).click();await settle(page);
+  assert.equal(await movements(page).getByRole('button',{name:'Descargar paquete de movimientos',exact:true}).isVisible(),false);
+  await saveShortcut.click();await settle(page);
+  await movements(page).getByRole('button',{name:'Descargar paquete de movimientos',exact:true}).waitFor({state:'visible'});
   assert.equal(await page.getByLabel(flowLabel,{exact:true}).isChecked(),false);
   assert.equal(await movements(page).getByTestId('stMetric').count(),0);
   for(const width of [1440,768,390]){
