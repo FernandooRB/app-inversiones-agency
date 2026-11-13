@@ -123,7 +123,7 @@ def download_review(context, files, *, cutoff, base):
                      on_change="rerun"):
         st.caption(
             "Descarga este ZIP y comprueba que quedó guardado en tu dispositivo antes de cerrar. "
-            "Para continuar, abre Abrir paquete de movimientos, carga el ZIP y pulsa Retomar movimientos. "
+            "Para continuar, abre Abrir paquete de movimientos, carga el ZIP y revisa la vista previa. "
             "Al retomarlo se recalculan las vistas y se renuevan las confirmaciones. "
             "El ZIP contiene datos privados sin cifrar; guárdalo como el documento original."
         )

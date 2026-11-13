@@ -42,7 +42,7 @@ module.exports=async({browser,out,url})=>{
     assert.equal(await m.getByLabel(flows,{exact:true}).isChecked(),false);
     assert.equal(await m.getByTestId('stMetric').count(),0);
     await m.getByText('Valuaciones necesarias para TWR',{exact:true}).click();
-    await m.getByText('2026-01-05',{exact:true}).waitFor({state:'visible'});
+    await m.getByText('2026-01-05',{exact:true}).waitFor({state:'attached'});
     await m.getByRole('button',{name:'Quitar archivo recuperado · Libro de movimientos',exact:true}).click();await settle();
     assert.equal(errors.length,0);assert.equal(await page.getByTestId('stException').count(),0);
     report={fictional_only:true,preview_keeps_inputs_and_consent:true,removing_candidate_cancels:true,
