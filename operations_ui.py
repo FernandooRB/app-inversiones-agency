@@ -93,9 +93,11 @@ def _status_upload(label, role, *, key):
 def _open_review_step(area, step):
     st.session_state["operations_tabs"] = area
     st.session_state[_key("_ops_focus_step")] = step
+    if step == "save":
+        st.session_state[review_key("ops_review_save_panel")] = True
 
 
-def _status_panel(context, *, demo=False):
+def _status_panel(context, *, demo=False, review_available=False):
     status = st.session_state.get(_key("_ops_status"))
     if status is None:
         return
@@ -130,6 +132,11 @@ def _status_panel(context, *, demo=False):
     st.write(f"**{snapshot['issue_count']} {pending_label} de revisión** · "
              f"{snapshot['conditional_count']} {conditional_label} · "
              f"{snapshot['input_count']} {files_label}")
+    if review_available and not demo:
+        st.button("Guardar para continuar después", key=_key("review_save_next"),
+                  on_click=_open_review_step, args=("Movimientos", "save"))
+        st.caption("Descarga el ZIP para retomar los CSV, el corte y la moneda. "
+                   "La sesión es temporal; el TXT sólo resume la revisión.")
     if status.failed_ledger:
         st.caption("La revisión de Movimientos falló; se retiraron sus saldos y resultados de este resumen.")
     issues = snapshot["issues"]
@@ -179,7 +186,8 @@ def _status_panel(context, *, demo=False):
         if not status.inputs:
             st.write("Sin archivos CSV aportados en esta revisión.")
         st.caption("Los archivos aportados conservan la validación y las confirmaciones de su etapa. "
-                   "El resumen contiene datos privados de la sesión actual y las huellas completas.")
+                   "El resumen contiene datos privados de la sesión actual y las huellas completas. "
+                   "El TXT no permite retomar los archivos.")
         st.download_button("Descargar resumen de revisión", status_text(snapshot),
                            f"{'demo_' if demo else ''}resumen_revision_{status.cutoff or 'sin_corte'}.txt",
                            "text/plain",
@@ -210,7 +218,7 @@ def _show_operation_error(area, label, error, *, public_validation=True):
 
 def _render_operation_area(context, area, label, render):
     try:
-        render(context)
+        return render(context)
     except (WorkspaceError, MemoryError):
         raise
     except Exception as error:
@@ -670,6 +678,7 @@ def _ledger(context, *, demo=False):
             )
     if not demo:
         _checked_input("Paquete de movimientos", download_review, context, files, cutoff=cutoff, base=base)
+        return True
 
 
 def _implementation(context):
@@ -1226,6 +1235,7 @@ def render_account_operations(*, demo=False):
             ("documents", "Originales GBM", _documents),
         )
         tabs = st.tabs([label for _, label, _ in areas], key="operations_tabs", on_change="rerun")
+        review_available = False
         for tab, (area, label, render) in zip(tabs, areas, strict=True):
             with tab:
                 if demo and area != "ledger":
@@ -1233,9 +1243,11 @@ def render_account_operations(*, demo=False):
                             "Tu revisión continúa en la pestaña de origen.")
                 else:
                     renderer = (lambda ctx: _ledger(ctx, demo=True)) if demo else render
-                    _render_operation_area(context, area, label, renderer)
+                    available = _render_operation_area(context, area, label, renderer)
+                    if area == "ledger":
+                        review_available = available is True
         with overview:
-            _status_panel(context, demo=demo)
+            _status_panel(context, demo=demo, review_available=review_available)
         st.caption(
             f"Preparación de la vista: {monotonic() - started:.2f} s. "
             "Los cálculos se ejecutan al solicitarlos."

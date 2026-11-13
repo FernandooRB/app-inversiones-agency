@@ -117,13 +117,20 @@ ensure(await origin.getByLabel(flowLabel,{exact:true}).isChecked(),'Original flo
 ensure(await origin.getByLabel(rawLabel,{exact:true}).isChecked(),'Original source confirmation changed');
 await origin.getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('0.00%',{exact:true}).waitFor({state:'visible'});
 ensure(await origin.getByRole('button',{name:'Remove operations.zip',exact:true}).count()===1,'Original file changed');
+await tap(f.getByRole('button',{name:'Guardar para continuar después',exact:true}),'Guardar para continuar después');await settle(p,f);
+const saved=await download(p,origin.getByRole('button',{name:'Descargar paquete de movimientos',exact:true}),'movimientos_2026-01-10.zip','touch_operations.zip');
+ensure(saved.subarray(0,4).equals(Buffer.from([80,75,3,4])),'Native download is not a ZIP');
+ensure(await origin.getByLabel(flowLabel,{exact:true}).isChecked(),'Saving changed flow confirmation');
+ensure(await origin.getByLabel(rawLabel,{exact:true}).isChecked(),'Saving changed source confirmation');
+await origin.getByRole('button',{name:'Descargar paquete de movimientos',exact:true}).scrollIntoViewIfNeeded();
+await page.screenshot({path:folder+'/touch-save.png'});
 await tap(origin.getByRole('button',{name:'Quitar archivo recuperado · Libro de movimientos',exact:true}),'Retirar libro ficticio de prueba');
 await origin.getByText('Importa el libro para revisar saldos y flujos',{exact:false}).waitFor({state:'visible'});
 ensure(metrics.every(x=>x.width>=43.9&&x.height>=43.9),'Touch target below 44px: '+JSON.stringify(metrics.filter(x=>x.width<43.9||x.height<43.9)));
 await p.close();
 const evidence={reference_commit:meta.commit,checked_at_utc:new Date().toISOString(),viewport:geometry,
   browser:'Chromium/Edge touch emulation',physical_device:false,human_test:false,
-  fictional_only:true,tap_navigation:true,native_file_chooser:true,native_csv_download:true,native_txt_download:true,
+  fictional_only:true,touch_save_shortcut:true,native_zip_download:true,saving_preserves_confirmations:true,tap_navigation:true,native_file_chooser:true,native_csv_download:true,native_txt_download:true,
   complete_dates_do_not_confirm:true,twr_zero:true,exact_cent_preserved:true,hashes_match_reference:true,
   reset_verified:true,original_tab_preserved:true,synthetic_inputs_removed:true,owned_pages_closed:true,owned_browser_closed:false,
   page_overflow:false,target_measurements:metrics,targets_under_44px:metrics.filter(x=>x.height<43.9||x.width<43.9),

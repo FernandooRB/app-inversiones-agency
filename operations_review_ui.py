@@ -99,8 +99,11 @@ def download_review(context, files, *, cutoff, base):
     _manifest, contents = build_operations_review(
         present, cutoff=cutoff.isoformat(), base=base, **_scope(context)
     )
-    with st.expander("Guardar revisión de movimientos", key=review_key("ops_review_save_panel")):
+    with st.expander("Guardar revisión de movimientos", key=review_key("ops_review_save_panel"),
+                     on_change="rerun"):
         st.caption(
+            "Descarga este ZIP y comprueba que quedó guardado en tu dispositivo antes de cerrar. "
+            "Para continuar, abre Abrir paquete de movimientos, carga el ZIP y pulsa Retomar movimientos. "
             "Al retomarlo se recalculan las vistas y se renuevan las confirmaciones. "
             "El ZIP contiene datos privados sin cifrar; guárdalo como el documento original."
         )

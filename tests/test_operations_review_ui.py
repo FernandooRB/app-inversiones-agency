@@ -137,3 +137,44 @@ with patch.object(st,"file_uploader",side_effect=uploaded):
     assert not app.exception and app.error
     assert app.session_state["_ops_review_temporary"]["token"] == "seed"
     assert app.session_state["_ops_last_book_temporary"]["book"]["cash"]["MXN"] == 150
+
+
+@pytest.mark.parametrize("nav", [NAV, b"Fecha,NAV\n2026-01-01,100\n2026-01-10,150\n"])
+def test_save_shortcut_opens_download_without_confirming_even_an_incomplete_review(nav):
+    recovery = {**RECOVERY, "files": {"ledger": LEDGER, "nav": nav}}
+    app = review_screen(recovery)
+    assert not app.error and not app.exception and not app.metric
+    button = next(b for b in app.button if b.label == "Guardar para continuar después")
+    button.click().run()
+    assert not app.error and not app.exception and not app.metric
+    assert all(not item.value for item in app.checkbox)
+    assert any(e.label == "Guardar revisión de movimientos" and e.proto.expanded for e in app.expander)
+    assert any("el TXT sólo resume" in c.value for c in app.caption)
+
+
+@pytest.mark.parametrize("files", [{}, {"ledger": LEDGER, "nav": b"Fecha,NAV\ninvalid,100\n"}])
+def test_missing_or_rejected_input_cannot_offer_a_stale_save_shortcut(files):
+    app = review_screen(RECOVERY)
+    assert any(b.label == "Guardar para continuar después" for b in app.button)
+    key = next(k for k in app.session_state.filtered_state if k.startswith("_ops_review_"))
+    app.session_state[key]["files"] = files
+    app.run()
+    assert not app.exception
+    assert not any(b.label == "Guardar para continuar después" for b in app.button)
+    assert not app.metric
+
+
+def review_screen(recovery):
+    return AppTest.from_string(f'''
+from hashlib import sha256
+from unittest.mock import patch
+import streamlit as st
+import operations_ui as ui
+context_key=sha256(str((None,None,None)).encode()).hexdigest()[:16]
+st.session_state.setdefault("_ops_review_"+context_key, {recovery!r})
+with patch.object(st,"file_uploader",return_value=None), \
+     patch.object(ui,"_context",return_value=(None,None,None,None)), \
+     patch.object(ui,"_implementation"), patch.object(ui,"_feeds"), \
+     patch.object(ui,"_wealth"), patch.object(ui,"_documents"):
+    ui.render_account_operations()
+''', default_timeout=40).run()

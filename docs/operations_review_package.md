@@ -5,6 +5,16 @@ permite descargar un ZIP incluso si todavía faltan datos o confirmaciones. Cons
 los CSV cargados, el corte del libro y la moneda elegida. Sirve para continuar una
 revisión en el piloto gratuito, donde la sesión puede desaparecer.
 
+El panel **Estado de la revisión** ofrece **Guardar para continuar después**
+cuando el paquete puede generarse con los insumos actuales. La acción abre el
+apartado de descarga en Movimientos; no guarda nada por sí sola. Descarga el ZIP
+y comprueba que quedó en tu dispositivo antes de cerrar la pestaña.
+
+**El TXT sólo resume el estado y sus pendientes. No permite retomar los CSV.**
+El acceso al ZIP no aparece en el demo, sin libro o cuando un insumo rechazado
+impide generar el paquete. No se muestra un mensaje de guardado completado sólo
+por pulsar el acceso o el botón de descarga.
+
 Puede incluir el libro, controles de cierre, cotizaciones, FX del cierre, valores
 de reportos, NAV histórico y FX de flujos. Se conservan los bytes originales:
 el paquete no corrige centavos, completa valores vacíos ni clasifica transferencias.
