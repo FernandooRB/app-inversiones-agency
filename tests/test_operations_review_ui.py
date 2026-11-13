@@ -29,7 +29,8 @@ def test_clearing_moves_discards_only_current_inputs_and_rotates_both_upload_gen
              "signature_raw_confirmation", "signature_flows_confirmation", "ops_review_save_panel",
              "ops_review_download", *("remove_" + role for role in ui.ROLE_LABELS))
     old_keys = {ui.review_key(name) for name in names}
-    old_keys.update(ui._open_key(name) for name in ("ops_review_open_panel", "ops_review_zip", "ops_review_open"))
+    old_keys.update(ui._open_key(name) for name in (
+        "ops_review_open_panel", "ops_review_zip", "ops_review_open"))
     old_keys.update(ui._context_key(name) for name in (
         "_ops_last_book", "_ops_book_signature", "_ops_status", "_ops_focus_step", "monitor_confirmation"))
     for key in old_keys:

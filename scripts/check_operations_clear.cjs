@@ -13,7 +13,14 @@ module.exports=async({browser,out,url})=>{
   const choose=async(p,label,file)=>{await panel(p).getByTestId('stFileUploader').filter({hasText:label}).locator('input[type=file]').setInputFiles(out+'/'+file);await panel(p).getByRole('button',{name:'Remove '+file,exact:true}).waitFor({state:'visible'});await settle(p);};
   const open=async p=>{await p.goto(url);await panel(p).getByText('Abrir paquete de movimientos',{exact:true}).click();await choose(p,'Paquete de movimientos ZIP','operations.zip');await panel(p).getByRole('button',{name:'Retomar movimientos',exact:true}).click();await settle(p);};
   const confirm=async p=>{await panel(p).getByText(raw,{exact:true}).click();await settle(p);await panel(p).getByText(flow,{exact:true}).click();await settle(p);await panel(p).getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('0.00%',{exact:true}).waitFor({state:'visible'});};
-  const empty=async p=>{await panel(p).getByText('Revisión de movimientos vacía. Carga un libro o abre un ZIP para empezar.',{exact:true}).waitFor({state:'visible'});assert.equal(await panel(p).getByTestId('stMetric').count(),0);assert.equal(await panel(p).getByTestId('stDateInput').count(),0);assert.equal(await panel(p).getByRole('button',{name:/^Remove /}).count(),0);assert.equal(await panel(p).getByText('Vista previa del paquete',{exact:true}).count(),0);assert.equal(await p.getByRole('button',{name:'Guardar para continuar después',exact:true}).count(),0);assert.equal(await panel(p).getByText(/Recuperado:/).count(),0);assert.equal(await panel(p).getByTestId('stAlert').filter({hasText:'Revisa '}).count(),0);};
+  const empty=async p=>{
+    const m=panel(p);
+    await m.getByText('Revisión de movimientos vacía. Carga un libro o abre un ZIP para empezar.',{exact:true}).waitFor({state:'visible'});
+    for(const absent of [m.getByTestId('stMetric'),m.getByTestId('stDateInput'),
+      m.getByRole('button',{name:/^Remove /}),m.getByText('Vista previa del paquete',{exact:true}),
+      p.getByRole('button',{name:'Guardar para continuar después',exact:true}),
+      m.getByText(/Recuperado:/),m.getByRole('alert')])await absent.first().waitFor({state:'detached'});
+  };
   const clear=async p=>{const button=panel(p).getByRole('button',{name:'Vaciar movimientos y empezar',exact:true});if(!await button.isVisible())await panel(p).getByText('Nueva revisión de movimientos',{exact:true}).click();await button.click();await settle(p);await empty(p);};
   let report;
   try{
