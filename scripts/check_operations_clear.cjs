@@ -28,7 +28,14 @@ module.exports=async({browser,out,url})=>{
     await open(page);await confirm(page);await open(other);await confirm(other);
     await panel(page).getByText('Nueva revisión de movimientos',{exact:true}).click();await settle(page);
     assert(await panel(page).getByLabel(flow,{exact:true}).isChecked());
-    for(const width of [1440,768,390]){await page.setViewportSize({width,height:width===390?844:900});await panel(page).getByRole('button',{name:'Vaciar movimientos y empezar',exact:true}).evaluate(el=>el.scrollIntoView({block:'center'}));await page.screenshot({path:out+`/clear-review-${width}.png`});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);}
+    const disclosure=panel(page).getByTestId('stExpander').filter({hasText:'Nueva revisión de movimientos'});
+    for(const width of [1440,768,390]){
+      await page.setViewportSize({width,height:width===390?844:900});await page.waitForTimeout(350);
+      await disclosure.scrollIntoViewIfNeeded();await page.waitForTimeout(350);
+      assert((await disclosure.boundingBox()).height>100,'Clear disclosure did not finish expanding');
+      await page.screenshot({path:out+`/clear-review-${width}.png`});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+    }
     const action=panel(page).getByRole('button',{name:'Vaciar movimientos y empezar',exact:true});await action.focus();await action.press('Enter');await settle(page);await empty(page);
     assert(await panel(other).getByLabel(flow,{exact:true}).isChecked());await panel(other).getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('0.00%',{exact:true}).waitFor({state:'visible'});
     await page.getByRole('tab',{name:'Originales GBM',exact:true}).click();await page.getByRole('tab',{name:'Movimientos',exact:true}).click();await settle(page);await empty(page);
