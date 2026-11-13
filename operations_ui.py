@@ -28,6 +28,7 @@ from operations_demo import DEMO_CONTEXT, DEMO_NAV_COMPLETE, DEMO_NAV_INVALID, d
 from operations_jobs import refresh_subscription
 from operations_review_ui import (
     download_review,
+    new_review,
     open_review,
     reset_confirmation,
     review_defaults,
@@ -425,6 +426,7 @@ def _ledger(context, *, demo=False):
     st.subheader("Movimientos y rendimiento histórico")
     st.caption("Títulos a fecha de operación, efectivo a liquidación y pendientes separados. MXN y USD.")
     if not demo:
+        new_review()
         open_review(context)
     _template("Plantilla de libro normalizado", COLUMNS, "ledger_template")
     with st.expander("Cómo registrar reportos"):

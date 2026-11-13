@@ -35,6 +35,43 @@ def review_defaults():
     return _recovery().get("settings", {})
 
 
+def _open_key(name):
+    token = st.session_state.get(_context_key("_ops_open_token"))
+    return _context_key(name) + ("_" + token if token else "")
+
+
+def clear_review():
+    """Discard only the current movement inputs; never clear other tools or accounts."""
+    names = (*ROLE_WIDGETS, "ops_cutoff", "ops_base", "raw_confirmation", "flows_confirmation",
+             "signature_raw_confirmation", "signature_flows_confirmation", "ops_review_save_panel",
+             "ops_review_download", *("remove_" + role for role in ROLE_LABELS))
+    keys = {_context_key(name) for name in names} | {review_key(name) for name in names}
+    keys.update(_open_key(name) for name in ("ops_review_open_panel", "ops_review_zip", "ops_review_open"))
+    keys.update(_context_key(name) for name in (
+        "_ops_last_book", "_ops_book_signature", "_ops_status", "_ops_focus_step", "monitor_confirmation",
+    ))
+    for key in keys:
+        st.session_state.pop(key, None)
+    st.session_state[_context_key("_ops_review")] = {"token": uuid4().hex, "files": {}, "settings": {}}
+    st.session_state[_context_key("_ops_open_token")] = uuid4().hex
+    st.session_state[_context_key("_ops_cleared_notice")] = True
+    st.session_state["operations_tabs"] = "Movimientos"
+
+
+def new_review():
+    present = _has_current_inputs() or st.session_state.get(_open_key("ops_review_zip")) is not None
+    if present:
+        st.session_state.pop(_context_key("_ops_cleared_notice"), None)
+        with st.expander("Nueva revisión de movimientos"):
+            st.caption("Vacía los CSV de Movimientos, el ZIP seleccionado, corte, moneda y confirmaciones "
+                       "de esta revisión. Descarga tu ZIP antes si quieres retomarla. "
+                       "Tus descargas, expedientes y archivos de las otras pestañas se conservan.")
+            st.button("Vaciar movimientos y empezar", key=_context_key("ops_review_clear"),
+                      on_click=clear_review)
+    elif st.session_state.get(_context_key("_ops_cleared_notice")):
+        st.success("Revisión de movimientos vacía. Carga un libro o abre un ZIP para empezar.")
+
+
 def _scope(context):
     if context is None:
         return {"case_id": None, "account_id": None}
@@ -49,9 +86,9 @@ def _has_current_inputs():
 
 
 def open_review(context):
-    with st.expander("Abrir paquete de movimientos", key=_context_key("ops_review_open_panel")):
+    with st.expander("Abrir paquete de movimientos", key=_open_key("ops_review_open_panel")):
         package = st.file_uploader(
-            "Paquete de movimientos ZIP", type=["zip"], key=_context_key("ops_review_zip")
+            "Paquete de movimientos ZIP", type=["zip"], key=_open_key("ops_review_zip")
         )
         if package:
             try:
@@ -70,7 +107,7 @@ def open_review(context):
                     st.warning("Se reemplazarán los CSV, el corte y la moneda de esta revisión. "
                                "Conserva una copia de lo que necesites antes de continuar.")
                 label = "Reemplazar revisión con este paquete" if replacing else "Retomar movimientos"
-                if st.button(label, key=_context_key("ops_review_open")):
+                if st.button(label, key=_open_key("ops_review_open")):
                     st.session_state[_context_key("_ops_review")] = {
                         "token": uuid4().hex, "files": files,
                         "settings": {"cutoff": manifest["cutoff"], "base": manifest["base"]},
@@ -78,7 +115,7 @@ def open_review(context):
                     }
                     st.session_state.pop(_context_key("_ops_last_book"), None)
                     st.rerun()
-    if _recovery():
+    if _recovery().get("settings"):
         st.info("Revisión recuperada. Se recalculan las vistas; confirma otra vez las fuentes y los flujos.")
         if _recovery().get("code_changed"):
             st.caption("El motor cambió desde la descarga; la revisión usa la versión actual.")

@@ -53,6 +53,23 @@ El ZIP contiene datos privados **sin cifrar**. Consérvalo con el mismo cuidado 
 el documento original. La descarga no convierte la sesión de Community Cloud en
 almacenamiento permanente ni contrata un servicio.
 
+## Empezar una revisión nueva
+
+En Movimientos, abre **Nueva revisión de movimientos** y pulsa
+**Vaciar movimientos y empezar**. Abrir ese apartado sólo explica la acción.
+Descarga primero el ZIP si quieres retomar la revisión más adelante.
+
+La acción retira los CSV cargados o recuperados en Movimientos, el ZIP seleccionado,
+el corte y moneda, las confirmaciones y la referencia del libro de esa cuenta en
+esta pestaña. También funciona con un libro o ZIP rechazado. Una revisión vacía
+permite cargar otro libro o abrir un paquete; al recuperarlo hay que confirmar de
+nuevo sus fuentes y flujos.
+
+Las descargas en tu dispositivo, los expedientes, las otras cuentas y los archivos
+de Implementación, Fuentes y alertas, Patrimonio y Originales GBM se conservan.
+La acción vacía el estado de trabajo de Movimientos; no es un borrado certificado
+del servidor, sus registros, las copias descargadas ni el almacenamiento externo.
+
 ## Formato y validación
 
 El formato `sig.operations.review`, versión 1, incluye `review.json` e insumos
