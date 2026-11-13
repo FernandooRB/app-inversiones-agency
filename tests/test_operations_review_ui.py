@@ -149,7 +149,9 @@ from operations_review import build_operations_review
 from operations_review_ui import open_review
 st.session_state.setdefault("_ops_review_temporary", {{}} if {manual!r} else {RECOVERY!r})
 st.session_state.setdefault("raw_confirmation_temporary_seed",True)
-st.session_state.setdefault("_ops_last_book_temporary",{{"unchanged":True}})
+if not st.session_state.get("_preview_initialized"):
+    st.session_state["_ops_last_book_temporary"]={{"unchanged":True}}
+    st.session_state["_preview_initialized"]=True
 if {manual!r}:
     st.session_state.setdefault("ops_ledger_temporary",BytesIO({LEDGER!r}))
 currency=st.selectbox("Paquete de prueba",["USD","MXN"])
