@@ -91,7 +91,7 @@ let browser;
   await saveShortcut.focus();await saveShortcut.press('Enter');await settle(page);
   await movements(page).getByRole('button',{name:'Descargar paquete de movimientos',exact:true}).waitFor({state:'visible'});
   await movements(page).getByText('Guardar revisión de movimientos',{exact:true}).click();await settle(page);
-  assert.equal(await movements(page).getByRole('button',{name:'Descargar paquete de movimientos',exact:true}).isVisible(),false);
+  await movements(page).getByRole('button',{name:'Descargar paquete de movimientos',exact:true}).waitFor({state:'hidden'});
   await saveShortcut.click();await settle(page);
   await movements(page).getByRole('button',{name:'Descargar paquete de movimientos',exact:true}).waitFor({state:'visible'});
   assert.equal(await page.getByLabel(flowLabel,{exact:true}).isChecked(),false);
@@ -295,7 +295,7 @@ let browser;
   fs.writeFileSync(path.join(out,'browser_verification.json'),JSON.stringify({fictional_only:true,visible_save_shortcut:true,keyboard_save_access:true,incomplete_review_native_zip_restored:true,save_does_not_confirm:true,no_stale_save_after_rejection:true,next_step_guidance:true,calendar_does_not_confirm_flows:true,summary_action_preserves_pending:true,native_zip_download:true,new_session_reopen:true,cutoff_and_currency_restored:true,nondefault_usd_restored:true,confirmations_reset:true,cent_difference_preserved:true,eod_neutral_twr_zero:true,currency_change_invalidates_consent:true,replacement_removal_does_not_resurrect:true,bad_zip_keeps_current_review:true,ledger_removal_clears_screen:true,validation_names_input:true,bad_nav_has_no_stale_return:true,other_tabs_work_after_bad_nav:true,removing_bad_nav_recovers:true,widths:[1440,768,390],page_errors:errors},null,2));
   console.log('Operations browser verification passed with fictional data');
 })().catch(async e=>{
-  console.error(e.message);
+  console.error(e.stack||e.message);
   if(browser){let n=0;for(const context of browser.contexts())for(const page of context.pages()){
     await page.screenshot({path:path.join(out,`failure-${n}.png`)}).catch(()=>{});
     await page.locator('body').ariaSnapshot().then(text=>fs.writeFileSync(path.join(out,`failure-${n}.txt`),text)).catch(()=>{});
