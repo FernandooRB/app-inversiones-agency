@@ -30,7 +30,7 @@ const tap=async(locator,label)=>{
 const chooser=async(pp,ff,panel,label,file)=>{
   await settle(pp,ff);
   const area=panel.getByTestId('stFileUploader').filter({hasText:label});
-  const trigger=area.getByRole('button',{name:/Upload|Browse files/}).first();
+  const trigger=area.getByRole('button',{name:/Upload|Browse files|Add files/}).first();
   const [selected]=await Promise.all([
     pp.waitForEvent('filechooser',{timeout:20000}),
     tap(trigger,'Seleccionar archivo: '+label),
