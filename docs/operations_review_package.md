@@ -21,8 +21,17 @@ el paquete no corrige centavos, completa valores vacíos ni clasifica transferen
 No incluye PDF/XML de la pestaña Originales GBM, propuestas de implementación,
 credenciales, el expediente completo ni resultados financieros archivados.
 
-Para retomarlo, abre **Abrir paquete de movimientos**, carga el ZIP y pulsa
-**Retomar movimientos**. Se reemplazan los insumos de esa revisión en la sesión,
+Para retomarlo, abre **Abrir paquete de movimientos** y carga el ZIP. La vista
+previa indica el corte, la moneda y los tipos de CSV incluidos. Cargarlo sólo
+valida el paquete y muestra esa vista: los datos y confirmaciones actuales siguen
+en su lugar. Los CSV aún requieren sus validaciones y revisión financiera.
+
+Sin insumos abiertos, pulsa **Retomar movimientos**. Si ya hay CSV cargados o
+recuperados, se muestra un aviso y el botón **Reemplazar revisión con este paquete**.
+Conserva una copia de la revisión actual si deseas retomarla después. Un ZIP
+rechazado muestra su motivo sin ofrecer la apertura ni reemplazar los datos.
+
+Al pulsar el botón se reemplazan los insumos de esa revisión en la sesión,
 se recuperan corte y moneda y se recalculan las vistas con el motor vigente.
 Las confirmaciones de precios y flujos empiezan desmarcadas. Un cambio de insumos,
 corte o moneda invalida las confirmaciones correspondientes y retira el resultado

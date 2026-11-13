@@ -133,10 +133,49 @@ def uploaded(label,**kwargs):
 with patch.object(st,"file_uploader",side_effect=uploaded):
     _ledger((None,None,None,None))
 ''', default_timeout=40).run()
-    app.button(key="ops_review_open_temporary").click().run()
     assert not app.exception and app.error
+    assert not any(button.key == "ops_review_open_temporary" for button in app.button)
     assert app.session_state["_ops_review_temporary"]["token"] == "seed"
     assert app.session_state["_ops_last_book_temporary"]["book"]["cash"]["MXN"] == 150
+
+
+@pytest.mark.parametrize("manual", [False, True])
+def test_valid_package_preview_keeps_current_inputs_and_consent_until_explicit_replacement(manual):
+    app = AppTest.from_string(f'''
+from io import BytesIO
+from unittest.mock import patch
+import streamlit as st
+from operations_review import build_operations_review
+from operations_review_ui import open_review
+st.session_state.setdefault("_ops_review_temporary", {{}} if {manual!r} else {RECOVERY!r})
+st.session_state.setdefault("raw_confirmation_temporary_seed",True)
+st.session_state.setdefault("_ops_last_book_temporary",{{"unchanged":True}})
+if {manual!r}:
+    st.session_state.setdefault("ops_ledger_temporary",BytesIO({LEDGER!r}))
+currency=st.selectbox("Paquete de prueba",["USD","MXN"])
+_,bundle=build_operations_review({{"ledger":{LEDGER!r}}},cutoff="2026-01-09",base=currency)
+with patch.object(st,"file_uploader",return_value=BytesIO(bundle)):
+    open_review((None,None,None,None))
+''', default_timeout=40).run()
+    assert not app.error and not app.exception
+    assert app.button(key="ops_review_open_temporary").label == "Reemplazar revisión con este paquete"
+    assert any("Moneda: USD" in item.value and "2026-01-09" in item.value for item in app.text)
+    assert app.session_state["_ops_last_book_temporary"] == {"unchanged": True}
+    if not manual:
+        assert app.session_state["_ops_review_temporary"]["files"] == RECOVERY["files"]
+    app.selectbox[0].select("MXN").run()
+    assert not app.error and not app.exception
+    assert any("Moneda: MXN" in item.value for item in app.text)
+    assert app.session_state["raw_confirmation_temporary_seed"] is True
+    assert app.session_state["_ops_last_book_temporary"] == {"unchanged": True}
+    if not manual:
+        assert app.session_state["_ops_review_temporary"]["token"] == "seed"
+    app.button(key="ops_review_open_temporary").click().run()
+    assert not app.error and not app.exception
+    opened = app.session_state["_ops_review_temporary"]
+    assert opened["settings"] == {"cutoff": "2026-01-09", "base": "MXN"}
+    assert opened["files"] == {"ledger": LEDGER}
+    assert "_ops_last_book_temporary" not in app.session_state
 
 
 @pytest.mark.parametrize("nav", [NAV, b"Fecha,NAV\n2026-01-01,100\n2026-01-10,150\n"])

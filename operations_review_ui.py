@@ -14,6 +14,8 @@ ROLE_LABELS = {
     "fx": "FX del cierre", "repo_values": "Valuaciones de reportos", "nav": "Valuaciones históricas",
     "flow_fx": "FX de los flujos",
 }
+ROLE_WIDGETS = ("ops_ledger", "ops_closing_controls", "ops_raw", "ops_book_fx",
+                "ops_repo_values", "ops_nav", "ops_flow_fx")
 
 
 def _context_key(name):
@@ -40,24 +42,42 @@ def _scope(context):
     return {"case_id": state["id"] if state and account else None, "account_id": account}
 
 
+def _has_current_inputs():
+    return bool(_recovery().get("files")) or any(
+        st.session_state.get(review_key(name)) is not None for name in ROLE_WIDGETS
+    )
+
+
 def open_review(context):
     with st.expander("Abrir paquete de movimientos", key=_context_key("ops_review_open_panel")):
         package = st.file_uploader(
             "Paquete de movimientos ZIP", type=["zip"], key=_context_key("ops_review_zip")
         )
-        if package and st.button("Retomar movimientos", key=_context_key("ops_review_open")):
+        if package:
             try:
                 manifest, files = read_operations_review(package.getvalue(), **_scope(context))
             except PortfolioError as exc:
                 st.error(str(exc))
             else:
-                st.session_state[_context_key("_ops_review")] = {
-                    "token": uuid4().hex, "files": files,
-                    "settings": {"cutoff": manifest["cutoff"], "base": manifest["base"]},
-                    "code_changed": manifest["code_sha256"] != review_code_fingerprints(),
-                }
-                st.session_state.pop(_context_key("_ops_last_book"), None)
-                st.rerun()
+                st.write("**Vista previa del paquete**")
+                st.text(f"Corte: {manifest['cutoff']} · Moneda: {manifest['base']} · "
+                        f"{len(files)} archivos CSV")
+                st.caption("Incluye: " + ", ".join(ROLE_LABELS[role] for role in files) + ".")
+                st.caption("Cargar el ZIP no cambia la revisión. Las vistas se recalculan al abrirlo; "
+                           "el paquete no confirma fuentes ni flujos.")
+                replacing = _has_current_inputs()
+                if replacing:
+                    st.warning("Se reemplazarán los CSV, el corte y la moneda de esta revisión. "
+                               "Conserva una copia de lo que necesites antes de continuar.")
+                label = "Reemplazar revisión con este paquete" if replacing else "Retomar movimientos"
+                if st.button(label, key=_context_key("ops_review_open")):
+                    st.session_state[_context_key("_ops_review")] = {
+                        "token": uuid4().hex, "files": files,
+                        "settings": {"cutoff": manifest["cutoff"], "base": manifest["base"]},
+                        "code_changed": manifest["code_sha256"] != review_code_fingerprints(),
+                    }
+                    st.session_state.pop(_context_key("_ops_last_book"), None)
+                    st.rerun()
     if _recovery():
         st.info("Revisión recuperada. Se recalculan las vistas; confirma otra vez las fuentes y los flujos.")
         if _recovery().get("code_changed"):

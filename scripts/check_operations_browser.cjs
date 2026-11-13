@@ -260,8 +260,8 @@ let browser;
   assert.equal(await restored.getByText('Recuperado: Valuaciones históricas.',{exact:true}).count(),0);
   await selectFile(restored,'Paquete de movimientos ZIP','invalid.zip');
   await restored.getByRole('button',{name:'Remove invalid.zip',exact:true}).waitFor({state:'visible'});
-  await restored.getByRole('button',{name:'Retomar movimientos',exact:true}).click();
   await restored.getByText(/El paquete de movimientos no supera/).waitFor({state:'visible'});
+  assert.equal(await restored.getByRole('button',{name:'Reemplazar revisión con este paquete',exact:true}).count(),0);
   assert.equal(await movements(restored).getByTestId('stDateInput').locator('input').inputValue(),'2026-01-10');
   await restored.getByRole('button',{name:'Remove invalid.zip',exact:true}).click();
   await restored.getByText(/El paquete de movimientos no supera/).waitFor({state:'detached'});
@@ -292,6 +292,7 @@ let browser;
   await restored.getByText(/Importa el libro para revisar saldos y flujos/).waitFor({state:'visible'});
   assert.equal(errors.length,0);assert.equal(await restored.getByTestId('stException').count(),0);
   await require('./check_operations_touch.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
+  await require('./check_operations_replace.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
   fs.writeFileSync(path.join(out,'browser_verification.json'),JSON.stringify({fictional_only:true,visible_save_shortcut:true,keyboard_save_access:true,incomplete_review_native_zip_restored:true,save_does_not_confirm:true,no_stale_save_after_rejection:true,next_step_guidance:true,calendar_does_not_confirm_flows:true,summary_action_preserves_pending:true,native_zip_download:true,new_session_reopen:true,cutoff_and_currency_restored:true,nondefault_usd_restored:true,confirmations_reset:true,cent_difference_preserved:true,eod_neutral_twr_zero:true,currency_change_invalidates_consent:true,replacement_removal_does_not_resurrect:true,bad_zip_keeps_current_review:true,ledger_removal_clears_screen:true,validation_names_input:true,bad_nav_has_no_stale_return:true,other_tabs_work_after_bad_nav:true,removing_bad_nav_recovers:true,widths:[1440,768,390],page_errors:errors},null,2));
   console.log('Operations browser verification passed with fictional data');
 })().catch(async e=>{

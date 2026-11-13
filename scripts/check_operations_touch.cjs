@@ -124,13 +124,23 @@ ensure(await origin.getByLabel(flowLabel,{exact:true}).isChecked(),'Saving chang
 ensure(await origin.getByLabel(rawLabel,{exact:true}).isChecked(),'Saving changed source confirmation');
 await origin.getByRole('button',{name:'Descargar paquete de movimientos',exact:true}).scrollIntoViewIfNeeded();
 await page.screenshot({path:folder+'/touch-save.png'});
+await chooser(p,f,origin,'Paquete de movimientos ZIP','operations_incomplete.zip');
+ensure(await origin.getByLabel(flowLabel,{exact:true}).isChecked(),'Preview changed flow confirmation');
+await origin.getByTestId('stMetric').filter({hasText:'TWR del periodo'}).getByText('0.00%',{exact:true}).waitFor({state:'visible'});
+const replace=origin.getByRole('button',{name:'Reemplazar revisión con este paquete',exact:true});
+await replace.scrollIntoViewIfNeeded();await page.screenshot({path:folder+'/touch-replace-preview.png'});
+await tap(replace,'Reemplazar revisión con este paquete');await settle(p,f);
+ensure(!await origin.getByLabel(flowLabel,{exact:true}).isChecked(),'Replacement retained flow confirmation');
+ensure(!await origin.getByLabel(rawLabel,{exact:true}).isChecked(),'Replacement retained raw confirmation');
+ensure(await origin.getByTestId('stMetric').count()===0,'Replacement retained old result');
+await f.getByText('4 pendientes de revisión',{exact:true}).waitFor({state:'visible'});
 await tap(origin.getByRole('button',{name:'Quitar archivo recuperado · Libro de movimientos',exact:true}),'Retirar libro ficticio de prueba');
 await origin.getByText('Importa el libro para revisar saldos y flujos',{exact:false}).waitFor({state:'visible'});
 ensure(metrics.every(x=>x.width>=43.9&&x.height>=43.9),'Touch target below 44px: '+JSON.stringify(metrics.filter(x=>x.width<43.9||x.height<43.9)));
 await p.close();
 const evidence={reference_commit:meta.commit,checked_at_utc:new Date().toISOString(),viewport:geometry,
   browser:'Chromium/Edge touch emulation',physical_device:false,human_test:false,
-  fictional_only:true,touch_save_shortcut:true,native_zip_download:true,saving_preserves_confirmations:true,tap_navigation:true,native_file_chooser:true,native_csv_download:true,native_txt_download:true,
+  fictional_only:true,touch_preview_preserves_review:true,touch_replacement_resets_confirmation:true,touch_save_shortcut:true,native_zip_download:true,saving_preserves_confirmations:true,tap_navigation:true,native_file_chooser:true,native_csv_download:true,native_txt_download:true,
   complete_dates_do_not_confirm:true,twr_zero:true,exact_cent_preserved:true,hashes_match_reference:true,
   reset_verified:true,original_tab_preserved:true,synthetic_inputs_removed:true,owned_pages_closed:true,owned_browser_closed:false,
   page_overflow:false,target_measurements:metrics,targets_under_44px:metrics.filter(x=>x.height<43.9||x.width<43.9),
