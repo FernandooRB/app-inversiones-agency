@@ -124,6 +124,7 @@ def clear_review():
     )
     keys = {_context_key(name) for name in names} | {review_key(name) for name in names}
     keys.update(_open_key(name) for name in ("ops_review_open_panel", "ops_review_zip", "ops_review_open"))
+    keys.add("_analysis_memo_" + _context_key("operations_calculations"))
     keys.update(
         _context_key(name)
         for name in (

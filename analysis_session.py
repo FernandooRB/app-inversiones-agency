@@ -4,6 +4,7 @@ import json
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
+from decimal import Decimal
 from hashlib import sha256
 from inspect import getsource
 
@@ -12,6 +13,8 @@ import pandas as pd
 
 
 def _serializable(value):
+    if isinstance(value, Decimal):
+        return {"decimal": str(value)}
     if isinstance(value, (pd.DataFrame, pd.Series)):
         return {
             "data_sha256": sha256(pd.util.hash_pandas_object(value, index=True).values.tobytes()).hexdigest(),

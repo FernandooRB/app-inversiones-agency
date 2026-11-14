@@ -396,3 +396,62 @@ def test_downloadable_practice_preserves_unique_statement_period_and_explicit_fl
     assert draft["rows"][1]["proposal"]["MomentoFlujo"] == "UNKNOWN"
     cover = PdfReader(BytesIO(raw)).pages[0].extract_text()
     assert "EOD" in cover and "2026-01-05 = 150.00 MXN" in cover
+
+
+def test_navigation_and_pdf_reuse_calculations_but_changed_inputs_reset_results_and_consent():
+    from unittest.mock import patch
+
+    from streamlit.testing.v1 import AppTest
+
+    ledger = materialize_draft(ready_draft())
+    nav = b"Fecha,NAV\n2025-12-31,100\n2026-01-05,150\n2026-01-30,150\n"
+    script = f"""
+from hashlib import sha256
+from unittest.mock import patch
+import streamlit as st
+from operations_ui import render_account_operations
+key=sha256(str((None,None,None)).encode()).hexdigest()[:16]
+st.session_state.setdefault('_ops_review_'+key, {{
+    'token':'memo-audit','files':{{'ledger':{ledger!r},'nav':{nav!r}}},
+    'settings':{{'cutoff':'2026-01-30','base':'MXN'}}
+}})
+with patch('operations_ui._context',return_value=(None,None,None,None)):
+    render_account_operations()
+"""
+    with (
+        patch("operations_ui.read_ledger", wraps=read_ledger) as ledger_calls,
+        patch("operations_ui.book_at", wraps=book_at) as book_calls,
+        patch("operations_ui.performance", wraps=performance) as returns_calls,
+        patch("operations_ui.performance_pdf", wraps=performance_pdf) as pdf_calls,
+    ):
+        app = AppTest.from_string(script, default_timeout=40).run()
+
+        def confirmation():
+            return next(c for c in app.checkbox if c.label.startswith("Concilié todos"))
+
+        assert not confirmation().value and returns_calls.call_count == 0
+        confirmation().check().run()
+        app.run()
+        app.run()
+        assert (ledger_calls.call_count, book_calls.call_count, returns_calls.call_count) == (1, 1, 1)
+
+        def prepare_pdf():
+            return next(b for b in app.button if b.label == "Preparar PDF breve")
+
+        prepare_pdf().click().run()
+        prepare_pdf().click().run()
+        assert pdf_calls.call_count == 1 and returns_calls.call_count == 1
+        key = next(k for k in app.session_state if k.startswith("_ops_review_"))
+        recovered = dict(app.session_state[key])
+        recovered.update(
+            token="changed-input", files={**recovered["files"], "nav": nav.replace(b"30,150", b"30,151")}
+        )
+        app.session_state[key] = recovered
+        app.run()
+        assert not confirmation().value and returns_calls.call_count == 1
+        confirmation().check().run()
+        assert returns_calls.call_count == 2
+        assert any(m.label == "Ganancia separada de flujos" and m.value == "1.00 MXN" for m in app.metric)
+        next(b for b in app.button if b.label == "Vaciar movimientos y empezar").click().run()
+        assert not any(k.startswith("_analysis_memo_operations_calculations_") for k in app.session_state)
+        assert not app.error and not app.exception
