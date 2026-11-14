@@ -43,6 +43,10 @@ let browser;
   fs.writeFileSync(path.join(out,'controls.csv'),'Fecha,Tipo,InstrumentoReferencia,Moneda,Saldo,Fuente\n2026-01-10,CASH,,MXN,150.01,Estado ficticio\n');
   fs.writeFileSync(path.join(out,'invalid.zip'),'invalid fictional package');
   browser=await chromium.launch({channel:process.platform==='win32'?'msedge':'chrome',headless:true});
+  if(process.env.SIG_GBM_ONLY==='1'){
+    await require('./check_gbm_review.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
+    console.log('GBM browser verification passed with fictional data');return;
+  }
   const page=await browser.newPage({viewport:{width:1440,height:900}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(`http://127.0.0.1:${port}/`);
@@ -294,6 +298,7 @@ let browser;
   await require('./check_operations_touch.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
   await require('./check_operations_replace.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
   await require('./check_operations_clear.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
+  await require('./check_gbm_review.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
   fs.writeFileSync(path.join(out,'browser_verification.json'),JSON.stringify({fictional_only:true,visible_save_shortcut:true,keyboard_save_access:true,incomplete_review_native_zip_restored:true,save_does_not_confirm:true,no_stale_save_after_rejection:true,next_step_guidance:true,calendar_does_not_confirm_flows:true,summary_action_preserves_pending:true,native_zip_download:true,new_session_reopen:true,cutoff_and_currency_restored:true,nondefault_usd_restored:true,confirmations_reset:true,cent_difference_preserved:true,eod_neutral_twr_zero:true,currency_change_invalidates_consent:true,replacement_removal_does_not_resurrect:true,bad_zip_keeps_current_review:true,ledger_removal_clears_screen:true,validation_names_input:true,bad_nav_has_no_stale_return:true,other_tabs_work_after_bad_nav:true,removing_bad_nav_recovers:true,widths:[1440,768,390],page_errors:errors},null,2));
   console.log('Operations browser verification passed with fictional data');
 })().catch(async e=>{

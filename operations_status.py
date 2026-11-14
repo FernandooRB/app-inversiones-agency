@@ -6,13 +6,20 @@ from hashlib import sha256
 from pathlib import Path
 
 LABELS = {
-    "ledger": "Libro de movimientos", "controls": "Controles de cierre",
-    "quotes": "Cotizaciones de cierre", "fx": "FX del cierre",
-    "repo_values": "Valuaciones de reportos", "nav": "Valuaciones históricas",
+    "ledger": "Libro de movimientos",
+    "controls": "Controles de cierre",
+    "quotes": "Cotizaciones de cierre",
+    "fx": "FX del cierre",
+    "repo_values": "Valuaciones de reportos",
+    "nav": "Valuaciones históricas",
     "flow_fx": "FX de los flujos",
 }
-KINDS = {"CASH": "Efectivo liquidado", "PENDING": "Efectivo pendiente",
-         "POSITION": "Títulos", "REPO": "Capital de reporto"}
+KINDS = {
+    "CASH": "Efectivo liquidado",
+    "PENDING": "Efectivo pendiente",
+    "POSITION": "Títulos",
+    "REPO": "Capital de reporto",
+}
 
 
 @dataclass
@@ -31,6 +38,7 @@ class OperationStatus:
     errors: list = field(default_factory=list)
     documents: list = field(default_factory=list)
     failed_ledger: bool = False
+    performance_summary: dict | None = None
 
     def input(self, role, source):
         if source is not None:
@@ -42,6 +50,7 @@ class OperationStatus:
         if area == "ledger":
             self.failed_ledger = True
             self.book = self.valuation = self.returns = None
+            self.performance_summary = None
 
     def evidence(self, role):
         source = self.inputs.get(role)
@@ -58,8 +67,10 @@ class OperationStatus:
             "summary": "Disponible con el estado actual",
         }
         step, title, detail, action = (
-            "ledger", "Cargar el libro de movimientos",
-            "En Movimientos, carga el libro o abre un paquete de revisión.", "Abrir Movimientos",
+            "ledger",
+            "Cargar el libro de movimientos",
+            "En Movimientos, carga el libro o abre un paquete de revisión.",
+            "Abrir Movimientos",
         )
         if self.failed_ledger:
             states.update(calendar="Sin validar", flows="Sin validar", returns="No disponible")
@@ -72,35 +83,40 @@ class OperationStatus:
         elif self.book is not None:
             if "nav" not in self.inputs:
                 step, title, detail, action = (
-                    "calendar", "Cargar las valuaciones históricas",
+                    "calendar",
+                    "Cargar las valuaciones históricas",
                     "En Movimientos, aporta el CSV de Valuaciones históricas verificadas "
                     "y revisa el calendario.",
                     "Abrir calendario de valuaciones",
                 )
             elif not calendar_ready:
                 step, title, detail, action = (
-                    "calendar", "Completar el calendario de valuaciones",
+                    "calendar",
+                    "Completar el calendario de valuaciones",
                     "Revisa las fechas faltantes y el momento BOD/EOD de los flujos. "
                     "Las fechas disponibles no resuelven un momento UNKNOWN.",
                     "Abrir calendario de valuaciones",
                 )
             elif not self.flows_confirmed:
                 step, title, detail, action = (
-                    "flows", "Revisar y confirmar los flujos",
+                    "flows",
+                    "Revisar y confirmar los flujos",
                     "El calendario está completo. En Movimientos → Revisión de flujos y resultado, "
                     "revisa importes, moneda, momento y fuentes antes de confirmar.",
                     "Abrir revisión de flujos",
                 )
             elif not calculated:
                 step, title, detail, action = (
-                    "flows", "Revisar el rendimiento pendiente",
+                    "flows",
+                    "Revisar el rendimiento pendiente",
                     "La confirmación está registrada, pero el TWR sigue pendiente. "
                     "Consulta el motivo en Revisión de flujos y resultado.",
                     "Abrir revisión de flujos",
                 )
             else:
                 step, title, detail, action = (
-                    "summary", "Guardar el resumen de revisión",
+                    "summary",
+                    "Guardar el resumen de revisión",
                     "El TWR está calculado. Descarga el resumen con sus resultados, "
                     "diferencias y confirmaciones pendientes.",
                     "Abrir resumen descargable",
@@ -111,90 +127,195 @@ class OperationStatus:
         rows = []
 
         def add(key, title, state, reason, evidence, action, *, step="ledger", area="Movimientos"):
-            rows.append({"id": key, "title": title, "state": state, "reason": reason,
-                         "evidence": evidence, "action": action, "step": step, "area": area})
+            rows.append(
+                {
+                    "id": key,
+                    "title": title,
+                    "state": state,
+                    "reason": reason,
+                    "evidence": evidence,
+                    "action": action,
+                    "step": step,
+                    "area": area,
+                }
+            )
 
         for index, error in enumerate(self.errors):
-            add(f"error:{index}", "Insumo o herramienta rechazados", "Corregir",
-                error["reason"], error["stage"], "Revisar " + error["stage"],
-                area={"ledger": "Movimientos", "implementation": "Implementación",
-                      "feeds": "Fuentes y alertas", "wealth": "Patrimonio",
-                      "documents": "Originales GBM"}[error["area"]])
+            add(
+                f"error:{index}",
+                "Insumo o herramienta rechazados",
+                "Corregir",
+                error["reason"],
+                error["stage"],
+                "Revisar " + error["stage"],
+                area={
+                    "ledger": "Movimientos",
+                    "implementation": "Implementación",
+                    "feeds": "Fuentes y alertas",
+                    "wealth": "Patrimonio",
+                    "documents": "Originales GBM",
+                }[error["area"]],
+            )
         if not self.inputs.get("ledger") and not self.failed_ledger:
-            add("ledger", "Libro de movimientos", "Falta dato", "Carga un libro o retoma un paquete ZIP.",
-                self.evidence("ledger"), "Abrir Movimientos")
+            add(
+                "ledger",
+                "Libro de movimientos",
+                "Falta dato",
+                "Carga un libro o retoma un paquete ZIP.",
+                self.evidence("ledger"),
+                "Abrir Movimientos",
+            )
         if self.book is not None:
             if self.reconciliation is None:
-                add("controls", "Controles de cierre", "Falta dato",
+                add(
+                    "controls",
+                    "Controles de cierre",
+                    "Falta dato",
                     "Aporta los saldos y fuentes del mismo cierre y cuenta para contrastar el libro.",
-                    self.evidence("controls"), "Revisar controles de cierre", step="controls")
+                    self.evidence("controls"),
+                    "Revisar controles de cierre",
+                    step="controls",
+                )
             else:
                 for index, row in enumerate(self.reconciliation["rows"]):
                     if row["Estado"] == "COINCIDE":
                         continue
-                    identity = " · ".join(filter(None, [KINDS[row["Tipo"]], row["InstrumentoReferencia"],
-                                                       row["Moneda"]]))
+                    identity = " · ".join(
+                        filter(None, [KINDS[row["Tipo"]], row["InstrumentoReferencia"], row["Moneda"]])
+                    )
                     values = f"{identity}. Libro: {row['Libro']} {row['Unidad']}. "
                     if row["Estado"] == "SIN_CONTROL":
                         reason = values + "Falta el saldo de control; no se interpreta como cero."
                     else:
-                        reason = values + (f"Control: {row['Control']}. Diferencia libro − control: "
-                                           f"{row['Diferencia']} {row['Unidad']}.")
-                    add(f"control:{index}", "Saldo sin control" if row["Estado"] == "SIN_CONTROL"
-                        else "Saldo con diferencia", "Falta dato" if row["Estado"] == "SIN_CONTROL"
-                        else "Diferencia", reason,
+                        reason = values + (
+                            f"Control: {row['Control']}. Diferencia libro − control: "
+                            f"{row['Diferencia']} {row['Unidad']}."
+                        )
+                    add(
+                        f"control:{index}",
+                        "Saldo sin control" if row["Estado"] == "SIN_CONTROL" else "Saldo con diferencia",
+                        "Falta dato" if row["Estado"] == "SIN_CONTROL" else "Diferencia",
+                        reason,
                         self.evidence("controls") + (" · Fuente: " + row["Fuente"] if row["Fuente"] else ""),
-                        "Revisar controles de cierre", step="controls")
-            for role, needed in (("quotes", bool(self.book["positions"])),
-                                 ("repo_values", bool(self.book["repos"]))):
+                        "Revisar controles de cierre",
+                        step="controls",
+                    )
+            for role, needed in (
+                ("quotes", bool(self.book["positions"])),
+                ("repo_values", bool(self.book["repos"])),
+            ):
                 if needed and role not in self.inputs:
-                    add(role, LABELS[role], "Falta dato", "Aporta valores documentados del cierre elegido.",
-                        self.evidence(role), "Revisar valuación al cierre", step="valuation")
+                    add(
+                        role,
+                        LABELS[role],
+                        "Falta dato",
+                        "Aporta valores documentados del cierre elegido.",
+                        self.evidence(role),
+                        "Revisar valuación al cierre",
+                        step="valuation",
+                    )
             currencies = set(self.book["cash"]) | set(self.book["pending"])
             currencies |= {c for _, c in self.book["positions"]} | {c for _, c in self.book["repos"]}
             if self.base and currencies - {self.base} and "fx" not in self.inputs:
-                add("fx", LABELS["fx"], "Falta dato", "La conversión requiere FX fechado y fuente.",
-                    self.evidence("fx"), "Revisar valuación al cierre", step="valuation")
-            if not self.raw_confirmed:
-                role = "quotes" if self.book["positions"] else (
-                    "controls" if "controls" in self.inputs else "ledger"
+                add(
+                    "fx",
+                    LABELS["fx"],
+                    "Falta dato",
+                    "La conversión requiere FX fechado y fuente.",
+                    self.evidence("fx"),
+                    "Revisar valuación al cierre",
+                    step="valuation",
                 )
-                add("prices-confirmation", "Fuentes de la valuación al cierre", "Por confirmar",
+            if not self.raw_confirmed:
+                role = (
+                    "quotes"
+                    if self.book["positions"]
+                    else ("controls" if "controls" in self.inputs else "ledger")
+                )
+                add(
+                    "prices-confirmation",
+                    "Fuentes de la valuación al cierre",
+                    "Por confirmar",
                     "Revisa los saldos y, cuando correspondan, precios sin ajuste, FX y valores de reportos.",
-                    self.evidence(role), "Revisar valuación al cierre", step="valuation")
+                    self.evidence(role),
+                    "Revisar valuación al cierre",
+                    step="valuation",
+                )
             if "nav" not in self.inputs:
-                add("nav", LABELS["nav"], "Falta dato",
+                add(
+                    "nav",
+                    LABELS["nav"],
+                    "Falta dato",
                     "Aporta cierres históricos para revisar el rendimiento.",
-                    self.evidence("nav"), "Revisar valuaciones históricas", step="calendar")
+                    self.evidence("nav"),
+                    "Revisar valuaciones históricas",
+                    step="calendar",
+                )
             if self.calendar is not None:
                 for row in self.calendar["rows"]:
                     if row["available"] or (row["required"] and "nav" not in self.inputs):
                         continue
-                    add("date:" + row["date"], "Cierre " + row["date"],
+                    add(
+                        "date:" + row["date"],
+                        "Cierre " + row["date"],
                         "Falta dato" if row["required"] else "Condicional",
-                        "; ".join(row["reasons"]), self.evidence("nav"),
-                        "Revisar calendario de valuaciones", step="calendar")
+                        "; ".join(row["reasons"]),
+                        self.evidence("nav"),
+                        "Revisar calendario de valuaciones",
+                        step="calendar",
+                    )
             for event in self.events:
                 if event.timing == "UNKNOWN":
-                    add("timing:" + event.id, "Momento del flujo", "Por confirmar",
+                    add(
+                        "timing:" + event.id,
+                        "Momento del flujo",
+                        "Por confirmar",
                         f"{event.settled.isoformat()} · {event.id}: confirma BOD o EOD contra su evidencia.",
-                        self.evidence("ledger"), "Revisar flujos y calendario", step="calendar")
+                        self.evidence("ledger"),
+                        "Revisar flujos y calendario",
+                        step="calendar",
+                    )
             if any(event.kind in {"TRANSFER_IN", "TRANSFER_OUT"} for event in self.events):
-                add("transfers", "Alcance de los traspasos", "Por revisar",
+                add(
+                    "transfers",
+                    "Alcance de los traspasos",
+                    "Por revisar",
                     "El libro conserva los traspasos declarados. Para excluirlos de los flujos de un "
                     "patrimonio consolidado se requiere una pareja acreditada entre cuentas.",
-                    self.evidence("ledger"), "Revisar transferencias del patrimonio", area="Patrimonio")
+                    self.evidence("ledger"),
+                    "Revisar transferencias del patrimonio",
+                    area="Patrimonio",
+                )
             if any(e.currency != self.base for e in self.events) and "flow_fx" not in self.inputs:
-                add("flow-fx", LABELS["flow_fx"], "Falta dato",
+                add(
+                    "flow-fx",
+                    LABELS["flow_fx"],
+                    "Falta dato",
                     "Aporta FX documentado en cada fecha de flujo.",
-                    self.evidence("flow_fx"), "Revisar flujos y calendario", step="calendar")
+                    self.evidence("flow_fx"),
+                    "Revisar flujos y calendario",
+                    step="calendar",
+                )
             if "nav" in self.inputs and not self.flows_confirmed:
-                add("flows-confirmation", "Flujos y valuaciones del periodo", "Por confirmar",
+                add(
+                    "flows-confirmation",
+                    "Flujos y valuaciones del periodo",
+                    "Por confirmar",
                     "Revisa el periodo, moneda y todos los flujos externos antes de confirmar.",
-                    self.evidence("nav"), "Revisar flujos del periodo", step="flows")
+                    self.evidence("nav"),
+                    "Revisar flujos del periodo",
+                    step="flows",
+                )
             if self.returns is not None and self.returns["xirr"] is None:
-                add("xirr", "XIRR anualizada", "Revisar", self.returns["xirr_status"],
-                    self.evidence("nav"), "Revisar rendimiento histórico", step="flows")
+                add(
+                    "xirr",
+                    "XIRR anualizada",
+                    "Revisar",
+                    self.returns["xirr_status"],
+                    self.evidence("nav"),
+                    "Revisar rendimiento histórico",
+                    step="flows",
+                )
         seen_documents = set()
         for document in self.documents:
             digest = document["sha256"]
@@ -202,52 +323,106 @@ class OperationStatus:
                 continue
             seen_documents.add(digest)
             for index, row in enumerate(document.get("differences", [])):
-                add(f"document:{digest}:{index}", "Diferencia en original GBM", "Diferencia",
+                add(
+                    f"document:{digest}:{index}",
+                    "Diferencia en original GBM",
+                    "Diferencia",
                     f"Página {row['Pagina']} · fila {row['Fila']} · diferencia: {row['Diferencia']} "
                     "MXN por confirmar. Requiere revisión de la fila original.",
-                    f"{document['name']} · SHA-256 {digest}", "Revisar originales GBM", area="Originales GBM")
-            add("document:" + digest, "Vinculación y revisión documental", "Por revisar",
-                document["notice"], f"{document['name']} · SHA-256 {digest}",
-                "Revisar originales GBM", area="Originales GBM")
+                    f"{document['name']} · SHA-256 {digest}",
+                    "Revisar originales GBM",
+                    area="Originales GBM",
+                )
+            add(
+                "document:" + digest,
+                "Vinculación y revisión documental",
+                "Por revisar",
+                document["notice"],
+                f"{document['name']} · SHA-256 {digest}",
+                "Revisar originales GBM",
+                area="Originales GBM",
+            )
         return rows
 
     def snapshot(self, scope):
         balances = []
         if self.book is not None:
-            for section, label in (("cash", "Efectivo liquidado"), ("pending", "Efectivo pendiente"),
-                                   ("positions", "Títulos"), ("repos", "Capital de reporto")):
+            for section, label in (
+                ("cash", "Efectivo liquidado"),
+                ("pending", "Efectivo pendiente"),
+                ("positions", "Títulos"),
+                ("repos", "Capital de reporto"),
+            ):
                 for key, value in self.book[section].items():
                     item, currency = ("", key) if section in {"cash", "pending"} else key
-                    balances.append({"type": label, "item": item, "currency": currency,
-                                     "value": str(value),
-                                     "unit": "títulos" if section == "positions" else currency})
+                    balances.append(
+                        {
+                            "type": label,
+                            "item": item,
+                            "currency": currency,
+                            "value": str(value),
+                            "unit": "títulos" if section == "positions" else currency,
+                        }
+                    )
         issues = self.issues()
-        return {"schema": 1, "scope": scope, "cutoff": self.cutoff, "base": self.base,
-                "input_count": len(self.inputs), "inputs": self.inputs, "balances": balances,
-                "issues": issues, "issue_count": len(issues),
-                "conditional_count": sum(row["state"] == "Condicional" for row in issues),
-                "ledger_failed": self.failed_ledger, "valuation": self.valuation, "returns": self.returns,
-                "calendar": self.calendar, "documents": self.documents,
-                "guidance": self.guidance(),
-                "human_approval": None, "postings_created": 0,
-                "notice": "Comprobaciones parciales de esta sesión; no acreditan aprobación humana ni "
-                          "vinculación de los originales con el libro. Los importes no se ajustan.",
-                "code_sha256": {name: sha256(Path(__file__).with_name(name).read_bytes()
-                                            .replace(b"\r\n", b"\n")).hexdigest()
-                                for name in ("operations_status.py", "operations_ui.py",
-                                             "transaction_ledger.py",
-                                             "ledger_reconciliation.py", "realized_performance.py")}}
+        return {
+            "schema": 1,
+            "scope": scope,
+            "cutoff": self.cutoff,
+            "base": self.base,
+            "input_count": len(self.inputs),
+            "inputs": self.inputs,
+            "balances": balances,
+            "issues": issues,
+            "issue_count": len(issues),
+            "conditional_count": sum(row["state"] == "Condicional" for row in issues),
+            "ledger_failed": self.failed_ledger,
+            "valuation": self.valuation,
+            "returns": self.returns,
+            "performance_summary": self.performance_summary,
+            "calendar": self.calendar,
+            "documents": self.documents,
+            "guidance": self.guidance(),
+            "human_approval": None,
+            "postings_created": 0,
+            "notice": "Comprobaciones parciales de esta sesión; no acreditan aprobación humana ni "
+            "vinculación de los originales con el libro. Los importes no se ajustan.",
+            "code_sha256": {
+                name: sha256(Path(__file__).with_name(name).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+                for name in (
+                    "operations_status.py",
+                    "operations_ui.py",
+                    "transaction_ledger.py",
+                    "ledger_reconciliation.py",
+                    "realized_performance.py",
+                    "gbm_documents.py",
+                    "gbm_movement_review.py",
+                    "operations_input_forms.py",
+                    "operations_report.py",
+                )
+            },
+        }
 
 
 def status_text(snapshot):
     """Readable plain text: uploaded identifiers are never treated as HTML, Markdown or formulas."""
-    title = ("DEMO · Resumen de práctica de Operación" if snapshot.get("demo")
-             else "Resumen de revisión de Operación")
-    lines = [title, snapshot["notice"], "",
-             f"Alcance: {snapshot['scope']}", f"Corte: {snapshot['cutoff'] or '—'}",
-             f"Moneda: {snapshot['base'] or '—'}", f"Archivos CSV incluidos: {snapshot['input_count']}",
-             f"Pendientes: {snapshot['issue_count']} · Condicionales: {snapshot['conditional_count']}", "",
-             "Saldos del libro (sin sumar monedas ni convertir capital de reporto a NAV)"]
+    title = (
+        "DEMO · Resumen de práctica de Operación"
+        if snapshot.get("demo")
+        else "Resumen de revisión de Operación"
+    )
+    lines = [
+        title,
+        snapshot["notice"],
+        "",
+        f"Alcance: {snapshot['scope']}",
+        f"Corte: {snapshot['cutoff'] or '—'}",
+        f"Moneda: {snapshot['base'] or '—'}",
+        f"Archivos CSV incluidos: {snapshot['input_count']}",
+        f"Pendientes: {snapshot['issue_count']} · Condicionales: {snapshot['conditional_count']}",
+        "",
+        "Saldos del libro (sin sumar monedas ni convertir capital de reporto a NAV)",
+    ]
     for row in snapshot["balances"]:
         lines.append(f"{row['type']} · {row['item']} · {row['currency']}: {row['value']} {row['unit']}")
     if not snapshot["balances"]:
@@ -269,18 +444,42 @@ def status_text(snapshot):
         lines.append(f"Periodo: {snapshot['calendar']['start']} a {snapshot['calendar']['end']}")
     if guidance := snapshot.get("guidance"):
         lines += ["", "Recorrido de rendimiento"]
-        for label, key in (("Calendario", "calendar"), ("Flujos", "flows"),
-                           ("TWR", "returns"), ("Resumen", "summary")):
+        for label, key in (
+            ("Calendario", "calendar"),
+            ("Flujos", "flows"),
+            ("TWR", "returns"),
+            ("Resumen", "summary"),
+        ):
             lines.append(f"{label}: {guidance['states'][key]}")
-        lines += ["Siguiente paso: " + guidance["title"], guidance["detail"],
-                  "Las fechas completas no acreditan revisión de importes ni aprobación humana."]
+        lines += [
+            "Siguiente paso: " + guidance["title"],
+            guidance["detail"],
+            "Las fechas completas no acreditan revisión de importes ni aprobación humana.",
+        ]
     lines += ["", "Pendientes de revisión"]
     for row in snapshot["issues"]:
-        lines.extend([f"{row['title']} · {row['state']}", row["reason"], "Evidencia: " + row["evidence"],
-                      f"Siguiente acción: {row['action']} · {row['area']}", ""])
-    lines += ["Resultados del motor y calendario", json.dumps(
-        {key: snapshot[key] for key in ("valuation", "returns", "calendar")},
-        ensure_ascii=False, default=str, allow_nan=False, indent=2), "", "Huellas de los insumos y el código",
+        lines.extend(
+            [
+                f"{row['title']} · {row['state']}",
+                row["reason"],
+                "Evidencia: " + row["evidence"],
+                f"Siguiente acción: {row['action']} · {row['area']}",
+                "",
+            ]
+        )
+    lines += [
+        "Resultados del motor y calendario",
+        json.dumps(
+            {key: snapshot[key] for key in ("valuation", "returns", "calendar", "performance_summary")},
+            ensure_ascii=False,
+            default=str,
+            allow_nan=False,
+            indent=2,
+        ),
+        "",
+        "Huellas de los insumos y el código",
         json.dumps({key: snapshot[key] for key in ("inputs", "code_sha256")}, ensure_ascii=False, indent=2),
-        "", "Aprobación humana: pendiente. Movimientos de ajuste creados: 0."]
+        "",
+        "Aprobación humana: pendiente. Movimientos de ajuste creados: 0.",
+    ]
     return ("\n".join(lines) + "\n").encode("utf-8")

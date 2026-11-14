@@ -102,7 +102,7 @@ def test_editing_proposal_clears_confirmation_and_expired_authorization_prevents
     app.button(key="technical_alpaca_order_submit").click().run()
     assert not app.exception and not server.posts
     assert not app.metric
-    assert "_technical_alpaca_draft" not in app.session_state.filtered_state
+    assert "_technical_alpaca_draft" not in app.session_state
 
 
 def test_timeout_keeps_attempt_visible_and_blocks_another_proposal(monkeypatch, tmp_path):

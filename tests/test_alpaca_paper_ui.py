@@ -128,5 +128,5 @@ def test_credential_rotation_and_user_change_remove_private_snapshot(monkeypatch
     app.session_state["test_subject"] = "bob"
     app.run()
     assert not app.exception and not app.metric and not app.dataframe
-    assert "_technical_alpaca_snapshot" not in app.session_state.filtered_state
+    assert "_technical_alpaca_snapshot" not in app.session_state
     assert client.calls == 2

@@ -20,12 +20,15 @@ from analysis_session import analysis_key, session_compute
 from case_workspace import WorkspaceError
 from executable_allocation import cost_aware_target, executable_plan
 from gbm_documents import read_cfdi_evidence, read_statement
+from gbm_movement_ui import render_movement_import
 from implementation_costs import ImplementationCostAssumptions
 from ledger_reconciliation import COLUMNS as CONTROL_COLUMNS
 from ledger_reconciliation import read_closing_controls, reconcile_book
 from multi_currency_wealth import consolidate_wealth, consolidated_performance, match_internal_flows
 from operations_demo import DEMO_CONTEXT, DEMO_NAV_COMPLETE, DEMO_NAV_INVALID, demo_operations, demo_url
+from operations_input_forms import complete_input
 from operations_jobs import refresh_subscription
+from operations_report import explain_performance, performance_pdf, summary_lines
 from operations_review_ui import (
     download_review,
     new_review,
@@ -72,10 +75,13 @@ def _forget_book_reference():
 
 
 def _remember_book(book, cutoff, source):
-    signature = analysis_key({
-        "ledger": sha256(source).hexdigest(), "cutoff": cutoff.isoformat(),
-        "review": review_key("book_source"),
-    })
+    signature = analysis_key(
+        {
+            "ledger": sha256(source).hexdigest(),
+            "cutoff": cutoff.isoformat(),
+            "review": review_key("book_source"),
+        }
+    )
     if st.session_state.get(_key("_ops_book_signature")) != signature:
         # The monitor checkbox is rendered later, in Fuentes y alertas.
         st.session_state[_key("monitor_confirmation")] = False
@@ -98,6 +104,17 @@ def _open_review_step(area, step):
         st.session_state[review_key("ops_review_save_panel")] = True
 
 
+def _explanation_table(rows, name):
+    key = _key(name)
+    with st.container(key=key):
+        st.html(f"""<style>
+          .st-key-{key} table td:last-child, .st-key-{key} table th:last-child {{
+            text-align:right!important;font-variant-numeric:tabular-nums;
+          }}
+        </style>""")
+        st.table(pd.DataFrame(rows, columns=["Concepto", "Resultado"]).style.hide(axis="index"))
+
+
 def _status_panel(context, *, demo=False, review_available=False):
     status = st.session_state.get(_key("_ops_status"))
     if status is None:
@@ -111,6 +128,26 @@ def _status_panel(context, *, demo=False, review_available=False):
         scope = "DEMO · datos de práctica SIG · sin cuenta vinculada"
     snapshot = status.snapshot(scope)
     snapshot["demo"] = demo
+    if status.performance_summary is not None:
+        st.subheader("Cuánto gané y por qué")
+        st.caption(status.performance_summary["state"])
+        explanation = status.performance_summary
+        figures, meaning = st.columns([2, 1], gap="large")
+        with figures:
+            st.caption("Ganancia monetaria")
+            rows = summary_lines(explanation)
+            st.subheader(rows[4][1])
+            _explanation_table(rows[:4] + [rows[9]], "performance_primary")
+            with st.expander("Ingresos, cargos y detalle del rendimiento"):
+                _explanation_table(rows[5:9] + [rows[10]], "performance_detail")
+        with meaning:
+            st.write("**Qué explica el cambio**")
+            st.write("Separamos lo que aportaste o retiraste de la variación de tu patrimonio.")
+            st.caption(
+                "Los ingresos y cargos se muestran cuando su moneda permite compararlos. "
+                "La variación no desglosada conserva lo que aún no se ha atribuido."
+            )
+            st.caption("Revisa los pendientes antes de utilizar el resultado.")
     if demo:
         snapshot["code_sha256"]["operations_demo.py"] = sha256(
             Path(__file__).with_name("operations_demo.py").read_bytes().replace(b"\r\n", b"\n")
@@ -121,31 +158,50 @@ def _status_panel(context, *, demo=False, review_available=False):
         st.caption(f"Periodo del rendimiento: {status.calendar['start']} a {status.calendar['end']}.")
     guidance = snapshot["guidance"]
     st.write("**Siguiente paso: " + guidance["title"] + "**")
-    st.button(guidance["action"], key=_key("guidance_next"), type="primary",
-              on_click=_open_review_step, args=("Movimientos", guidance["step"]))
+    st.button(
+        guidance["action"],
+        key=_key("guidance_next"),
+        type="primary",
+        on_click=_open_review_step,
+        args=("Movimientos", guidance["step"]),
+    )
     st.caption("Valuaciones → Revisión de flujos → Resultado → Resumen")
     st.text(guidance["detail"])
-    st.caption(f"Calendario: {guidance['states']['calendar']} · "
-               f"Flujos: {guidance['states']['flows']} · TWR: {guidance['states']['returns']}")
+    st.caption(
+        f"Calendario: {guidance['states']['calendar']} · "
+        f"Flujos: {guidance['states']['flows']} · TWR: {guidance['states']['returns']}"
+    )
     pending_label = "pendiente" if snapshot["issue_count"] == 1 else "pendientes"
     conditional_label = "condicional" if snapshot["conditional_count"] == 1 else "condicionales"
     files_label = "archivo CSV incluido" if snapshot["input_count"] == 1 else "archivos CSV incluidos"
-    st.write(f"**{snapshot['issue_count']} {pending_label} de revisión** · "
-             f"{snapshot['conditional_count']} {conditional_label} · "
-             f"{snapshot['input_count']} {files_label}")
+    st.write(
+        f"**{snapshot['issue_count']} {pending_label} de revisión** · "
+        f"{snapshot['conditional_count']} {conditional_label} · "
+        f"{snapshot['input_count']} {files_label}"
+    )
     if review_available and not demo:
-        st.button("Guardar para continuar después", key=_key("review_save_next"),
-                  on_click=_open_review_step, args=("Movimientos", "save"))
-        st.caption("Descarga el ZIP para retomar los CSV, el corte y la moneda. "
-                   "La sesión es temporal; el TXT sólo resume la revisión.")
+        st.button(
+            "Guardar para continuar después",
+            key=_key("review_save_next"),
+            on_click=_open_review_step,
+            args=("Movimientos", "save"),
+        )
+        st.caption(
+            "Descarga el ZIP para retomar los CSV, el corte y la moneda. "
+            "La sesión es temporal; el TXT sólo resume la revisión."
+        )
     if status.failed_ledger:
         st.caption("La revisión de Movimientos falló; se retiraron sus saldos y resultados de este resumen.")
     issues = snapshot["issues"]
     if issues:
         first = issues[0]
         if first["action"] != guidance["action"]:
-            st.button(first["action"], key=_key("status_next"), on_click=_open_review_step,
-                      args=(first["area"], first["step"]))
+            st.button(
+                first["action"],
+                key=_key("status_next"),
+                on_click=_open_review_step,
+                args=(first["area"], first["step"]),
+            )
     with st.expander("Pendientes y evidencia", expanded=not st.session_state.get(_key("_ops_focus_step"))):
         show_all = len(issues) > 3 and st.checkbox("Ver todos los pendientes", key=_key("status_show_all"))
         start, end = 0, min(3, len(issues))
@@ -161,38 +217,66 @@ def _status_panel(context, *, demo=False, review_available=False):
             with st.container(border=True):
                 st.write(f"**{item['title']}** · {item['state']}")
                 st.text(item["reason"])
-                short_evidence = re.sub(r"(SHA-256 )([a-f0-9]{64})", lambda m: m[1] + m[2][:12] + "…",
-                                        item["evidence"])
+                short_evidence = re.sub(
+                    r"(SHA-256 )([a-f0-9]{64})", lambda m: m[1] + m[2][:12] + "…", item["evidence"]
+                )
                 st.text("Evidencia: " + short_evidence)
                 if item["id"] == first["id"]:
                     st.caption(item["action"] + " · " + item["area"])
                 else:
-                    label = {"controls": "Ver control", "calendar": "Ver calendario",
-                             "flows": "Ver revisión de flujos",
-                             "valuation": "Ver valuación"}.get(item["step"], "Ver etapa")
+                    label = {
+                        "controls": "Ver control",
+                        "calendar": "Ver calendario",
+                        "flows": "Ver revisión de flujos",
+                        "valuation": "Ver valuación",
+                    }.get(item["step"], "Ver etapa")
                     if item["area"] == "Originales GBM":
                         label = "Ver original"
                     elif item["area"] == "Patrimonio":
                         label = "Ver patrimonio"
-                    st.button(label, key=_key("status_item_" + sha256(item["id"].encode()).hexdigest()[:12]),
-                              on_click=_open_review_step, args=(item["area"], item["step"]))
+                    st.button(
+                        label,
+                        key=_key("status_item_" + sha256(item["id"].encode()).hexdigest()[:12]),
+                        on_click=_open_review_step,
+                        args=(item["area"], item["step"]),
+                    )
         if not issues:
-            st.write("Sin pendientes detectados por estas comprobaciones. "
-                     "La aprobación humana sigue pendiente.")
+            st.write(
+                "Sin pendientes detectados por estas comprobaciones. La aprobación humana sigue pendiente."
+            )
         st.caption(snapshot["notice"])
-    with st.expander("Archivos y resumen descargable",
-                     expanded=st.session_state.get(_key("_ops_focus_step")) == "summary"):
+    with st.expander(
+        "Archivos y resumen descargable", expanded=st.session_state.get(_key("_ops_focus_step")) == "summary"
+    ):
         for source in status.inputs.values():
             st.text(f"{source['label']} · {source['bytes']:,} bytes · SHA-256 {source['sha256']}")
         if not status.inputs:
             st.write("Sin archivos CSV aportados en esta revisión.")
-        st.caption("Los archivos aportados conservan la validación y las confirmaciones de su etapa. "
-                   "El resumen contiene datos privados de la sesión actual y las huellas completas. "
-                   "El TXT no permite retomar los archivos.")
-        st.download_button("Descargar resumen de revisión", status_text(snapshot),
-                           f"{'demo_' if demo else ''}resumen_revision_{status.cutoff or 'sin_corte'}.txt",
-                           "text/plain",
-                           key=_key("status_download"), on_click="ignore")
+        st.caption(
+            "Los archivos aportados conservan la validación y las confirmaciones de su etapa. "
+            "El resumen contiene datos privados de la sesión actual y las huellas completas. "
+            "El TXT no permite retomar los archivos."
+        )
+        st.download_button(
+            "Descargar resumen de revisión",
+            status_text(snapshot),
+            f"{'demo_' if demo else ''}resumen_revision_{status.cutoff or 'sin_corte'}.txt",
+            "text/plain",
+            key=_key("status_download"),
+            on_click="ignore",
+        )
+        if st.button("Preparar PDF breve", key=_key("performance_pdf_prepare")):
+            raw = session_compute(
+                st.session_state, "operations_pdf", analysis_key(snapshot), lambda: performance_pdf(snapshot)
+            )
+            st.download_button(
+                "Descargar PDF de rendimiento",
+                raw,
+                f"{'demo_' if demo else ''}rendimiento_{status.cutoff or 'borrador'}.pdf",
+                "application/pdf",
+                key=_key("performance_pdf_download"),
+                on_click="ignore",
+            )
 
 
 def _show_operation_error(area, label, error, *, public_validation=True):
@@ -207,7 +291,9 @@ def _show_operation_error(area, label, error, *, public_validation=True):
         reference = uuid4().hex[:12]
         LOGGER.error(
             "Unexpected operation error area=%s type=%s reference=%s",
-            area, type(original).__name__, reference,
+            area,
+            type(original).__name__,
+            reference,
         )
         st.error(f"No se pudo completar {stage}.")
         st.caption(f"Vuelve a intentarlo. Si persiste, conserva esta referencia: {reference}.")
@@ -310,14 +396,18 @@ def _save_evidence(context, label, payload):
 
 
 def _closing_reconciliation(context, book, cutoff, ledger_bytes, files=None):
-    with st.expander("Conciliar contra el estado de cuenta",
-                     expanded=st.session_state.get(_key("_ops_focus_step")) == "controls"):
+    with st.expander(
+        "Conciliar contra el estado de cuenta",
+        expanded=st.session_state.get(_key("_ops_focus_step")) == "controls",
+    ):
         st.caption(
             "Compara CASH (efectivo liquidado), PENDING (efectivo pendiente), POSITION (títulos) "
             "y REPO (capital por referencia). Usa saldos y fuentes del mismo cierre y cuenta."
         )
         _template("Plantilla de controles de cierre", CONTROL_COLUMNS, "closing_controls_template")
         source = _status_upload("Controles de cierre", "controls", key="ops_closing_controls")
+        if st.session_state.get("_ops_context_key") != DEMO_CONTEXT:
+            complete_input("controls", source, day=cutoff)
         if files is not None:
             files["controls"] = source
         if not source:
@@ -335,26 +425,40 @@ def _closing_reconciliation(context, book, cutoff, ledger_bytes, files=None):
         view = pd.DataFrame(result["rows"]).rename(
             columns={"InstrumentoReferencia": "Instrumento / referencia"}
         )
-        view["Tipo"] = view["Tipo"].replace({
-            "CASH": "Efectivo liquidado", "PENDING": "Efectivo pendiente",
-            "POSITION": "Títulos", "REPO": "Capital de reporto",
-        })
-        view["Estado"] = view["Estado"].replace({
-            "COINCIDE": "Coincide", "SIN_CONTROL": "Sin control", "DIFERENCIA": "Diferencia",
-        })
+        view["Tipo"] = view["Tipo"].replace(
+            {
+                "CASH": "Efectivo liquidado",
+                "PENDING": "Efectivo pendiente",
+                "POSITION": "Títulos",
+                "REPO": "Capital de reporto",
+            }
+        )
+        view["Estado"] = view["Estado"].replace(
+            {
+                "COINCIDE": "Coincide",
+                "SIN_CONTROL": "Sin control",
+                "DIFERENCIA": "Diferencia",
+            }
+        )
         st.dataframe(
             view.style.format(
-                {"Libro": "{:,.12g}", "Control": "{:,.12g}",
-                 "Diferencia": lambda value: f"{value:+,.12g}" if value else "0"}, na_rep="—",
+                {
+                    "Libro": "{:,.12g}",
+                    "Control": "{:,.12g}",
+                    "Diferencia": lambda value: f"{value:+,.12g}" if value else "0",
+                },
+                na_rep="—",
             ).set_properties(subset=["Libro", "Control", "Diferencia"], **{"text-align": "right"}),
-            hide_index=True, width="stretch",
+            hide_index=True,
+            width="stretch",
         )
         st.caption(
             "Cada saldo conserva su unidad y moneda. Un control ausente sigue pendiente; "
             "la coincidencia aritmética no acredita integridad del estado ni aprobación de la cuenta."
         )
         payload = {
-            **result, "ledger_sha256": sha256(ledger_bytes).hexdigest(),
+            **result,
+            "ledger_sha256": sha256(ledger_bytes).hexdigest(),
             "controls_sha256": sha256(source.getvalue()).hexdigest(),
             "code_sha256": {
                 name: sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
@@ -364,8 +468,10 @@ def _closing_reconciliation(context, book, cutoff, ledger_bytes, files=None):
         st.download_button(
             "Descargar conciliación de cierre",
             json.dumps(payload, ensure_ascii=False, default=str).encode(),
-            f"conciliacion_cierre_{cutoff}.json", "application/json",
-            key=_key("closing_reconciliation_download"), on_click="ignore",
+            f"conciliacion_cierre_{cutoff}.json",
+            "application/json",
+            key=_key("closing_reconciliation_download"),
+            on_click="ignore",
         )
         _save_evidence(context, "Conservar conciliación de cierre", payload)
         return payload
@@ -377,8 +483,10 @@ def _native_flow_amount(event):
 
 
 def _valuation_calendar(start, end, flows, available_dates=()):
-    with st.expander("Valuaciones necesarias para TWR",
-                     expanded=st.session_state.get(_key("_ops_focus_step")) == "calendar"):
+    with st.expander(
+        "Valuaciones necesarias para TWR",
+        expanded=st.session_state.get(_key("_ops_focus_step")) == "calendar",
+    ):
         if start >= end:
             st.info("Selecciona un cierre posterior a la apertura del libro para planear el periodo.")
             return None
@@ -386,24 +494,28 @@ def _valuation_calendar(start, end, flows, available_dates=()):
         st.caption(f"Periodo del plan: {start.isoformat()} a {end.isoformat()}.")
         if result["twr_coverage_ready"]:
             st.success("Las fechas y los momentos declarados cubren el calendario de TWR.")
-            st.caption("Calendario completo se refiere a fechas y momentos. "
-                       "Sigue en Revisión de flujos y resultado: revisa importes, moneda y fuentes "
-                       "antes de marcar la confirmación.")
+            st.caption(
+                "Calendario completo se refiere a fechas y momentos. "
+                "Sigue en Revisión de flujos y resultado: revisa importes, moneda y fuentes "
+                "antes de marcar la confirmación."
+            )
         else:
             st.warning(
                 "Calendario pendiente · Cierres obligatorios faltantes: "
                 f"{len(result['missing_required_dates'])} "
                 f"· Flujos sin momento: {result['unknown_flow_count']}."
             )
-        view = pd.DataFrame([
-            {
-                "Fecha": row["date"],
-                "Requisito": "Obligatorio" if row["required"] else "Si el flujo se confirma BOD",
-                "Fecha en CSV": "Aportada" if row["available"] else "Falta",
-                "Motivo": "; ".join(row["reasons"]),
-            }
-            for row in result["rows"]
-        ])
+        view = pd.DataFrame(
+            [
+                {
+                    "Fecha": row["date"],
+                    "Requisito": "Obligatorio" if row["required"] else "Si el flujo se confirma BOD",
+                    "Fecha en CSV": "Aportada" if row["available"] else "Falta",
+                    "Motivo": "; ".join(row["reasons"]),
+                }
+                for row in result["rows"]
+            ]
+        )
         st.dataframe(view, hide_index=True, width="stretch")
         st.caption(
             "BOD requiere el cierre del día calendario anterior; EOD usa el cierre de la fecha del flujo. "
@@ -411,9 +523,12 @@ def _valuation_calendar(start, end, flows, available_dates=()):
             "saldos, clasificación de flujos, FX ni eventos corporativos."
         )
         st.download_button(
-            "Descargar plan de valuaciones", view.to_csv(index=False).encode("utf-8-sig"),
-            f"plan_valuaciones_{start}_{end}.csv", "text/csv",
-            key=_key("valuation_calendar_download"), on_click="ignore",
+            "Descargar plan de valuaciones",
+            view.to_csv(index=False).encode("utf-8-sig"),
+            f"plan_valuaciones_{start}_{end}.csv",
+            "text/csv",
+            key=_key("valuation_calendar_download"),
+            on_click="ignore",
         )
         return result
 
@@ -428,6 +543,20 @@ def _ledger(context, *, demo=False):
     if not demo:
         new_review()
         open_review(context)
+        render_movement_import(context)
+        from operations_review_ui import movement_draft
+
+        if movement_draft():
+            for document in movement_draft()["documents"]:
+                status.documents.append(
+                    {
+                        "name": "Estado GBM · " + document["end"],
+                        "sha256": document["sha256"],
+                        "differences": [],
+                        "notice": " ".join(document["warnings"])
+                        or "Cotejo de procedencia y aprobación independiente pendientes.",
+                    }
+                )
     _template("Plantilla de libro normalizado", COLUMNS, "ledger_template")
     with st.expander("Cómo registrar reportos"):
         st.write(
@@ -445,8 +574,10 @@ def _ledger(context, *, demo=False):
     events = _checked_input("Libro de movimientos", read_ledger, source.getvalue())
     defaults = review_defaults()
     cutoff = st.date_input(
-        "Cierre del libro", value=date.fromisoformat(defaults["cutoff"]) if defaults else date.today(),
-        max_value=date.today(), key=review_key("ops_cutoff"),
+        "Cierre del libro",
+        value=date.fromisoformat(defaults["cutoff"]) if defaults else date.today(),
+        max_value=date.today(),
+        key=review_key("ops_cutoff"),
     )
     files = {"ledger": source}
     book = _checked_input("Cierre del libro", book_at, events, cutoff)
@@ -493,25 +624,29 @@ def _ledger(context, *, demo=False):
                     {"Referencia": ref, "Moneda": currency, "Capital": amount}
                     for (ref, currency), amount in book["repos"].items()
                 ]
-            ).style.format({"Capital": "{:,.2f}"}).set_properties(
-                subset=["Capital"], **{"text-align": "right"}
-            ),
+            )
+            .style.format({"Capital": "{:,.2f}"})
+            .set_properties(subset=["Capital"], **{"text-align": "right"}),
             hide_index=True,
             width="stretch",
         )
         _template("Plantilla de valuación de reportos", REPO_VALUE_COLUMNS, "repo_values_template")
         repo_file = _status_upload(
             "Valuación de reportos al cierre: Fecha,Referencia,Moneda,Valor,Fuente",
-            "repo_values", key="ops_repo_values",
+            "repo_values",
+            key="ops_repo_values",
         )
+        complete_input("repo_values", repo_file, day=cutoff)
         if not repo_file:
             st.info(
                 "Valuación pendiente: carga el valor total documentado de cada reporto al cierre, "
                 "incluidos los intereses devengados que correspondan. El capital no sustituye esa valuación."
             )
-    repo_values = _checked_input(
-        "Valuación de reportos", read_repo_values, repo_file.getvalue(), cutoff
-    ) if repo_file else None
+    repo_values = (
+        _checked_input("Valuación de reportos", read_repo_values, repo_file.getvalue(), cutoff)
+        if repo_file
+        else None
+    )
     st.write("**Efectivo liquidado y pendientes**")
     st.dataframe(
         pd.DataFrame(
@@ -528,27 +663,37 @@ def _ledger(context, *, demo=False):
     quotes_file = _status_upload(
         "Cotizaciones de cierre: Fecha,Instrumento,Moneda,Precio", "quotes", key="ops_raw"
     )
-    fx_file = _status_upload(
-        "FX del cierre: Fecha,Moneda,Base,Tasa,Fuente", "fx", key="ops_book_fx"
-    )
+    fx_file = _status_upload("FX del cierre: Fecha,Moneda,Base,Tasa,Fuente", "fx", key="ops_book_fx")
+    if not demo:
+        complete_input("quotes", quotes_file, day=cutoff)
+        complete_input("fx", fx_file, day=cutoff)
     base = st.selectbox(
-        "Moneda del rendimiento y valuación", ["MXN", "USD"],
-        index=1 if defaults.get("base") == "USD" else 0, key=review_key("ops_base"),
+        "Moneda del rendimiento y valuación",
+        ["MXN", "USD"],
+        index=1 if defaults.get("base") == "USD" else 0,
+        key=review_key("ops_base"),
     )
     files.update(quotes=quotes_file, fx=fx_file)
     status.base = base
-    reset_confirmation("raw_confirmation", [
-        source.getvalue(), cutoff, base,
-        *(file.getvalue() if file else b"" for file in (repo_file, quotes_file, fx_file)),
-    ])
+    reset_confirmation(
+        "raw_confirmation",
+        [
+            source.getvalue(),
+            cutoff,
+            base,
+            *(file.getvalue() if file else b"" for file in (repo_file, quotes_file, fx_file)),
+        ],
+    )
     raw_confirmed = st.checkbox(
         "Confirmé las cotizaciones sin ajuste y las valuaciones contra las fuentes del cierre",
         key=review_key("raw_confirmation"),
     )
     status.raw_confirmed = raw_confirmed
     if (quotes_file or not book["positions"]) and raw_confirmed and (not book["repos"] or repo_file):
-        quotes = _checked_input("Cotizaciones de cierre", _csv, quotes_file) if quotes_file else pd.DataFrame(
-            columns=["Fecha", "Instrumento", "Moneda", "Precio"]
+        quotes = (
+            _checked_input("Cotizaciones de cierre", _csv, quotes_file)
+            if quotes_file
+            else pd.DataFrame(columns=["Fecha", "Instrumento", "Moneda", "Precio"])
         )
         if not {"Fecha", "Instrumento", "Moneda", "Precio"}.issubset(quotes):
             raise PortfolioError("Las cotizaciones requieren fecha, instrumento, moneda y precio.")
@@ -562,8 +707,10 @@ def _ledger(context, *, demo=False):
         if not fx.empty:
             # Reuse exact-cut validation, including source and duplicate-rate rejection.
             currencies = sorted(
-                set(book["cash"]) | {c for _, c in book["positions"]}
-                | set(book["pending"]) | {c for _, c in book["repos"]}
+                set(book["cash"])
+                | {c for _, c in book["positions"]}
+                | set(book["pending"])
+                | {c for _, c in book["repos"]}
             )
             dummy = pd.DataFrame(
                 [
@@ -581,8 +728,14 @@ def _ledger(context, *, demo=False):
             _checked_input("FX del cierre", consolidate_wealth, dummy, fx, cutoff=cutoff, base=base)
         rates = {(row["Moneda"], row["Base"]): row["Tasa"] for row in fx.to_dict("records")}
         valued = _checked_input(
-            "Valuación al cierre", value_book, book, quote_map, rates,
-            base=base, raw_prices_confirmed=True, repo_values=repo_values,
+            "Valuación al cierre",
+            value_book,
+            book,
+            quote_map,
+            rates,
+            base=base,
+            raw_prices_confirmed=True,
+            repo_values=repo_values,
         )
         status.valuation = valued
         st.metric(f"Patrimonio neto al cierre · {base}", f"{valued['nav']:,.2f}")
@@ -590,9 +743,12 @@ def _ledger(context, *, demo=False):
             pd.DataFrame(valued["detail"]).style.format(
                 {"ValorOrigen": "{:,.2f}", "FX": "{:,.6g}", "ValorBase": "{:,.2f}"}
             ),
-            hide_index=True, width="stretch",
+            hide_index=True,
+            width="stretch",
         )
     nav_file = _status_upload("Valuaciones históricas verificadas: Fecha,NAV", "nav", key="ops_nav")
+    if not demo:
+        complete_input("nav", nav_file, day=cutoff)
     nav = None
     if nav_file:
         nav = _checked_input("Valuaciones históricas", _read_nav, nav_file)
@@ -601,33 +757,45 @@ def _ledger(context, *, demo=False):
         start = min((event.day for event in events if event.day <= cutoff), default=cutoff)
         end = cutoff
     period_events = [
-        event for event in events
-        if event.kind in EXTERNAL_EVENT_KINDS and start < event.settled <= end
+        event for event in events if event.kind in EXTERNAL_EVENT_KINDS and start < event.settled <= end
     ]
     status.events = period_events
     status.calendar = _valuation_calendar(
-        start, end,
+        start,
+        end,
         [Flow(event.settled, _native_flow_amount(event), event.timing) for event in period_events],
         available_dates=nav.index if nav is not None else (),
     )
-    with st.expander("Revisión de flujos y resultado",
-                     expanded=bool(status.calendar and status.calendar["twr_coverage_ready"])
-                     or st.session_state.get(_key("_ops_focus_step")) == "flows"):
-        st.caption("Revisa los flujos externos, sus importes, moneda y fuentes del periodo. "
-                   "Tener las fechas completas no confirma esos datos. "
-                   "Cambiar un archivo exige renovar esta confirmación.")
+    with st.expander(
+        "Revisión de flujos y resultado",
+        expanded=bool(status.calendar and status.calendar["twr_coverage_ready"])
+        or st.session_state.get(_key("_ops_focus_step")) == "flows",
+    ):
+        st.caption(
+            "Revisa los flujos externos, sus importes, moneda y fuentes del periodo. "
+            "Tener las fechas completas no confirma esos datos. "
+            "Cambiar un archivo exige renovar esta confirmación."
+        )
         flow_fx_file = _status_upload(
             "FX por fecha de cada flujo: Fecha,Moneda,Base,Tasa,Fuente", "flow_fx", key="ops_flow_fx"
         )
+        if not demo:
+            complete_input("flow_fx", flow_fx_file, day=cutoff)
         files.update(nav=nav_file, flow_fx=flow_fx_file)
-        reset_confirmation("flows_confirmation", [
-            cutoff, base, *(file.getvalue() if file else b"" for file in files.values()),
-        ])
+        reset_confirmation(
+            "flows_confirmation",
+            [
+                cutoff,
+                base,
+                *(file.getvalue() if file else b"" for file in files.values()),
+            ],
+        )
         verified = st.checkbox(
             "Concilié todos los flujos externos y las valuaciones del periodo en la moneda elegida",
             key=review_key("flows_confirmation"),
         )
         status.flows_confirmed = verified
+        flows = []
         if nav_file and verified:
             fx_frame = (
                 _checked_input("FX de los flujos", _csv, flow_fx_file) if flow_fx_file else pd.DataFrame()
@@ -654,11 +822,12 @@ def _ledger(context, *, demo=False):
                 flows.append(Flow(event.settled, amount, event.timing))
             result = _checked_input("Rendimiento histórico", performance, nav, flows)
             status.returns = result
+            status.performance_summary = explain_performance(events, nav, result, flows, base=base)
+            display_rows = summary_lines(status.performance_summary)
             a, b, c = st.columns(3)
-            a.metric("Ganancia separada de flujos", f"{result['gain']:,.2f} {base}")
-            b.metric("TWR del periodo", f"{result['twr']:.2%}" if result["twr"] is not None else "Pendiente")
-            c.metric("XIRR anualizada",
-                     f"{result['xirr']:.2%}" if result["xirr"] is not None else "Pendiente")
+            a.metric("Ganancia separada de flujos", display_rows[4][1])
+            b.metric("TWR del periodo", display_rows[9][1])
+            c.metric("XIRR anualizada", display_rows[10][1])
             st.caption(
                 f"TWR: {result['twr_status']} · XIRR: {result['xirr_status']}. "
                 "TWR requiere valuación en cada flujo y momento BOD/EOD confirmado."
@@ -678,6 +847,8 @@ def _ledger(context, *, demo=False):
                     "closing_reconciliation": reconciliation,
                 },
             )
+        if status.performance_summary is None:
+            status.performance_summary = explain_performance(events, nav, status.returns, flows, base=base)
     if not demo:
         _checked_input("Paquete de movimientos", download_review, context, files, cutoff=cutoff, base=base)
         return True
@@ -1090,13 +1261,19 @@ def _documents(context):
                 )
                 status = st.session_state.get(_key("_ops_status"))
                 if status is not None:
-                    status.documents.append({
-                        "name": file.name, "sha256": draft["sha256"],
-                        "differences": [row for row in draft["cash_review"][1:]
-                                        if row["ControlAritmetico"] != "EXACTO"],
-                        "notice": "Confirma cuenta, moneda, periodo y clasificación contra el original. "
-                                  "Las filas exactas también conservan revisión humana pendiente.",
-                    })
+                    status.documents.append(
+                        {
+                            "name": file.name,
+                            "sha256": draft["sha256"],
+                            "differences": [
+                                row
+                                for row in draft["cash_review"][1:]
+                                if row["ControlAritmetico"] != "EXACTO"
+                            ],
+                            "notice": "Confirma cuenta, moneda, periodo y clasificación contra el original. "
+                            "Las filas exactas también conservan revisión humana pendiente.",
+                        }
+                    )
                 st.caption(
                     f"Corte {draft['end']} · {len(draft['positions'])} posiciones · "
                     f"huella {draft['sha256'][:12]}"
@@ -1118,18 +1295,26 @@ def _documents(context):
                 for column in money:
                     display[column] = pd.to_numeric(display[column])
                 display["ControlAritmetico"] = display["ControlAritmetico"].replace(
-                    {"EXACTO": "Cuadra", "DIFERENCIA_CENTAVO": "Difiere un centavo",
-                     "DIFERENCIA_MAYOR": "Diferencia mayor"}
+                    {
+                        "EXACTO": "Cuadra",
+                        "DIFERENCIA_CENTAVO": "Difiere un centavo",
+                        "DIFERENCIA_MAYOR": "Diferencia mayor",
+                    }
                 )
                 display["EstadoRevision"] = "Pendiente"
                 display["Sentido"] = display["Sentido"].str.capitalize()
                 st.dataframe(
                     display.style.format({column: "{:,.2f}" for column in money}, na_rep="—"),
                     column_config={
-                        "Pagina": "Página", "Sentido": "Movimiento", "NetoImpreso": "Neto · MXN",
-                        "SaldoAnteriorImpreso": "Anterior · MXN", "SaldoEsperado": "Esperado · MXN",
-                        "SaldoImpreso": "Impreso · MXN", "Diferencia": "Diferencia · MXN",
-                        "ControlAritmetico": "Comprobación", "EstadoRevision": "Revisión",
+                        "Pagina": "Página",
+                        "Sentido": "Movimiento",
+                        "NetoImpreso": "Neto · MXN",
+                        "SaldoAnteriorImpreso": "Anterior · MXN",
+                        "SaldoEsperado": "Esperado · MXN",
+                        "SaldoImpreso": "Impreso · MXN",
+                        "Diferencia": "Diferencia · MXN",
+                        "ControlAritmetico": "Comprobación",
+                        "EstadoRevision": "Revisión",
                     },
                     hide_index=True,
                     width="stretch",
@@ -1139,9 +1324,7 @@ def _documents(context):
                     "Moneda MXN por confirmar. Cada fila conserva su revisión pendiente."
                 )
                 with st.expander("Texto original de los movimientos"):
-                    st.dataframe(
-                        pd.DataFrame(draft["movement_candidates"]), hide_index=True, width="stretch"
-                    )
+                    st.dataframe(pd.DataFrame(draft["movement_candidates"]), hide_index=True, width="stretch")
                 for warning in draft["warnings"]:
                     st.warning(warning)
                 st.caption(
@@ -1151,8 +1334,9 @@ def _documents(context):
                 evidence = read_cfdi_evidence(raw)
                 status = st.session_state.get(_key("_ops_status"))
                 if status is not None:
-                    status.documents.append({"name": file.name, "sha256": evidence["sha256"],
-                                             "notice": evidence["notice"]})
+                    status.documents.append(
+                        {"name": file.name, "sha256": evidence["sha256"], "notice": evidence["notice"]}
+                    )
                 st.write(evidence["notice"])
                 st.dataframe(pd.DataFrame([evidence["checks"]]), hide_index=True)
             st.download_button(
@@ -1170,7 +1354,10 @@ def _documents(context):
 def _reset_demo():
     files, settings = demo_operations()
     st.session_state["_ops_review_" + DEMO_CONTEXT] = {
-        "token": uuid4().hex, "files": files, "settings": settings, "code_changed": False,
+        "token": uuid4().hex,
+        "files": files,
+        "settings": settings,
+        "code_changed": False,
     }
     for name in ("_ops_last_book", "_ops_book_signature", "_ops_status", "_ops_focus_step"):
         st.session_state.pop(name + "_" + DEMO_CONTEXT, None)
@@ -1180,24 +1367,44 @@ def _reset_demo():
 def _demo_guide():
     st.caption("Datos de práctica en esta pestaña. Tu revisión sigue abierta en la pestaña de origen.")
     with st.expander("Guía de práctica"):
-        st.write("El libro parte de 100 MXN y registra una aportación de 50 MXN al final del 5 de enero. "
-                 "Revisa el control de cierre sin modificar importes para cuadrarlo.")
-        st.write("Consulta el calendario: el CSV inicial omite un cierre. Descarga el archivo completo "
-                 "y cárgalo en Valuaciones históricas verificadas, dentro de Movimientos.")
-        st.download_button("Descargar valuaciones completas del demo", DEMO_NAV_COMPLETE,
-                           "valuaciones_demo_completas.csv", "text/csv",
-                           key="demo_nav_complete", on_click="ignore")
-        st.write("Después revisa y confirma los flujos del periodo. Descarga el TXT en Archivos y resumen "
-                 "descargable. El control con diferencia conserva su revisión pendiente.")
+        st.write(
+            "El libro parte de 100 MXN y registra una aportación de 50 MXN al final del 5 de enero. "
+            "Revisa el control de cierre sin modificar importes para cuadrarlo."
+        )
+        st.write(
+            "Consulta el calendario: el CSV inicial omite un cierre. Descarga el archivo completo "
+            "y cárgalo en Valuaciones históricas verificadas, dentro de Movimientos."
+        )
+        st.download_button(
+            "Descargar valuaciones completas del demo",
+            DEMO_NAV_COMPLETE,
+            "valuaciones_demo_completas.csv",
+            "text/csv",
+            key="demo_nav_complete",
+            on_click="ignore",
+        )
+        st.write(
+            "Después revisa y confirma los flujos del periodo. Descarga el TXT en Archivos y resumen "
+            "descargable. El control con diferencia conserva su revisión pendiente."
+        )
         with st.expander("Practicar un archivo rechazado"):
-            st.write("Este ejemplo contiene una fecha inválida. Puedes cargarlo y después reemplazarlo "
-                     "por las valuaciones completas para comprobar la recuperación.")
-            st.download_button("Descargar ejemplo con fecha inválida", DEMO_NAV_INVALID,
-                               "valuaciones_demo_invalidas.csv", "text/csv",
-                               key="demo_nav_invalid", on_click="ignore")
+            st.write(
+                "Este ejemplo contiene una fecha inválida. Puedes cargarlo y después reemplazarlo "
+                "por las valuaciones completas para comprobar la recuperación."
+            )
+            st.download_button(
+                "Descargar ejemplo con fecha inválida",
+                DEMO_NAV_INVALID,
+                "valuaciones_demo_invalidas.csv",
+                "text/csv",
+                key="demo_nav_invalid",
+                on_click="ignore",
+            )
         st.button("Reiniciar datos de práctica", key="demo_reset", on_click=_reset_demo)
-        st.caption("El demo no guarda en expedientes ni exporta paquetes ZIP. "
-                   "Para volver a tu revisión, cierra esta pestaña.")
+        st.caption(
+            "El demo no guarda en expedientes ni exporta paquetes ZIP. "
+            "Para volver a tu revisión, cierra esta pestaña."
+        )
 
 
 def render_account_operations(*, demo=False):
@@ -1209,22 +1416,30 @@ def render_account_operations(*, demo=False):
         with title:
             st.title("Operación por cuenta")
         with action:
-            st.link_button("Probar con datos ficticios", demo_url(st.context.url),
-                           help="Abre una pestaña de práctica; tu revisión permanece en esta pestaña.")
-        st.caption("Revisa movimientos y fuentes, prepara cambios y reúne el patrimonio "
-                   "con sus datos de origen.")
+            st.link_button(
+                "Probar con datos ficticios",
+                demo_url(st.context.url),
+                help="Abre una pestaña de práctica; tu revisión permanece en esta pestaña.",
+            )
+        st.caption(
+            "Revisa movimientos y fuentes, prepara cambios y reúne el patrimonio con sus datos de origen."
+        )
     started = monotonic()
     try:
         context = (None, None, None, None) if demo else _context()
-        st.session_state["_ops_context_key"] = DEMO_CONTEXT if demo else sha256(
-            str(
-                (
-                    context[1].actor if context[1] else None,
-                    context[2]["id"] if context[2] else None,
-                    context[3],
-                )
-            ).encode()
-        ).hexdigest()[:16]
+        st.session_state["_ops_context_key"] = (
+            DEMO_CONTEXT
+            if demo
+            else sha256(
+                str(
+                    (
+                        context[1].actor if context[1] else None,
+                        context[2]["id"] if context[2] else None,
+                        context[3],
+                    )
+                ).encode()
+            ).hexdigest()[:16]
+        )
         if demo:
             if "_ops_review_" + DEMO_CONTEXT not in st.session_state:
                 _reset_demo()
@@ -1232,8 +1447,10 @@ def render_account_operations(*, demo=False):
         st.session_state.pop(_key("_ops_status"), None)
         overview = st.container()
         areas = (
-            ("ledger", "Movimientos", _ledger), ("implementation", "Implementación", _implementation),
-            ("feeds", "Fuentes y alertas", _feeds), ("wealth", "Patrimonio", _wealth),
+            ("ledger", "Movimientos", _ledger),
+            ("implementation", "Implementación", _implementation),
+            ("feeds", "Fuentes y alertas", _feeds),
+            ("wealth", "Patrimonio", _wealth),
             ("documents", "Originales GBM", _documents),
         )
         tabs = st.tabs([label for _, label, _ in areas], key="operations_tabs", on_change="rerun")
@@ -1241,8 +1458,10 @@ def render_account_operations(*, demo=False):
         for tab, (area, label, render) in zip(tabs, areas, strict=True):
             with tab:
                 if demo and area != "ledger":
-                    st.info("Esta práctica se realiza en Movimientos. "
-                            "Tu revisión continúa en la pestaña de origen.")
+                    st.info(
+                        "Esta práctica se realiza en Movimientos. "
+                        "Tu revisión continúa en la pestaña de origen."
+                    )
                 else:
                     renderer = (lambda ctx: _ledger(ctx, demo=True)) if demo else render
                     available = _render_operation_area(context, area, label, renderer)

@@ -27,21 +27,38 @@ from scripts.inspect_gbm_intake import (
 )
 
 
-def _cash_review(candidates: list[dict], document_sha256: str) -> list[dict]:
+def _cash_review(candidates: list[dict], document_sha256: str, *, allow_unknown=False) -> list[dict]:
     """Explain every printed transition without correcting or posting any amount."""
     reviewed = []
     previous = None
     for candidate in candidates:
         text = candidate["Texto"]
         amounts = _money_values(text)
-        if len(amounts) not in {5, 6}:
+        if len(amounts) not in {5, 6} and not allow_unknown:
             raise IntakeError("Una fila de efectivo tiene columnas inesperadas.")
-        net, balance = amounts[-2:]
-        direction = 0 if previous is None else _cash_direction(text)
-        expected = balance if previous is None else previous + direction * net
-        difference = expected - balance
-        control = "EXACTO" if difference == 0 else (
-            "DIFERENCIA_CENTAVO" if abs(difference) <= Decimal("0.01") else "DIFERENCIA_MAYOR"
+        net, balance = amounts[-2:] if len(amounts) in {5, 6} else (None, None)
+        try:
+            direction = 0 if not reviewed else _cash_direction(text)
+        except IntakeError:
+            if not allow_unknown:
+                raise
+            direction = None
+        expected = (
+            balance
+            if not reviewed
+            else (
+                previous + direction * net
+                if previous is not None and direction is not None and net is not None
+                else None
+            )
+        )
+        difference = expected - balance if expected is not None and balance is not None else None
+        control = (
+            "NO_CALCULABLE"
+            if difference is None
+            else "EXACTO"
+            if difference == 0
+            else ("DIFERENCIA_CENTAVO" if abs(difference) <= Decimal("0.01") else "DIFERENCIA_MAYOR")
         )
         reviewed.append(
             {
@@ -51,13 +68,15 @@ def _cash_review(candidates: list[dict], document_sha256: str) -> list[dict]:
                 "Pagina": candidate["Pagina"],
                 "Fila": candidate["Fila"],
                 "DiasImpresos": text.split()[0],
-                "Sentido": "APERTURA" if previous is None else "ABONO" if direction == 1 else "CARGO",
-                "NetoImpreso": str(net),
+                "Sentido": "APERTURA"
+                if not reviewed
+                else ("DESCONOCIDO" if direction is None else "ABONO" if direction == 1 else "CARGO"),
+                "NetoImpreso": str(net) if net is not None else None,
                 "SaldoAnteriorImpreso": None if previous is None else str(previous),
-                "SaldoEsperado": str(expected),
-                "SaldoImpreso": str(balance),
-                "Diferencia": str(difference),
-                "ControlAritmetico": "APERTURA_COTEJADA" if previous is None else control,
+                "SaldoEsperado": str(expected) if expected is not None else None,
+                "SaldoImpreso": str(balance) if balance is not None else None,
+                "Diferencia": str(difference) if difference is not None else None,
+                "ControlAritmetico": "APERTURA_COTEJADA" if not reviewed else control,
                 "EstadoRevision": "PENDIENTE",
                 "TextoOriginal": text,
                 "TextoSHA256": candidate["sha256"],
@@ -68,7 +87,7 @@ def _cash_review(candidates: list[dict], document_sha256: str) -> list[dict]:
     return reviewed
 
 
-def read_statement(raw: bytes) -> dict:
+def read_statement(raw: bytes, *, movement_review=False) -> dict:
     """Return private values and page provenance for the observed layout only.
 
     Reconciliation tolerates no unexplained difference: a printed cent remains a
@@ -76,13 +95,27 @@ def read_statement(raw: bytes) -> dict:
     """
     summary = _statement_summary(raw)  # validates size, wrapper and page count
     differences, detail_counts = _detail_differences(raw, summary)
-    quantities, quantity_counts = _equity_quantity_bridge(raw, summary)
+    review_warnings = []
+    try:
+        quantities, quantity_counts = _equity_quantity_bridge(raw, summary)
+    except IntakeError:
+        if not movement_review:
+            raise
+        quantities, quantity_counts = None, {}
+        review_warnings.append("Las cantidades requieren revisión contra el original.")
     checks = Counter(detail_counts)
     checks.update(quantity_counts)
-    checks.update(_cash_ledger_counts(raw, summary))
-    checks.update(_movement_date_counts(raw, summary))
-    checks.update(_equity_trade_cost_counts(raw))
-    checks.update(_reporto_net_counts(raw))
+    for check in (_cash_ledger_counts, _movement_date_counts, _equity_trade_cost_counts, _reporto_net_counts):
+        try:
+            checks.update(
+                check(raw, summary) if check in {_cash_ledger_counts, _movement_date_counts} else check(raw)
+            )
+        except IntakeError:
+            if not movement_review:
+                raise
+            review_warnings.append(
+                "Hay movimientos que requieren clasificación o cotejo de fechas e importes."
+            )
     reader = PdfReader(BytesIO(raw[raw.find(b"%PDF-") :]), strict=True)
     rows, candidates = [], []
     in_equity = False
@@ -119,14 +152,18 @@ def read_statement(raw: bytes) -> dict:
                         "sha256": sha256(text.encode()).hexdigest(),
                     }
                 )
-    if len(rows) != len(quantities):
+    if quantities is not None and len(rows) != len(quantities):
         raise IntakeError("No se reprodujeron todas las posiciones visibles del documento.")
-    if len(candidates) != checks["cash_rows_checked"]:
+    if not movement_review and len(candidates) != checks["cash_rows_checked"]:
         raise IntakeError("No se reprodujeron todas las filas de efectivo del documento.")
     document_sha256 = sha256(raw).hexdigest()
-    cash_review = _cash_review(candidates, document_sha256)
+    if movement_review and (
+        cash_heading != 2 or not candidates or "INICIAL" not in candidates[0]["Texto"].upper()
+    ):
+        raise IntakeError("No se encontró la apertura de la tabla de movimientos.")
+    cash_review = _cash_review(candidates, document_sha256, allow_unknown=movement_review)
     other = summary.closing_total - summary.closing_categories[1] - summary.closing_categories[7]
-    warnings = []
+    warnings = list(dict.fromkeys(review_warnings))
     if any(differences.values()) or summary.opening_difference or summary.closing_difference:
         warnings.append(
             "Diferencia impresa de totales; requiere aceptación documentada, sin ajustar valores."
@@ -144,6 +181,7 @@ def read_statement(raw: bytes) -> dict:
         "opening_total": str(summary.opening_total),
         "closing_total": str(summary.closing_total),
         "cash": str(summary.closing_categories[7]),
+        "opening_cash": str(summary.opening_categories[7]),
         "equity": str(summary.closing_categories[1]),
         "other": str(other),
         "currency": "MXN",
