@@ -2,6 +2,7 @@
 const fs=require('node:fs');
 const path=require('node:path');
 const assert=require('node:assert/strict');
+const {createHash}=require('node:crypto');
 const {execFileSync}=require('node:child_process');
 module.exports=async({browser,out,url})=>{
   execFileSync(process.env.SIG_PYTHON||'python',[path.join(__dirname,'gbm_review_fixture.py'),path.join(out,'gbm_fictional.pdf')]);
@@ -49,12 +50,18 @@ module.exports=async({browser,out,url})=>{
   await page.getByRole('checkbox',{name:/Cotejé cuenta, moneda/}).press('Space');await settle();
   await page.getByRole('button',{name:'Usar movimientos revisados',exact:true}).click();await settle();
   await page.getByText('Recuperado: Libro de movimientos.',{exact:true}).waitFor();
+  const navRecords=[];
   for(const [day,value] of [['2025-12-31','100'],['2026-01-05','150'],['2026-01-30','150']]){
     const form=await expand('Completar en la app · Valuación histórica');
     await form.getByRole('textbox',{name:'Fecha',exact:true}).fill(day);
     await form.getByRole('textbox',{name:'NAV',exact:true}).fill(value);
     await form.getByRole('textbox',{name:'Fuente',exact:true}).fill('Valuación ficticia revisada');
-    await form.getByRole('button',{name:'Guardar dato · Valuación histórica',exact:true}).click();await settle();
+    await form.getByRole('button',{name:'Guardar dato · Valuación histórica',exact:true}).click();
+    navRecords.push(`${day},${value},Valuación ficticia revisada`);
+    const expectedNav='Fecha,NAV,Fuente\r\n'+navRecords.join('\r\n')+'\r\n';
+    const expectedHash=createHash('sha256').update(expectedNav).digest('hex');
+    await page.waitForFunction(hash=>document.body.textContent.includes(hash),expectedHash);
+    await settle();
   }
   await page.getByRole('checkbox',{name:'Concilié todos los flujos externos y las valuaciones del periodo en la moneda elegida',exact:true}).press('Space');
   await settle();
