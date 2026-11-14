@@ -11,7 +11,8 @@ module.exports=async({browser,out,url})=>{
   const settle=async()=>{await page.waitForTimeout(150);await page.locator('[data-stale="true"]').first().waitFor({state:'detached'});};
   const expand=async(label,p=page)=>{
     const block=p.getByTestId('stExpander').filter({has:p.getByText(label,{exact:true})}).first();
-    if(!(await block.locator('details').evaluate(el=>el.open).catch(()=>false)))await block.getByText(label,{exact:true}).click();
+    const opened=await block.evaluate(el=>el.tagName==='DETAILS'?el.open:!!el.querySelector('details')?.open);
+    if(!opened)await block.getByText(label,{exact:true}).click();
     return block;
   };
   const snapshots=async(label)=>{

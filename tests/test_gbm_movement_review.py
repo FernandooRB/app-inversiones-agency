@@ -71,6 +71,7 @@ def test_duplicate_pdf_is_idempotent_and_opening_is_unique():
     assert len(draft["documents"]) == 1 and len(draft["rows"]) == 2
     assert draft["rows"][1]["proposal"]["MomentoFlujo"] == "UNKNOWN"
     assert draft_issues(draft)  # A deposit description does not establish the transfer counterparty.
+    assert "referencia" in draft_issues(draft)[0]["reason"].lower()
 
 
 def test_unknown_movement_survives_without_inventing_amount_or_direction():

@@ -449,13 +449,10 @@ def draft_issues(draft):
                 )
             else:
                 proposal_event(proposal)
-        except (PortfolioError, ValueError):
-            issues.append(
-                {
-                    "id": row["id"],
-                    "reason": "Revisa clasificación, fechas, instrumento, referencia e importes.",
-                }
-            )
+        except PortfolioError as error:
+            issues.append({"id": row["id"], "reason": str(error)})
+        except ValueError:
+            issues.append({"id": row["id"], "reason": "Confirma las fechas de operación y liquidación."})
     return issues
 
 
