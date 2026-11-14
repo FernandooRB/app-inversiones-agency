@@ -18,8 +18,12 @@ module.exports=async({browser,out,url})=>{
     for(const width of [1440,768,390]){
       await page.setViewportSize({width,height:900});await page.waitForTimeout(200);
       if(label==='pending'){
-        const form=page.getByTestId('stExpander').filter({has:page.getByText('Preparar desde estados GBM',{exact:true})}).first();
-        await form.screenshot({path:path.join(out,`gbm-${label}-${width}.png`)});
+        await page.getByText(/filas de evidencia/).evaluate(el=>el.scrollIntoView({block:'start'}));
+        await page.screenshot({path:path.join(out,`gbm-${label}-${width}.png`)});
+        await page.getByRole('combobox',{name:'Clasificación',exact:true}).evaluate(el=>el.scrollIntoView({block:'start'}));
+        await page.screenshot({path:path.join(out,`gbm-editor-${width}.png`)});
+        await page.getByRole('button',{name:'Guardar propuesta revisada',exact:true}).scrollIntoViewIfNeeded();
+        await page.screenshot({path:path.join(out,`gbm-editor-end-${width}.png`)});
       }else await page.screenshot({path:path.join(out,`gbm-${label}-${width}.png`)});
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'Page overflows');
     }

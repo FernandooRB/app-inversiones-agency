@@ -819,12 +819,12 @@ def _ledger(context, *, demo=False):
                 flows.append(Flow(event.settled, amount, event.timing))
             result = _checked_input("Rendimiento histórico", performance, nav, flows)
             status.returns = result
+            status.performance_summary = explain_performance(events, nav, result, flows, base=base)
+            display_rows = summary_lines(status.performance_summary)
             a, b, c = st.columns(3)
-            a.metric("Ganancia separada de flujos", f"{result['gain']:,.2f} {base}")
-            b.metric("TWR del periodo", f"{result['twr']:.2%}" if result["twr"] is not None else "Pendiente")
-            c.metric(
-                "XIRR anualizada", f"{result['xirr']:.2%}" if result["xirr"] is not None else "Pendiente"
-            )
+            a.metric("Ganancia separada de flujos", display_rows[4][1])
+            b.metric("TWR del periodo", display_rows[9][1])
+            c.metric("XIRR anualizada", display_rows[10][1])
             st.caption(
                 f"TWR: {result['twr_status']} · XIRR: {result['xirr_status']}. "
                 "TWR requiere valuación en cada flujo y momento BOD/EOD confirmado."
@@ -844,7 +844,8 @@ def _ledger(context, *, demo=False):
                     "closing_reconciliation": reconciliation,
                 },
             )
-        status.performance_summary = explain_performance(events, nav, status.returns, flows, base=base)
+        if status.performance_summary is None:
+            status.performance_summary = explain_performance(events, nav, status.returns, flows, base=base)
     if not demo:
         _checked_input("Paquete de movimientos", download_review, context, files, cutoff=cutoff, base=base)
         return True
