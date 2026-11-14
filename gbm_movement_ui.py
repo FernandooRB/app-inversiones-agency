@@ -88,11 +88,16 @@ def render_movement_import(context):
             for warning in document["warnings"]:
                 st.warning(warning)
         if issues:
-            st.dataframe(
-                pd.DataFrame(issues).rename(columns={"id": "Referencia", "reason": "Por resolver"}),
-                hide_index=True,
-                width="stretch",
-            )
+            for issue in issues[:3]:
+                st.text("Por resolver: " + issue["reason"])
+            with st.expander("Todas las incidencias y sus referencias"):
+                st.dataframe(
+                    pd.DataFrame(issues)[["reason", "id"]].rename(
+                        columns={"id": "Referencia", "reason": "Por resolver"}
+                    ),
+                    hide_index=True,
+                    width="stretch",
+                )
         unresolved = {issue["id"] for issue in issues}
         editable = [row for row in draft["rows"] if not row["control"]]
         editable.sort(key=lambda row: row["id"] not in unresolved)
