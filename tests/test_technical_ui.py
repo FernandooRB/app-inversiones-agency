@@ -104,9 +104,9 @@ def test_user_change_does_not_keep_previous_list_or_quotes(monkeypatch, tmp_path
     monkeypatch.setattr(technical_ui, "configured_watchlist", lambda: (store, "test-issuer", "second-user"))
     app.run()
     assert app.text_area[0].value == "MSFT"
-    assert not app.session_state.filtered_state.get("_technical_histories", {})
-    assert "technical_sic_symbol_AAPL" not in app.session_state.filtered_state
-    assert "technical_paper_local_symbol" not in app.session_state.filtered_state
+    assert not app.session_state.get("_technical_histories", {})
+    assert "technical_sic_symbol_AAPL" not in app.session_state
+    assert "technical_paper_local_symbol" not in app.session_state
     assert not app.exception
 
 

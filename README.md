@@ -1,5 +1,8 @@
 # Optimizador de Portafolios V2
 
+El [recorrido GBM de documentos a rendimiento](docs/gbm_movement_workflow.md)
+conecta PDF, borrador revisable, libro, conciliación, explicación y descargas PDF/ZIP.
+
 Aplicación educativa de uso interno en Streamlit para analizar asignaciones de activos con datos históricos. Calcula
 portafolios de máximo Sharpe y mínima volatilidad, una frontera eficiente, VaR, CVaR y un reporte PDF.
 Los ejemplos ficticios verifican el software; el producto previsto para clientes utilizará datos
