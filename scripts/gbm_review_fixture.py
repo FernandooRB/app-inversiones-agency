@@ -33,8 +33,8 @@ def fictional_statement():
         [
         "DATOS DE PRACTICA: el abono del 05 de enero es una aportacion externa propia "
         "al cierre del dia (EOD).",
-        "Valuaciones verificadas ficticias: 31-DIC-25 = 100.00 MXN; "
-        "05-ENE-26 = 150.00 MXN; 30-ENE-26 = 150.00 MXN.",
+        "Valuaciones verificadas ficticias: 2025-12-31 = 100.00 MXN; "
+        "2026-01-05 = 150.00 MXN; 2026-01-30 = 150.00 MXN.",
             "El control impreso de 150.01 MXN conserva una diferencia de un centavo pendiente de revision.",
         "Este archivo es ficticio para probar el recorrido; "
         "no es un estado autentico de un intermediario.",

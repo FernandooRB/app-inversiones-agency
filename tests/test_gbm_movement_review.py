@@ -384,3 +384,14 @@ with patch("operations_ui._context",return_value=(None,None,None,None)):
     next(item for item in app.button if item.label == "Usar movimientos revisados").click().run()
     assert not app.error and not app.exception
     assert any(item.value == "Recuperado: Libro de movimientos." for item in app.caption)
+
+
+def test_downloadable_practice_preserves_unique_statement_period_and_explicit_flow_evidence():
+    from scripts.gbm_review_fixture import fictional_statement
+
+    raw = fictional_statement()
+    draft = read_movement_documents([raw])
+    assert len(draft["documents"]) == 1 and len(draft["rows"]) == 2
+    assert draft["rows"][1]["proposal"]["MomentoFlujo"] == "UNKNOWN"
+    cover = PdfReader(BytesIO(raw)).pages[0].extract_text()
+    assert "EOD" in cover and "2026-01-05 = 150.00 MXN" in cover

@@ -17,7 +17,10 @@ module.exports=async({browser,out,url})=>{
   const snapshots=async(label)=>{
     for(const width of [1440,768,390]){
       await page.setViewportSize({width,height:900});await page.waitForTimeout(200);
-      await page.screenshot({path:path.join(out,`gbm-${label}-${width}.png`)});
+      if(label==='pending'){
+        const form=page.getByTestId('stExpander').filter({has:page.getByText('Preparar desde estados GBM',{exact:true})}).first();
+        await form.screenshot({path:path.join(out,`gbm-${label}-${width}.png`)});
+      }else await page.screenshot({path:path.join(out,`gbm-${label}-${width}.png`)});
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'Page overflows');
     }
     await page.setViewportSize({width:1440,height:900});await page.waitForTimeout(500);await settle();
