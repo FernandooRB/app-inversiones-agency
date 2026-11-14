@@ -29,6 +29,7 @@ from operations_demo import DEMO_CONTEXT, DEMO_NAV_COMPLETE, DEMO_NAV_INVALID, d
 from operations_input_forms import complete_input
 from operations_jobs import refresh_subscription
 from operations_report import explain_performance, performance_pdf, summary_lines
+from operations_review import review_code_fingerprints
 from operations_review_ui import (
     download_review,
     new_review,
@@ -67,6 +68,19 @@ def _checked_input(stage, function, *args, **kwargs):
         raise
     except Exception as error:
         raise _OperationInputError(stage, error) from None
+
+
+def _cached_calculation(stage, function, *args, **kwargs):
+    signature = analysis_key(review_key("calculation"), stage, review_code_fingerprints(), args, kwargs)
+    return _checked_input(
+        stage,
+        session_compute,
+        st.session_state,
+        _key("operations_calculations"),
+        signature,
+        lambda: function(*args, **kwargs),
+        max_entries=8,
+    )
 
 
 def _forget_book_reference():
@@ -571,7 +585,7 @@ def _ledger(context, *, demo=False):
             "Las compras, ventas y dividendos son movimientos internos."
         )
         return
-    events = _checked_input("Libro de movimientos", read_ledger, source.getvalue())
+    events = _cached_calculation("Libro de movimientos", read_ledger, source.getvalue())
     defaults = review_defaults()
     cutoff = st.date_input(
         "Cierre del libro",
@@ -580,7 +594,7 @@ def _ledger(context, *, demo=False):
         key=review_key("ops_cutoff"),
     )
     files = {"ledger": source}
-    book = _checked_input("Cierre del libro", book_at, events, cutoff)
+    book = _cached_calculation("Cierre del libro", book_at, events, cutoff)
     status.cutoff, status.book = cutoff.isoformat(), book
     _remember_book(book, cutoff, source.getvalue())
     ledger_view = pd.DataFrame([asdict(event) for event in events]).rename(
@@ -820,7 +834,7 @@ def _ledger(context, *, demo=False):
                         raise PortfolioError("Un flujo no tiene un único FX positivo y documentado.")
                     amount *= float(match.iloc[0]["Tasa"])
                 flows.append(Flow(event.settled, amount, event.timing))
-            result = _checked_input("Rendimiento histórico", performance, nav, flows)
+            result = _cached_calculation("Rendimiento histórico", performance, nav, flows)
             status.returns = result
             status.performance_summary = explain_performance(events, nav, result, flows, base=base)
             display_rows = summary_lines(status.performance_summary)
