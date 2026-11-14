@@ -104,6 +104,17 @@ def _open_review_step(area, step):
         st.session_state[review_key("ops_review_save_panel")] = True
 
 
+def _explanation_table(rows, name):
+    key = _key(name)
+    with st.container(key=key):
+        st.html(f"""<style>
+          .st-key-{key} table td:last-child, .st-key-{key} table th:last-child {{
+            text-align:right!important;font-variant-numeric:tabular-nums;
+          }}
+        </style>""")
+        st.table(pd.DataFrame(rows, columns=["Concepto", "Resultado"]).style.hide(axis="index"))
+
+
 def _status_panel(context, *, demo=False, review_available=False):
     status = st.session_state.get(_key("_ops_status"))
     if status is None:
@@ -126,17 +137,9 @@ def _status_panel(context, *, demo=False, review_available=False):
             st.caption("Ganancia monetaria")
             rows = summary_lines(explanation)
             st.subheader(rows[4][1])
-            st.table(
-                pd.DataFrame(rows[:4] + [rows[9]], columns=["Concepto", "Resultado"])
-                .style.hide(axis="index")
-                .set_properties(subset=["Resultado"], **{"text-align": "right"})
-            )
+            _explanation_table(rows[:4] + [rows[9]], "performance_primary")
             with st.expander("Ingresos, cargos y detalle del rendimiento"):
-                st.table(
-                    pd.DataFrame(rows[5:9] + [rows[10]], columns=["Concepto", "Resultado"])
-                    .style.hide(axis="index")
-                    .set_properties(subset=["Resultado"], **{"text-align": "right"})
-                )
+                _explanation_table(rows[5:9] + [rows[10]], "performance_detail")
         with meaning:
             st.write("**Qué explica el cambio**")
             st.write("Separamos lo que aportaste o retiraste de la variación de tu patrimonio.")
