@@ -3,9 +3,19 @@
 import streamlit as st
 
 
+def render_document_language():
+    # Streamlit has no page-language option. This constant script sets the app
+    # document's language; no uploaded or user-controlled content enters JavaScript.
+    st.html(
+        "<script>document.documentElement.lang = 'es-MX';</script>",
+        unsafe_allow_javascript=True,
+    )
+
+
 def render_shell(
     areas: tuple[str, ...] = ("Análisis", "Operación", "Seguimiento", "Expedientes", "Guía operativa"),
 ):
+    render_document_language()
     # 256px parameter rail + 2 x 24px gutters + fluid canvas. At mobile width the
     # native Streamlit rail folds; form columns and the canvas remain fluid.
     st.html("""<style>

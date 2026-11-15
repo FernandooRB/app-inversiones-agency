@@ -9,6 +9,7 @@ module.exports=async({browser,out,url})=>{
   const page=await browser.newPage({viewport:{width:1440,height:900}});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(url);
+  await page.waitForFunction(()=>document.documentElement.lang==='es-MX');
   const settle=async()=>{await page.waitForTimeout(150);await page.locator('[data-stale="true"]').first().waitFor({state:'detached'});};
   const expand=async(label,p=page)=>{
     const block=p.getByText(label,{exact:true}).first().locator('xpath=ancestor::*[@data-testid="stExpander"][1]');
