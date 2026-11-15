@@ -84,12 +84,13 @@ from stress import (
 from tax_cash_flows import read_tax_cash_flows_csv
 from tax_impact import estimate_tax_reserve, read_tax_basis_csv
 from walk_forward import run_walk_forward_backtest
-from workspace_presentation import render_shell
+from workspace_presentation import render_document_language, render_shell
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOGGER = logging.getLogger(__name__)
 
 st.set_page_config(page_title="SIG | Análisis y seguimiento de portafolios", layout="wide")
+render_document_language()
 require_access()
 
 if st.query_params.get("demo_operacion") == "1":
