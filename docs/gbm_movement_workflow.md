@@ -59,6 +59,13 @@ procedencia. Incluye el resumen TXT del estado al descargarlo. Puede guardar un
 borrador incompleto sin libro. Los PDF/XML quedan fuera; el archivo contiene datos
 privados sin cifrar y debe custodiarse como el original.
 
+Guardar desde el panel del borrador conserva también el libro y los CSV ya incorporados
+a la revisión. Si todavía no existe libro, el panel lo distingue y muestra el siguiente
+paso; dos JSON internos y un TXT pueden ser un borrador legítimo sin rendimiento.
+
+Puedes continuar en **Implementación** para [preparar una propuesta desde el libro](ledger_proposals.md),
+con precios, lotes y pesos cotejados y una nueva confirmación de costos y límites.
+
 Se siguen leyendo los paquetes versión 1. Reabrir un ZIP no restaura aprobaciones:
 las confirmaciones se renuevan. Para volver a usar un borrador documental debes
 adjuntar los originales; además de sus huellas se vuelve a comprobar que las filas

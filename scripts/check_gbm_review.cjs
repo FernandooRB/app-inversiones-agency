@@ -11,10 +11,15 @@ module.exports=async({browser,out,url})=>{
   await page.goto(url);
   const settle=async()=>{await page.waitForTimeout(150);await page.locator('[data-stale="true"]').first().waitFor({state:'detached'});};
   const expand=async(label,p=page)=>{
-    const block=p.getByTestId('stExpander').filter({has:p.getByText(label,{exact:true})}).first();
+    const block=p.getByText(label,{exact:true}).first().locator('xpath=ancestor::*[@data-testid="stExpander"][1]');
     const opened=await block.evaluate(el=>el.tagName==='DETAILS'?el.open:!!el.querySelector('details')?.open);
     if(!opened)await block.getByText(label,{exact:true}).click();
     return block;
+  };
+  const checkZip=(name,roles)=>{
+    const result=JSON.parse(execFileSync(process.env.SIG_PYTHON||'python',['-c',
+      'import json,sys;from zipfile import ZipFile;z=ZipFile(sys.argv[1]);m=json.loads(z.read("review.json"));print(json.dumps({"roles":sorted(m["files"]),"members":z.namelist()}))',path.join(out,name)],{encoding:'utf8'}));
+    assert.deepEqual(result.roles,[...roles].sort());return result;
   };
   const snapshots=async(label)=>{
     for(const width of [1440,768,390]){
@@ -26,7 +31,11 @@ module.exports=async({browser,out,url})=>{
         await page.screenshot({path:path.join(out,`gbm-editor-${width}.png`)});
         await page.getByRole('button',{name:'Guardar propuesta revisada',exact:true}).scrollIntoViewIfNeeded();
         await page.screenshot({path:path.join(out,`gbm-editor-end-${width}.png`)});
-      }else await page.screenshot({path:path.join(out,`gbm-${label}-${width}.png`)});
+      }else{
+        const focus=label==='partial-export'?page.getByText(/Este ZIP guarda el borrador GBM/):label==='proposal-inputs'?page.getByText('SIM-NEW · Títulos del libro: 0',{exact:true}):label==='proposal-result'?page.getByText(/Efectivo final.*89.94/):null;
+        if(focus)await focus.evaluate(el=>{el.style.scrollMarginTop='80px';el.scrollIntoView({block:'start'});});
+        await page.screenshot({path:path.join(out,`gbm-${label}-${width}.png`)});
+      }
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'Page overflows');
     }
     await page.setViewportSize({width:1440,height:900});await page.waitForTimeout(500);await settle();
@@ -39,6 +48,13 @@ module.exports=async({browser,out,url})=>{
   await settle();await page.getByRole('button',{name:'Preparar borrador GBM',exact:true}).click();
   await page.getByText(/1 incidencias de normalización/).waitFor();await settle();
   await snapshots('pending');
+  const partial=await expand('Guardar borrador GBM');
+  await page.getByText(/Este ZIP guarda el borrador GBM/).waitFor();
+  await snapshots('partial-export');
+  const partialEvent=page.waitForEvent('download');await partial.getByText('Descargar paquete de movimientos',{exact:true}).click();
+  await (await partialEvent).saveAs(path.join(out,'gbm_draft_only.zip'));
+  const partialContents=checkZip('gbm_draft_only.zip',[]);
+  assert(partialContents.members.includes('draft/gbm.json')&&partialContents.members.includes('evidence/review.txt'));
   const classification=page.getByRole('combobox',{name:'Clasificación',exact:true});
   await classification.fill('DEPOSIT');await classification.press('ArrowDown');await classification.press('Enter');
   const timing=page.getByRole('combobox',{name:/Momento del flujo/});
@@ -79,10 +95,46 @@ module.exports=async({browser,out,url})=>{
   const zipEvent=page.waitForEvent('download');
   await save.getByText('Descargar paquete de movimientos',{exact:true}).click();
   await (await zipEvent).saveAs(path.join(out,'gbm_review_v2.zip'));
+  checkZip('gbm_review_v2.zip',['ledger','controls','nav']);
+  const fromDraft=await expand('Guardar borrador GBM');
+  const combinedEvent=page.waitForEvent('download');await fromDraft.getByText('Descargar paquete de movimientos',{exact:true}).click();
+  await (await combinedEvent).saveAs(path.join(out,'gbm_from_draft_panel.zip'));
+  checkZip('gbm_from_draft_panel.zip',['ledger','controls','nav']);
   await page.addScriptTag({path:require.resolve('axe-core/axe.min.js')});
   const audit=await page.evaluate(async()=>{const r=await axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}});return {violations:r.violations,incomplete:r.incomplete,passes:r.passes.length};});
   fs.writeFileSync(path.join(out,'gbm_accessibility.json'),JSON.stringify(audit,null,2));
   assert.equal(audit.violations.filter(v=>['critical','serious'].includes(v.impact)).length,0,'Unresolved accessibility failures');
+  await page.getByRole('tab',{name:'Implementación',exact:true}).click();await settle();
+  const bridge=await expand('Preparar desde el libro de movimientos');
+  const extra=bridge.getByRole('textbox',{name:'Instrumentos adicionales, separados por coma',exact:true});
+  await extra.fill('SIM-NEW');await extra.press('Tab');
+  await bridge.getByRole('textbox',{name:'Precio sin ajuste · SIM-NEW',exact:true}).waitFor();
+  for(const [label,value] of [['Precio sin ajuste · SIM-NEW','10'],['Lote · SIM-NEW','1'],['Peso objetivo entre 0 y 1 · SIM-NEW','0.4'],['Fuente de precio y lote · SIM-NEW','Datos ficticios, PDF de práctica página 1']])await bridge.getByRole('textbox',{name:label,exact:true}).fill(value);
+  await snapshots('proposal-inputs');
+  await bridge.getByRole('checkbox',{name:'Cotejé títulos, efectivo liquidado, precios, lotes y pesos con sus fuentes',exact:true}).press('Space');
+  await bridge.getByRole('button',{name:'Usar libro para preparar propuesta',exact:true}).click();
+  await page.getByText('Posiciones y efectivo preparados. Revisa los costos y límites antes de calcular.',{exact:true}).waitFor();await settle();
+  const implementation=page.getByRole('tabpanel',{name:'Implementación',exact:true});
+  const tariff=implementation.getByRole('textbox',{name:'Fuente y vigencia de las tarifas aplicables',exact:true});
+  await tariff.fill('Tarifa ficticia del PDF de práctica');await tariff.press('Tab');await settle();
+  const commission=implementation.getByRole('spinbutton',{name:'Comisión · puntos base por operación',exact:true});
+  await commission.fill('10');await commission.press('Enter');await settle();
+  const orderCheck=implementation.getByRole('checkbox',{name:'Confirmé precios sin ajuste, títulos, lotes, moneda y tarifas de esta cuenta',exact:true});
+  await orderCheck.press('Space');await settle();
+  await implementation.getByRole('button',{name:'Calcular propuesta de títulos',exact:true}).click();
+  await page.getByText(/Efectivo final.*89.94/).waitFor();await snapshots('proposal-result');
+  const proposalEvent=page.waitForEvent('download');await implementation.getByText('Descargar propuesta CSV',{exact:true}).click();
+  await (await proposalEvent).saveAs(path.join(out,'gbm_proposal.csv'));
+  const csvResult=JSON.parse(execFileSync(process.env.SIG_PYTHON||'python',['-c','import csv,json,sys;rows=list(csv.DictReader(open(sys.argv[1],encoding="utf-8-sig")));print(json.dumps(rows))',path.join(out,'gbm_proposal.csv')],{encoding:'utf8'}));
+  assert.equal(csvResult.length,1);assert.equal(Number(csvResult[0]['Títulos a operar']),6);assert.equal(Number(csvResult[0]['Comisión e IVA']),0.06);
+  const inputsEvent=page.waitForEvent('download');await implementation.getByText('Descargar insumos de propuesta CSV',{exact:true}).click();
+  await (await inputsEvent).saveAs(path.join(out,'gbm_proposal_inputs.csv'));
+  const proposalAxe=await page.evaluate(async()=>{const r=await axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}});return {violations:r.violations,incomplete:r.incomplete,passes:r.passes.length};});
+  fs.writeFileSync(path.join(out,'gbm_proposal_accessibility.json'),JSON.stringify(proposalAxe,null,2));
+  assert.equal(proposalAxe.violations.filter(v=>['critical','serious'].includes(v.impact)).length,0);
+  await commission.fill('20');await commission.press('Enter');await settle();
+  assert.equal(await orderCheck.isChecked(),false);assert.equal(await implementation.getByText('Descargar propuesta CSV',{exact:true}).count(),0);
+  fs.writeFileSync(path.join(out,'gbm_proposal_verification.json'),JSON.stringify({fictional_only:true,ledger_to_proposal:true,quantity:6,cost:0.06,cash:89.94,partial_export_disclosed:true,draft_panel_keeps_ledger:true,changed_tariff_withdraws_result:true,confirmations_reset:true,no_orders_sent:true,widths:[1440,768,390],physical_phone:false,human_test:false},null,2));
   const restored=await browser.newPage({viewport:{width:390,height:900}});
   await restored.goto(url);const opener=await expand('Abrir paquete de movimientos',restored);
   await opener.locator('input[type=file]').setInputFiles(path.join(out,'gbm_review_v2.zip'));
