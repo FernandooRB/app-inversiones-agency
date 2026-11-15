@@ -31,13 +31,15 @@ def fictional_statement():
     page.setFont("Helvetica", 9)
     for index, note in enumerate(
         [
-        "DATOS DE PRACTICA: el abono del 05 de enero es una aportacion externa propia "
-        "al cierre del dia (EOD).",
-        "Valuaciones verificadas ficticias: 2025-12-31 = 100.00 MXN; "
-        "2026-01-05 = 150.00 MXN; 2026-01-30 = 150.00 MXN.",
+            "DATOS DE PRACTICA: el abono del 05 de enero es una aportacion externa propia "
+            "al cierre del dia (EOD).",
+            "Valuaciones verificadas ficticias: 2025-12-31 = 100.00 MXN; "
+            "2026-01-05 = 150.00 MXN; 2026-01-30 = 150.00 MXN.",
             "El control impreso de 150.01 MXN conserva una diferencia de un centavo pendiente de revision.",
-        "Este archivo es ficticio para probar el recorrido; "
-        "no es un estado autentico de un intermediario.",
+            "Propuesta ficticia: SIM-NEW, precio sin ajuste 10.00 MXN al 2026-01-30, lote 1, peso 0.4.",
+            "Tarifa ficticia: comision 10 puntos base, minimo 0, IVA 0 y costo de mercado 0.",
+            "Este archivo es ficticio para probar el recorrido; "
+            "no es un estado autentico de un intermediario.",
         ]
     ):
         page.drawString(30, 510 - 14 * index, note)

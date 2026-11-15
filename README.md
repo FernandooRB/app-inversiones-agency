@@ -2,6 +2,8 @@
 
 El [recorrido GBM de documentos a rendimiento](docs/gbm_movement_workflow.md)
 conecta PDF, borrador revisable, libro, conciliación, explicación y descargas PDF/ZIP.
+La [conexión del libro con propuestas por títulos](docs/ledger_proposals.md) reutiliza
+posiciones y efectivo liquidado con precios, lotes, pesos y costos revisados.
 
 Aplicación educativa de uso interno en Streamlit para analizar asignaciones de activos con datos históricos. Calcula
 portafolios de máximo Sharpe y mínima volatilidad, una frontera eficiente, VaR, CVaR y un reporte PDF.

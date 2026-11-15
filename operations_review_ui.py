@@ -65,6 +65,11 @@ def _current_files():
     return files
 
 
+def current_review_files():
+    """Current account inputs, including uploads that replaced recovered files."""
+    return _current_files()
+
+
 def save_review_input(role, raw):
     current = dict(_recovery())
     files = _current_files()
@@ -125,6 +130,7 @@ def clear_review():
     keys = {_context_key(name) for name in names} | {review_key(name) for name in names}
     keys.update(_open_key(name) for name in ("ops_review_open_panel", "ops_review_zip", "ops_review_open"))
     keys.add("_analysis_memo_" + _context_key("operations_calculations"))
+    keys.add("_analysis_memo_" + _context_key("bridge_book"))
     keys.update(
         _context_key(name)
         for name in (
@@ -134,6 +140,7 @@ def clear_review():
             "_ops_focus_step",
             "monitor_confirmation",
             "_gbm_attached",
+            "_ops_proposal_bridge",
         )
     )
     for key in keys:
@@ -265,7 +272,12 @@ def download_review(context, files, *, cutoff, base, suffix=""):
     ):
         if not st.session_state.get(panel_key, False):
             return
-        present = {role: source.getvalue() for role, source in files.items() if source is not None}
+        present = current_review_files()
+        for role, source in files.items():
+            if source is None:
+                present.pop(role, None)
+            else:
+                present[role] = source.getvalue()
         draft = movement_draft()
         status = st.session_state.get(_context_key("_ops_status"))
         summary = status_text(status.snapshot("Revisión de movimientos")) if status and draft else None
@@ -283,6 +295,18 @@ def download_review(context, files, *, cutoff, base, suffix=""):
             lambda: build_operations_review(present, **args),
             max_entries=1,
         )
+        if draft and "ledger" not in present:
+            st.info(
+                "Este ZIP guarda el borrador GBM. Para preparar el libro, revisa las incidencias, "
+                "coteja los datos con el PDF y pulsa Usar movimientos revisados."
+            )
+            st.caption(
+                "Los archivos internos permiten retomar el borrador; "
+                "el cálculo de rendimiento sigue pendiente."
+            )
+        elif "ledger" in present:
+            st.write("**Este ZIP incluye el libro de movimientos y los datos disponibles de esta revisión.**")
+        st.caption("El PDF de rendimiento se prepara por separado en Archivos y resumen descargable.")
         st.caption(
             "Descarga este ZIP y comprueba que quedó guardado en tu dispositivo antes de cerrar. "
             "Para continuar, abre Abrir paquete de movimientos, carga el ZIP y revisa la vista previa. "
@@ -297,4 +321,9 @@ def download_review(context, files, *, cutoff, base, suffix=""):
             key=review_key("ops_review_download" + suffix),
             on_click="ignore",
         )
-        st.write("Incluye: " + ", ".join(ROLE_LABELS[role] for role in present) + ".")
+        labels = [ROLE_LABELS[role] for role in ROLE_LABELS if role in present]
+        if draft:
+            labels.append("Borrador GBM con sus correcciones")
+        if summary:
+            labels.append("Resumen TXT")
+        st.write("Incluye: " + ", ".join(labels) + ".")

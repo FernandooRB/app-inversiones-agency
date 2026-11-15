@@ -36,7 +36,7 @@ def render_movement_import(context):
             "Los archivos y sus importes permanecen privados; el ZIP excluye los PDF/XML."
         )
         fixture = session_compute(
-            st.session_state, "gbm_fictional_pdf", "v1", fictional_statement, max_entries=1
+            st.session_state, "gbm_fictional_pdf", "v2-proposal", fictional_statement, max_entries=1
         )
         st.download_button(
             "Descargar PDF ficticio de práctica",

@@ -398,6 +398,32 @@ def test_downloadable_practice_preserves_unique_statement_period_and_explicit_fl
     assert "EOD" in cover and "2026-01-05 = 150.00 MXN" in cover
 
 
+@pytest.mark.parametrize("with_book", [False, True])
+def test_draft_download_discloses_its_state_and_keeps_the_current_ledger_if_present(with_book):
+    from unittest.mock import patch
+
+    from streamlit.testing.v1 import AppTest
+
+    files = {"ledger": materialize_draft(ready_draft())} if with_book else {}
+    script = f"""
+from datetime import date
+import streamlit as st
+from operations_review_ui import download_review
+st.session_state.setdefault('_ops_review_temporary', {{
+    'token':'export-test','draft':{ready_draft()!r},'files':{files!r}
+}})
+st.session_state['ops_review_save_panelgbm_temporary_export-test']=True
+download_review((None,None,None,None), {{}}, cutoff=date(2026,1,30), base='MXN', suffix='gbm')
+"""
+    with patch("operations_review_ui.build_operations_review", wraps=build_operations_review) as build:
+        app = AppTest.from_string(script, default_timeout=40).run()
+    assert not app.error and not app.exception
+    assert ("ledger" in build.call_args.args[0]) is with_book
+    if not with_book:
+        assert any("Este ZIP guarda el borrador GBM" in item.value for item in app.info)
+    assert not any(item.value == "Incluye: ." for item in app.markdown)
+
+
 def test_navigation_and_pdf_reuse_calculations_but_changed_inputs_reset_results_and_consent():
     from unittest.mock import patch
 
