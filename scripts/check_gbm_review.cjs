@@ -158,6 +158,7 @@ module.exports=async({browser,out,url})=>{
   assert.equal(errors.length,0);
   await restored.screenshot({path:path.join(out,'gbm-restored-390.png')});
   await opener.locator('input[type=file]').setInputFiles(path.join(out,'gbm_review_v3.zip'));
+  await restored.getByText('Incluye propuesta, tarifas, fuentes y límites. El resultado guardado es histórico; requiere revisión y nuevo cálculo.',{exact:true}).waitFor();
   await restored.getByRole('button',{name:'Reemplazar revisión con este paquete',exact:true}).click();
   await restored.getByRole('tab',{name:'Implementación',exact:true}).click();
   const recoveredBridge=await expand('Preparar desde el libro de movimientos',restored);
