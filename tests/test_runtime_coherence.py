@@ -87,6 +87,25 @@ assert loaded_module_changes(root) == ['synthetic_legacy_module']
     assert result.returncode == 0, result.stderr
 
 
+def test_script_entrypoint_is_not_an_untracked_import(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    script = tmp_path / "app.py"
+    script.write_text(
+        f"""
+import sys
+from pathlib import Path
+sys.path.insert(0,{str(root)!r})
+from runtime_coherence import install_local_tracking, loaded_module_changes
+root=Path(__file__).resolve().parent
+install_local_tracking(root)
+assert loaded_module_changes(root) == [], loaded_module_changes(root)
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+
+
 def test_login_does_not_load_advanced_financial_engines():
     root = Path(__file__).resolve().parents[1]
     result = subprocess.run(

@@ -32,6 +32,8 @@ jobs:
               target.write(str(Path(".venv/bin").resolve()) + "\n")
       - run: python -m pip install -r requirements.txt
       - run: npm install --no-save --prefix "$RUNNER_TEMP/sig-browser" playwright-core@1.62.1 axe-core@4.11.2
+      - name: Verify real-entrypoint smoke isolation
+        run: node --test scripts/test_entrypoint_boot.cjs
       - name: Download and reopen a fictional operations review in Chrome
         env:
           NODE_PATH: ${{ runner.temp }}/sig-browser/node_modules

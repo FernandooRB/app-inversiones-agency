@@ -66,7 +66,9 @@ def install_local_tracking(root):
         # Modules predating tracking cannot be attested. A clean process will capture them.
         for name, module in tuple(sys.modules.items()):
             location = getattr(module, "__file__", None)
-            if location and name != __name__:
+            # Streamlit recreates __main__ for each script run; it is the entrypoint,
+            # not a cached import. Imported local modules still require attestation.
+            if location and name not in {__name__, "__main__"}:
                 location = Path(location).resolve()
                 if location.suffix == ".py" and _in_scope(location, root) and name not in _LOADED:
                     _LOADED[name] = (location, None)
