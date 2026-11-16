@@ -7,6 +7,7 @@ from uuid import uuid4
 import streamlit as st
 
 from analysis_session import analysis_key, session_compute
+from operations_proposal import portable_proposal
 from operations_review import build_operations_review, read_operations_review, review_code_fingerprints
 from operations_status import status_text
 from portfolio_core import PortfolioError
@@ -50,6 +51,28 @@ def review_defaults():
 
 def movement_draft():
     return _recovery().get("draft")
+
+
+def recovered_proposal():
+    return _recovery().get("proposal")
+
+
+def current_proposal(context, files, *, cutoff, base):
+    proposal = st.session_state.get("_execution_proposal")
+    binding = (context[2]["id"] if context[2] else None, context[3])
+    if not proposal or proposal.get("context") != binding:
+        return None
+    if not st.session_state.get(_context_key("orders_confirmation")) or proposal.get(
+        "signature"
+    ) != st.session_state.get(_context_key("orders_signature")):
+        return None
+    inputs = proposal["inputs"]
+    if inputs["date"] != str(cutoff) or inputs["currency"] != base:
+        return None
+    origin = inputs.get("book_origin")
+    if origin and ("ledger" not in files or origin["ledger_sha256"] != sha256(files["ledger"]).hexdigest()):
+        return None
+    return portable_proposal(proposal)
 
 
 def attached_originals():
@@ -132,6 +155,12 @@ def clear_review():
     keys.add("_analysis_memo_" + _context_key("operations_calculations"))
     keys.add("_analysis_memo_" + _context_key("bridge_book"))
     keys.update(
+        key
+        for key in st.session_state
+        if key.endswith("_" + st.session_state.get("_ops_context_key", "temporary"))
+        and key.startswith(("proposal_", "orders_"))
+    )
+    keys.update(
         _context_key(name)
         for name in (
             "_ops_last_book",
@@ -198,11 +227,17 @@ def open_review(context):
                 st.text(
                     f"Corte: {manifest['cutoff']} · Moneda: {manifest['base']} · {len(files)} archivos CSV"
                 )
-                st.caption("Incluye: " + ", ".join(ROLE_LABELS[role] for role in files) + ".")
+                if files:
+                    st.caption("Incluye: " + ", ".join(ROLE_LABELS[role] for role in files) + ".")
                 if manifest.get("draft_data"):
                     st.caption(
                         "Incluye borrador GBM y procedencia. "
                         "Requiere cotejo de los originales y nuevas confirmaciones."
+                    )
+                if manifest.get("proposal_data"):
+                    st.caption(
+                        "Incluye propuesta, tarifas, fuentes y límites. "
+                        "El resultado guardado es histórico; requiere revisión y nuevo cálculo."
                     )
                 st.caption(
                     "Cargar el ZIP no cambia la revisión. Las vistas se recalculan al abrirlo; "
@@ -223,6 +258,7 @@ def open_review(context):
                         "code_changed": manifest["code_sha256"]
                         != review_code_fingerprints(schema=manifest["schema"]),
                         "draft": manifest.get("draft_data"),
+                        "proposal": manifest.get("proposal_data"),
                     }
                     st.session_state.pop(_context_key("_ops_last_book"), None)
                     st.session_state.pop(_context_key("_gbm_attached"), None)
@@ -263,10 +299,14 @@ def reset_confirmation(name, parts):
         st.session_state[signature_key] = signature
 
 
-def download_review(context, files, *, cutoff, base, suffix=""):
+def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
     panel_key = review_key("ops_review_save_panel" + suffix)
     with st.expander(
-        "Guardar borrador GBM" if suffix else "Guardar revisión de movimientos",
+        "Guardar propuesta y revisión"
+        if suffix == "_proposal"
+        else "Guardar borrador GBM"
+        if suffix
+        else "Guardar revisión de movimientos",
         key=panel_key,
         on_change="rerun",
     ):
@@ -279,6 +319,7 @@ def download_review(context, files, *, cutoff, base, suffix=""):
             else:
                 present[role] = source.getvalue()
         draft = movement_draft()
+        proposal = proposal or current_proposal(context, present, cutoff=cutoff, base=base)
         status = st.session_state.get(_context_key("_ops_status"))
         summary = status_text(status.snapshot("Revisión de movimientos")) if status and draft else None
         args = {
@@ -286,12 +327,15 @@ def download_review(context, files, *, cutoff, base, suffix=""):
             "base": base,
             "draft": draft,
             "summary": summary,
+            "proposal": proposal,
             **_scope(context),
         }
         _manifest, contents = session_compute(
             st.session_state,
             "operations_zip",
-            analysis_key(present, args, review_code_fingerprints(schema=2 if draft else 1)),
+            analysis_key(
+                present, args, review_code_fingerprints(schema=3 if proposal else 2 if draft else 1)
+            ),
             lambda: build_operations_review(present, **args),
             max_entries=1,
         )
@@ -326,4 +370,6 @@ def download_review(context, files, *, cutoff, base, suffix=""):
             labels.append("Borrador GBM con sus correcciones")
         if summary:
             labels.append("Resumen TXT")
+        if proposal:
+            labels.append("Propuesta completa con fuentes, tarifas, límites y resultado histórico")
         st.write("Incluye: " + ", ".join(labels) + ".")

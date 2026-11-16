@@ -208,12 +208,22 @@ def executable_plan(
             for q, p in zip(delta, price, strict=True)
         ]
     )
-    commissions = np.where(notional > 0, np.maximum(notional * commission, assumptions.minimum_commission), 0)
+    commission_decimal = Decimal(str(assumptions.commission_bps)) / Decimal(10000)
+    market_decimal = Decimal(str(assumptions.market_cost_bps)) / Decimal(10000)
+    vat_decimal = Decimal(1) + Decimal(str(assumptions.vat_rate))
+    minimum_decimal = Decimal(str(assumptions.minimum_commission))
+    commissions = [
+        max(Decimal(str(value)) * commission_decimal, minimum_decimal) if value else Decimal(0)
+        for value in notional
+    ]
     commission_vat = np.array(
-        [float(Decimal(str(value * vat)).quantize(cent, rounding=ROUND_CEILING)) for value in commissions]
+        [float((value * vat_decimal).quantize(cent, rounding=ROUND_CEILING)) for value in commissions]
     )
     market_cost = np.array(
-        [float(Decimal(str(value * market)).quantize(cent, rounding=ROUND_CEILING)) for value in notional]
+        [
+            float((Decimal(str(value)) * market_decimal).quantize(cent, rounding=ROUND_CEILING))
+            for value in notional
+        ]
     )
     costs = commission_vat + market_cost
     signed_notional = np.sign(delta) * notional

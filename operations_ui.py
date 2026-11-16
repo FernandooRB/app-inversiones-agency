@@ -28,7 +28,8 @@ from multi_currency_wealth import consolidate_wealth, consolidated_performance, 
 from operations_demo import DEMO_CONTEXT, DEMO_NAV_COMPLETE, DEMO_NAV_INVALID, demo_operations, demo_url
 from operations_input_forms import complete_input
 from operations_jobs import refresh_subscription
-from operations_proposal_ui import prepare_book_proposal
+from operations_proposal import portable_proposal, proposal_pdf
+from operations_proposal_ui import hydrate_proposal, prepare_book_proposal
 from operations_report import explain_performance, performance_pdf, summary_lines
 from operations_review import review_code_fingerprints
 from operations_review_ui import (
@@ -879,6 +880,7 @@ def _implementation(context):
         "Minimiza desvío del objetivo y costos sujetos a efectivo, lotes, concentración y rotación. "
         "Comprueba precios, lotes y tarifas con tu intermediario antes de usar una propuesta."
     )
+    recovery = hydrate_proposal()
     prepared = prepare_book_proposal()
     origin = st.radio(
         "Origen de la propuesta", ["CSV manual", "Libro de movimientos"], key=_key("proposal_origin")
@@ -897,8 +899,18 @@ def _implementation(context):
         if using_book
         else upload.getvalue()
         if origin == "CSV manual" and upload
+        else base64.b64decode(recovery["inputs"]["csv"])
+        if origin == "CSV manual" and recovery
         else b""
     )
+    recovered_target = (
+        recovery["inputs"]["target"] if recovery and origin == "CSV manual" and not upload else None
+    )
+    if recovered_target is not None:
+        st.caption(
+            "Insumos y pesos efectivos recuperados. "
+            "Revisa las fuentes y confirma de nuevo antes de recalcular."
+        )
     if using_book:
         cash = float(prepared["cash"])
         currency = prepared["currency"]
@@ -977,10 +989,11 @@ def _implementation(context):
         else None,
     }
     signature = analysis_key(
-        _key("proposal"),
+        review_key("proposal"),
         source_raw,
         inputs,
         model_signature,
+        recovered_target,
         Path(__file__).with_name("executable_allocation.py").read_bytes().replace(b"\r\n", b"\n"),
     )
     if st.session_state.get(_key("orders_signature")) != signature:
@@ -997,6 +1010,8 @@ def _implementation(context):
         if "PesoObjetivo" not in positions:
             raise PortfolioError("Falta el peso objetivo de cada instrumento.")
         target = pd.to_numeric(positions["PesoObjetivo"], errors="raise").to_numpy()
+        if recovered_target is not None:
+            target = pd.Series(recovered_target).to_numpy(dtype=float)
         if optimize:
             _, _, state, account = context
             if (
@@ -1083,6 +1098,21 @@ def _implementation(context):
             key=_key("proposal_inputs_download"),
             on_click="ignore",
         )
+        portable = portable_proposal(proposal)
+        status = st.session_state.get(_key("_ops_status"))
+        snapshot = status.snapshot("Libro de origen") if using_book and status else None
+        if st.button("Preparar PDF de la propuesta", key=_key("proposal_pdf_prepare")):
+            st.session_state[_key("proposal_pdf")] = {
+                "signature": analysis_key(portable, snapshot),
+                "bytes": proposal_pdf(portable, snapshot),
+            }
+        pdf = st.session_state.get(_key("proposal_pdf"))
+        if pdf and pdf["signature"] == analysis_key(portable, snapshot):
+            st.download_button(
+                "Descargar PDF de la propuesta", pdf["bytes"], "propuesta_cartera.pdf",
+                "application/pdf", on_click="ignore"
+            )
+        download_review(context, {}, cutoff=quote_day, base=currency, suffix="_proposal", proposal=portable)
         _save_evidence(
             context,
             "Conservar propuesta e insumos",

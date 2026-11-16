@@ -11,6 +11,7 @@ from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile, ZipInfo
 from zlib import error as ZlibError
 
 from gbm_movement_review import validate_draft
+from operations_proposal import MAX_PROPOSAL_BYTES, validate_proposal
 from portfolio_core import PortfolioError
 
 FILE_ROLES = ("ledger", "controls", "quotes", "fx", "repo_values", "nav", "flow_fx")
@@ -31,6 +32,14 @@ V2_CODE_FILES = (
     "operations_input_forms.py",
     "operations_report.py",
 )
+V3_CODE_FILES = (
+    *V2_CODE_FILES,
+    "operations_proposal.py",
+    "operations_proposal_bridge.py",
+    "operations_proposal_ui.py",
+    "executable_allocation.py",
+    "implementation_costs.py",
+)
 MAX_PACKAGE_BYTES = 15_000_000
 MAX_MANIFEST_BYTES = 32_000
 _FIELDS = {"schema", "kind", "created_at", "scope", "cutoff", "base", "files", "code_sha256", "review_state"}
@@ -41,7 +50,7 @@ def review_code_fingerprints(*, schema=1):
     # Normalize source line endings for Windows/Linux portability; input CSV bytes stay exact.
     return {
         name: sha256((root / name).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
-        for name in (V2_CODE_FILES if schema == 2 else CODE_FILES)
+        for name in (V3_CODE_FILES if schema == 3 else V2_CODE_FILES if schema == 2 else CODE_FILES)
     }
 
 
@@ -83,7 +92,9 @@ def _no_constant(_value):
     raise ValueError
 
 
-def build_operations_review(files, *, cutoff, base, case_id=None, account_id=None, draft=None, summary=None):
+def build_operations_review(
+    files, *, cutoff, base, case_id=None, account_id=None, draft=None, summary=None, proposal=None
+):
     """Preserve exact CSV bytes and settings, including incomplete drafts, without approvals."""
     try:
         _settings(cutoff, base)
@@ -91,7 +102,7 @@ def build_operations_review(files, *, cutoff, base, case_id=None, account_id=Non
         if (
             not isinstance(files, dict)
             or not set(files).issubset(FILE_ROLES)
-            or ("ledger" not in files and draft is None)
+            or ("ledger" not in files and draft is None and proposal is None)
         ):
             raise ValueError
         if any(
@@ -118,10 +129,29 @@ def build_operations_review(files, *, cutoff, base, case_id=None, account_id=Non
             manifest.update(schema=2, draft={"size": len(draft_raw), "sha256": sha256(draft_raw).hexdigest()})
             manifest["code_sha256"] = review_code_fingerprints(schema=2)
         if summary is not None:
-            if draft is None or not isinstance(summary, bytes) or not 0 < len(summary) <= MAX_FILE_BYTES:
+            if (
+                (draft is None and proposal is None)
+                or not isinstance(summary, bytes)
+                or not 0 < len(summary) <= MAX_FILE_BYTES
+            ):
                 raise ValueError
             summary.decode("utf-8")
             manifest["summary"] = {"size": len(summary), "sha256": sha256(summary).hexdigest()}
+        proposal_raw = None
+        if proposal is not None:
+            data = validate_proposal(proposal)
+            if data["inputs"]["date"] != cutoff or data["inputs"]["currency"] != base:
+                raise ValueError
+            origin = data["inputs"]["book_origin"]
+            if origin and (
+                "ledger" not in files or origin["ledger_sha256"] != sha256(files["ledger"]).hexdigest()
+            ):
+                raise ValueError
+            proposal_raw = json.dumps(data, ensure_ascii=False, allow_nan=False).encode()
+            manifest.update(
+                schema=3, proposal={"size": len(proposal_raw), "sha256": sha256(proposal_raw).hexdigest()}
+            )
+            manifest["code_sha256"] = review_code_fingerprints(schema=3)
         stream = BytesIO()
         with ZipFile(stream, "w", compression=ZIP_DEFLATED) as archive:
             data = {"review.json": json.dumps(manifest, ensure_ascii=False, allow_nan=False).encode()}
@@ -130,6 +160,8 @@ def build_operations_review(files, *, cutoff, base, case_id=None, account_id=Non
                 data["draft/gbm.json"] = draft_raw
             if summary is not None:
                 data["evidence/review.txt"] = summary
+            if proposal_raw is not None:
+                data["proposal/proposal.json"] = proposal_raw
             for name, raw in sorted(data.items()):
                 archive.writestr(ZipInfo(name, (1980, 1, 1, 0, 0, 0)), raw, compress_type=ZIP_DEFLATED)
         contents = stream.getvalue()
@@ -151,7 +183,7 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         with ZipFile(BytesIO(contents)) as archive:
             entries = archive.infolist()
             names = {entry.filename for entry in entries}
-            allowed = {"review.json", "draft/gbm.json", "evidence/review.txt"} | {
+            allowed = {"review.json", "draft/gbm.json", "evidence/review.txt", "proposal/proposal.json"} | {
                 f"inputs/{role}.csv" for role in FILE_ROLES
             }
             if (
@@ -163,7 +195,13 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
                 raise ValueError
             raw_files = {}
             for entry in entries:
-                limit = MAX_MANIFEST_BYTES if entry.filename == "review.json" else MAX_FILE_BYTES
+                limit = (
+                    MAX_MANIFEST_BYTES
+                    if entry.filename == "review.json"
+                    else MAX_PROPOSAL_BYTES
+                    if entry.filename == "proposal/proposal.json"
+                    else MAX_FILE_BYTES
+                )
                 if (
                     not 0 < entry.file_size <= limit
                     or entry.is_dir()
@@ -185,10 +223,15 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         if (
             not isinstance(manifest, dict)
             or type(manifest.get("schema")) is not int
-            or manifest["schema"] not in {1, 2}
+            or manifest["schema"] not in {1, 2, 3}
             or set(manifest)
             != (
-                _FIELDS | {"draft"} | ({"summary"} if "summary" in manifest else set())
+                _FIELDS
+                | {"proposal"}
+                | ({"draft"} if "draft" in manifest else set())
+                | ({"summary"} if "summary" in manifest else set())
+                if manifest["schema"] == 3
+                else _FIELDS | {"draft"} | ({"summary"} if "summary" in manifest else set())
                 if manifest["schema"] == 2
                 else _FIELDS
             )
@@ -198,6 +241,34 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             raise ValueError
         draft_raw = raw_files.pop("draft/gbm.json", None)
         summary_raw = raw_files.pop("evidence/review.txt", None)
+        proposal_raw = raw_files.pop("proposal/proposal.json", None)
+        proposal_data = None
+        if (manifest["schema"] == 3) != (proposal_raw is not None):
+            raise ValueError
+        if proposal_raw is not None:
+            detail = manifest["proposal"]
+            if (
+                not isinstance(detail, dict)
+                or set(detail) != {"size", "sha256"}
+                or type(detail["size"]) is not int
+                or detail["size"] != len(proposal_raw)
+                or detail["sha256"] != sha256(proposal_raw).hexdigest()
+            ):
+                raise ValueError
+            proposal_data = validate_proposal(
+                json.loads(proposal_raw, object_pairs_hook=_unique_object, parse_constant=_no_constant)
+            )
+            if (
+                proposal_data["inputs"]["date"] != manifest["cutoff"]
+                or proposal_data["inputs"]["currency"] != manifest["base"]
+            ):
+                raise ValueError
+            origin = proposal_data["inputs"]["book_origin"]
+            if origin and (
+                "inputs/ledger.csv" not in raw_files
+                or origin["ledger_sha256"] != sha256(raw_files["inputs/ledger.csv"]).hexdigest()
+            ):
+                raise ValueError
         if ("summary" in manifest) != (summary_raw is not None):
             raise ValueError
         if summary_raw is not None:
@@ -214,7 +285,7 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         if manifest["schema"] == 1:
             if draft_raw is not None or "inputs/ledger.csv" not in raw_files:
                 raise ValueError
-        else:
+        elif manifest["schema"] == 2 or "draft" in manifest:
             detail = manifest["draft"]
             if (
                 draft_raw is None
@@ -228,6 +299,8 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             validate_draft(
                 json.loads(draft_raw, object_pairs_hook=_unique_object, parse_constant=_no_constant)
             )
+        elif draft_raw is not None:
+            raise ValueError
         _settings(manifest["cutoff"], manifest["base"])
         scope = manifest["scope"]
         if not isinstance(scope, dict) or set(scope) != {"case_id", "account_id"}:
@@ -243,7 +316,14 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         code = manifest["code_sha256"]
         if (
             not isinstance(code, dict)
-            or set(code) != set(V2_CODE_FILES if manifest["schema"] == 2 else CODE_FILES)
+            or set(code)
+            != set(
+                V3_CODE_FILES
+                if manifest["schema"] == 3
+                else V2_CODE_FILES
+                if manifest["schema"] == 2
+                else CODE_FILES
+            )
             or any(
                 not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
                 for value in code.values()
@@ -267,6 +347,8 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         if draft_raw is not None:
             # Keep the historical two-value return contract; the validated draft is data, never approval.
             manifest = {**manifest, "draft_data": json.loads(draft_raw)}
+        if proposal_data is not None:
+            manifest = {**manifest, "proposal_data": proposal_data}
         return manifest, files
     except PortfolioError:
         raise

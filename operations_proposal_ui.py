@@ -6,9 +6,10 @@ from hashlib import sha256
 import streamlit as st
 
 from analysis_session import analysis_key, session_compute
+from operations_proposal import proposal_positions, reviewed_quote_defaults
 from operations_proposal_bridge import proposal_book, proposal_code_fingerprints, proposal_inputs
 from operations_review import review_code_fingerprints
-from operations_review_ui import current_review_files, review_key
+from operations_review_ui import current_review_files, recovered_proposal, review_key
 from portfolio_core import PortfolioError
 
 
@@ -16,7 +17,53 @@ def _key(name):
     return name + "_" + st.session_state.get("_ops_context_key", "temporary")
 
 
+def hydrate_proposal():
+    payload = recovered_proposal()
+    token = review_key("proposal_recovery")
+    if not payload or st.session_state.get(_key("proposal_recovered")) == token:
+        return payload
+    values = payload["inputs"]
+    mapping = {
+        "currency": "currency",
+        "date": "date",
+        "quote_source": "quote_source",
+        "tariff_source": "tariff_source",
+        "cash": "cash",
+        "cash_floor": "floor",
+        "max_turnover": "turnover",
+        "max_weight": "cap",
+        "minimum_trade": "min_trade",
+        "origin": "origin",
+    }
+    for source, target in mapping.items():
+        value = date.fromisoformat(values[source]) if source == "date" else values[source]
+        st.session_state[_key("proposal_" + target)] = value
+    for source, target in {
+        "commission_bps": "commission",
+        "minimum_commission": "minimum",
+        "market_cost_bps": "market",
+        "vat_rate": "vat",
+    }.items():
+        st.session_state[_key("proposal_" + target)] = float(values["tariff"][source]) * (
+            100 if source == "vat_rate" else 1
+        )
+    # Models are session-bound; saved model output is retained as an explicit target, not reactivated.
+    st.session_state[_key("proposal_optimize")] = False
+    st.session_state[_key("orders_confirmation")] = False
+    origin = values["book_origin"]
+    if origin:
+        reference = st.session_state.get(_key("_ops_last_book"), {})
+        held = {asset for asset, _ in reference.get("book", {}).get("positions", {})}
+        st.session_state[review_key("bridge_additional")] = ", ".join(
+            row["Instrumento"] for row in proposal_positions(values) if row["Instrumento"] not in held
+        )
+        st.session_state[review_key("bridge_currency")] = values["currency"]
+    st.session_state[_key("proposal_recovered")] = token
+    return payload
+
+
 def prepare_book_proposal():
+    recovery = recovered_proposal()
     raw = current_review_files().get("ledger")
     reference = st.session_state.get(_key("_ops_last_book"))
     valid = raw is not None and reference and reference.get("ledger_sha256") == sha256(raw).hexdigest()
@@ -27,6 +74,7 @@ def prepare_book_proposal():
             reference["cutoff"],
             review_code_fingerprints(),
             proposal_code_fingerprints(),
+            current_review_files().get("quotes"),
         )
         if valid
         else None
@@ -78,6 +126,31 @@ def prepare_book_proposal():
         if not assets:
             st.info("Este libro sólo tiene efectivo. Añade arriba los instrumentos que quieras evaluar.")
             return None
+        defaults = (
+            reviewed_quote_defaults(
+                current_review_files().get("quotes"), assets=assets, cutoff=cutoff, currency=currency
+            )
+            if st.session_state.get(review_key("raw_confirmation"))
+            else {}
+        )
+        origin = recovery["inputs"].get("book_origin") if recovery else None
+        if (
+            origin
+            and origin["ledger_sha256"] == sha256(raw).hexdigest()
+            and origin["cutoff"] == str(cutoff)
+            and origin["currency"] == currency
+        ):
+            defaults.update(
+                {
+                    row["Instrumento"]: {**row, "PesoObjetivo": str(target)}
+                    for row, target in zip(origin["quotes"], recovery["inputs"]["target"], strict=True)
+                }
+            )
+        if defaults:
+            st.caption(
+                "Se precargan datos con fuente, instrumento, moneda y corte coincidentes. "
+                "Revisa los lotes y los pesos antes de confirmar."
+            )
         with st.form(review_key("bridge_form") + signature[:12]):
             rows = []
             for asset in assets:
@@ -87,10 +160,20 @@ def prepare_book_proposal():
                     {
                         "Instrumento": asset,
                         "Fecha": str(cutoff),
-                        "Precio": left.text_input("Precio sin ajuste · " + asset),
-                        "Lote": right.text_input("Lote · " + asset),
-                        "PesoObjetivo": left.text_input("Peso objetivo entre 0 y 1 · " + asset),
-                        "Fuente": right.text_input("Fuente de precio y lote · " + asset),
+                        "Precio": left.text_input(
+                            "Precio sin ajuste · " + asset, value=defaults.get(asset, {}).get("Precio", "")
+                        ),
+                        "Lote": right.text_input(
+                            "Lote · " + asset, value=defaults.get(asset, {}).get("Lote", "")
+                        ),
+                        "PesoObjetivo": left.text_input(
+                            "Peso objetivo entre 0 y 1 · " + asset,
+                            value=defaults.get(asset, {}).get("PesoObjetivo", ""),
+                        ),
+                        "Fuente": right.text_input(
+                            "Fuente de precio y lote · " + asset,
+                            value=defaults.get(asset, {}).get("Fuente", ""),
+                        ),
                     }
                 )
             checked = st.checkbox(

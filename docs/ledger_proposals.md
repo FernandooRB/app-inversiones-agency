@@ -28,12 +28,25 @@ debe pertenecer a esta cuenta y tener los mismos instrumentos y orden.
 Cambiar origen, insumos, costos, límites o modelo retira la confirmación y la propuesta
 anterior. Cambiar el libro/corte, reabrir una revisión o vaciar Movimientos exige
 preparar nuevamente su conexión. Los datos se conservan en la sesión privada actual,
-sin contratar almacenamiento. El ZIP financiero sigue leyendo las versiones 1 y 2.
+sin contratar almacenamiento. El ZIP financiero sigue leyendo las versiones 1 y 2;
+la versión 3 añade la propuesta completa.
 
 **Descargar propuesta CSV** guarda el resultado por títulos. **Descargar insumos de
 propuesta CSV** conserva posiciones, precios, lotes y pesos para volver a usar el
-recorrido manual; el corte y las fuentes siguen documentados en la sesión y, cuando
-esté habilitado, en la evidencia del expediente.
+recorrido manual. Para conservar también corte, moneda, fuentes por instrumento,
+tarifas, límites, pesos efectivos y cifras, abre **Guardar propuesta y revisión**
+y descarga el paquete ZIP. Puedes preparar un **PDF de la propuesta** bajo demanda;
+sus importes proceden de la misma ejecución que la pantalla y los CSV.
+
+Al reabrir un ZIP v3 se recuperan los datos como propuestas. El resultado guardado
+es histórico: no activa una cartera, no modifica el libro y no repone confirmaciones.
+Revisa las fuentes y vuelve a calcular. Si venía de un libro, primero prepara otra
+vez su conexión; el libro debe conservar la huella y el corte correspondientes.
+Los modelos de riesgo de una sesión anterior no se reactivan automáticamente.
+
+Las cotizaciones ya cotejadas pueden precargarse si coinciden instrumento, moneda
+y corte y tienen fuente. Un precio duplicado, una fecha distinta o una fuente vacía
+no se reutilizan. El precio por sí solo no acredita lote ni peso objetivo.
 
 ## Qué se guarda en el ZIP financiero
 
@@ -41,7 +54,9 @@ esté habilitado, en la evidencia del expediente.
 Si aún no hay libro, lo indica expresamente junto al siguiente paso. Un borrador sin
 CSV puede contener los dos JSON internos y un resumen TXT; no significa que el libro
 o el rendimiento estén terminados. El PDF se prepara por separado en **Archivos y
-resumen descargable**. Los originales PDF/XML siguen fuera del ZIP.
+resumen descargable**. Los originales PDF/XML siguen fuera del ZIP. El resumen de
+propuesta muestra hasta doce instrumentos y las fuentes principales para mantener
+dos páginas; el CSV y el ZIP conservan todos los instrumentos y fuentes.
 
 ## Práctica ficticia reproducible
 
