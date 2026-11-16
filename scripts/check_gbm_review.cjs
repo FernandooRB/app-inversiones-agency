@@ -160,6 +160,7 @@ module.exports=async({browser,out,url})=>{
   await opener.locator('input[type=file]').setInputFiles(path.join(out,'gbm_review_v3.zip'));
   await restored.getByText('Incluye propuesta, tarifas, fuentes y límites. El resultado guardado es histórico; requiere revisión y nuevo cálculo.',{exact:true}).waitFor();
   await restored.getByRole('button',{name:'Reemplazar revisión con este paquete',exact:true}).click();
+  await restored.getByText('Propuesta recuperada. Revisa sus datos y vuelve a confirmar para recalcular.',{exact:true}).waitFor({state:'attached'});
   await restored.getByRole('tab',{name:'Implementación',exact:true}).click();
   const recoveredBridge=await expand('Preparar desde el libro de movimientos',restored);
   assert.equal(await recoveredBridge.getByRole('textbox',{name:'Precio sin ajuste · SIM-NEW',exact:true}).inputValue(),'10');

@@ -29,7 +29,7 @@ from operations_demo import DEMO_CONTEXT, DEMO_NAV_COMPLETE, DEMO_NAV_INVALID, d
 from operations_input_forms import complete_input
 from operations_jobs import refresh_subscription
 from operations_proposal import portable_proposal, proposal_pdf
-from operations_proposal_ui import hydrate_proposal, prepare_book_proposal
+from operations_proposal_ui import prepare_book_proposal
 from operations_report import explain_performance, performance_pdf, summary_lines
 from operations_review import review_code_fingerprints
 from operations_review_ui import (
@@ -37,6 +37,7 @@ from operations_review_ui import (
     new_review,
     open_review,
     proposal_key,
+    recovered_proposal,
     reset_confirmation,
     review_defaults,
     review_key,
@@ -881,10 +882,16 @@ def _implementation(context):
         "Minimiza desvío del objetivo y costos sujetos a efectivo, lotes, concentración y rotación. "
         "Comprueba precios, lotes y tarifas con tu intermediario antes de usar una propuesta."
     )
-    recovery = hydrate_proposal()
+    recovery = recovered_proposal()
+    defaults = recovery["inputs"] if recovery else {}
+    default_tariff = defaults.get("tariff", {})
+    if recovery:
+        st.caption("Propuesta recuperada. Revisa sus datos y vuelve a confirmar para recalcular.")
     prepared = prepare_book_proposal()
     origin = st.radio(
-        "Origen de la propuesta", ["CSV manual", "Libro de movimientos"], key=proposal_key("proposal_origin")
+        "Origen de la propuesta", ["CSV manual", "Libro de movimientos"],
+        index=1 if defaults.get("origin") == "Libro de movimientos" else 0,
+        key=proposal_key("proposal_origin")
     )
     using_book = origin == "Libro de movimientos" and prepared is not None
     _template(
@@ -927,49 +934,61 @@ def _implementation(context):
         if origin == "Libro de movimientos":
             st.info("Prepara primero las posiciones y sus fuentes en Preparar desde el libro de movimientos.")
         cash = st.number_input(
-            "Efectivo disponible para operar", min_value=0.0, value=0.0, key=proposal_key("proposal_cash")
+            "Efectivo disponible para operar", min_value=0.0, value=float(defaults.get("cash", 0)),
+            key=proposal_key("proposal_cash")
         )
         currency = st.selectbox(
-            "Moneda de las órdenes", ["MXN", "USD"], key=proposal_key("proposal_currency")
+            "Moneda de las órdenes", ["MXN", "USD"], index=1 if defaults.get("currency") == "USD" else 0,
+            key=proposal_key("proposal_currency")
         )
         quote_day = st.date_input(
             "Fecha de cotización de las órdenes",
-            date.today(),
+            date.fromisoformat(defaults["date"]) if defaults else date.today(),
             max_value=date.today(),
             key=proposal_key("proposal_date"),
         )
         quote_source = st.text_input(
-            "Fuente de cotizaciones y lotes", key=proposal_key("proposal_quote_source")
+            "Fuente de cotizaciones y lotes", value=defaults.get("quote_source", ""),
+            key=proposal_key("proposal_quote_source")
         )
     floor = st.number_input(
-        "Efectivo mínimo que deseas conservar", min_value=0.0, value=0.0, key=proposal_key("proposal_floor")
+        "Efectivo mínimo que deseas conservar", min_value=0.0, value=float(defaults.get("cash_floor", 0)),
+        key=proposal_key("proposal_floor")
     )
     commission = st.number_input(
-        "Comisión · puntos base por operación", 0.0, 500.0, 0.0, key=proposal_key("proposal_commission")
+        "Comisión · puntos base por operación", 0.0, 500.0, float(default_tariff.get("commission_bps", 0)),
+        key=proposal_key("proposal_commission")
     )
     minimum = st.number_input(
-        "Comisión mínima por orden", 0.0, 100000.0, 0.0, key=proposal_key("proposal_minimum")
+        "Comisión mínima por orden", 0.0, 100000.0, float(default_tariff.get("minimum_commission", 0)),
+        key=proposal_key("proposal_minimum")
     )
     market = st.number_input(
-        "Costo de mercado · puntos base", 0.0, 500.0, 0.0, key=proposal_key("proposal_market")
+        "Costo de mercado · puntos base", 0.0, 500.0, float(default_tariff.get("market_cost_bps", 0)),
+        key=proposal_key("proposal_market")
     )
-    vat = st.number_input("IVA sobre comisión · %", 0.0, 100.0, 0.0, key=proposal_key("proposal_vat")) / 100
+    vat = st.number_input(
+        "IVA sobre comisión · %", 0.0, 100.0, float(default_tariff.get("vat_rate", 0)) * 100,
+        key=proposal_key("proposal_vat")
+    ) / 100
     tariff_source = st.text_input(
-        "Fuente y vigencia de las tarifas aplicables", key=proposal_key("proposal_tariff_source")
+        "Fuente y vigencia de las tarifas aplicables", value=defaults.get("tariff_source", ""),
+        key=proposal_key("proposal_tariff_source")
     )
     turnover = st.slider(
         "Rotación máxima · suma de compras y ventas / patrimonio",
         0.0,
         2.0,
-        0.5,
+        float(defaults.get("max_turnover", .5)),
         key=proposal_key("proposal_turnover"),
     )
     cap = st.slider(
         "Concentración máxima por activo sobre capital inicial",
-        0.01, 1.0, 1.0, key=proposal_key("proposal_cap")
+        0.01, 1.0, float(defaults.get("max_weight", 1)), key=proposal_key("proposal_cap")
     )
     min_trade = st.number_input(
-        "Importe mínimo por orden", 0.0, value=0.0, key=proposal_key("proposal_min_trade")
+        "Importe mínimo por orden", 0.0, value=float(defaults.get("minimum_trade", 0)),
+        key=proposal_key("proposal_min_trade")
     )
     optimize = st.checkbox(
         "Usar modelo de costos y riesgo del análisis de cuenta abierto en esta sesión",

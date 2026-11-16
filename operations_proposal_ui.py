@@ -6,7 +6,7 @@ from hashlib import sha256
 import streamlit as st
 
 from analysis_session import analysis_key, session_compute
-from operations_proposal import proposal_positions, reviewed_quote_defaults
+from operations_proposal import reviewed_quote_defaults
 from operations_proposal_bridge import proposal_book, proposal_code_fingerprints, proposal_inputs
 from operations_review import review_code_fingerprints
 from operations_review_ui import current_review_files, proposal_key, recovered_proposal, review_key
@@ -15,51 +15,6 @@ from portfolio_core import PortfolioError
 
 def _key(name):
     return name + "_" + st.session_state.get("_ops_context_key", "temporary")
-
-
-def hydrate_proposal():
-    payload = recovered_proposal()
-    token = proposal_key("proposal_recovery")
-    if not payload or st.session_state.get(_key("proposal_recovered")) == token:
-        return payload
-    values = payload["inputs"]
-    mapping = {
-        "currency": "currency",
-        "date": "date",
-        "quote_source": "quote_source",
-        "tariff_source": "tariff_source",
-        "cash": "cash",
-        "cash_floor": "floor",
-        "max_turnover": "turnover",
-        "max_weight": "cap",
-        "minimum_trade": "min_trade",
-        "origin": "origin",
-    }
-    for source, target in mapping.items():
-        value = date.fromisoformat(values[source]) if source == "date" else values[source]
-        st.session_state[proposal_key("proposal_" + target)] = value
-    for source, target in {
-        "commission_bps": "commission",
-        "minimum_commission": "minimum",
-        "market_cost_bps": "market",
-        "vat_rate": "vat",
-    }.items():
-        st.session_state[proposal_key("proposal_" + target)] = float(values["tariff"][source]) * (
-            100 if source == "vat_rate" else 1
-        )
-    # Models are session-bound; saved model output is retained as an explicit target, not reactivated.
-    st.session_state[proposal_key("proposal_optimize")] = False
-    st.session_state[proposal_key("orders_confirmation")] = False
-    origin = values["book_origin"]
-    if origin:
-        reference = st.session_state.get(_key("_ops_last_book"), {})
-        held = {asset for asset, _ in reference.get("book", {}).get("positions", {})}
-        st.session_state[review_key("bridge_additional")] = ", ".join(
-            row["Instrumento"] for row in proposal_positions(values) if row["Instrumento"] not in held
-        )
-        st.session_state[review_key("bridge_currency")] = values["currency"]
-    st.session_state[_key("proposal_recovered")] = token
-    return payload
 
 
 def prepare_book_proposal():
@@ -91,8 +46,12 @@ def prepare_book_proposal():
             )
             return None
         cutoff = date.fromisoformat(reference["cutoff"])
+        origin = recovery["inputs"].get("book_origin") if recovery else None
         currency = st.selectbox(
-            "Moneda del libro para la propuesta", ["MXN", "USD"], key=review_key("bridge_currency")
+            "Moneda del libro para la propuesta",
+            ["MXN", "USD"],
+            index=1 if origin and origin["currency"] == "USD" else 0,
+            key=review_key("bridge_currency"),
         )
         try:
             book = session_compute(
@@ -105,8 +64,22 @@ def prepare_book_proposal():
         except PortfolioError as error:
             st.text(str(error))
             return None
+        restored_assets = (
+            [
+                row["Instrumento"]
+                for row in origin["quotes"]
+                if (row["Instrumento"], currency) not in book["positions"]
+            ]
+            if origin
+            and origin["ledger_sha256"] == sha256(raw).hexdigest()
+            and origin["cutoff"] == str(cutoff)
+            and origin["currency"] == currency
+            else []
+        )
         additional = st.text_input(
-            "Instrumentos adicionales, separados por coma", key=review_key("bridge_additional")
+            "Instrumentos adicionales, separados por coma",
+            value=", ".join(restored_assets),
+            key=review_key("bridge_additional"),
         )
         assets = [asset for asset, _ in book["positions"]]
         assets.extend(asset.strip() for asset in additional.split(",") if asset.strip())
@@ -133,7 +106,6 @@ def prepare_book_proposal():
             if st.session_state.get(review_key("raw_confirmation"))
             else {}
         )
-        origin = recovery["inputs"].get("book_origin") if recovery else None
         if (
             origin
             and origin["ledger_sha256"] == sha256(raw).hexdigest()

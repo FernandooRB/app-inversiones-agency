@@ -275,6 +275,10 @@ if st.session_state.pop('_complete_nav',False):
  from operations_review_ui import save_review_input
  st.session_state['_ops_context_key']='{key}'
  save_review_input('nav',{nav_raw!r})
+if st.session_state.pop('_lose_widget_values',False):
+ from operations_review_ui import proposal_key
+ for name in ('proposal_commission','proposal_tariff_source'):
+  st.session_state.pop(proposal_key(name),None)
 with patch('operations_ui._context',return_value=(None,None,None,None)):
  render_account_operations()
 """,
@@ -283,6 +287,13 @@ with patch('operations_ui._context',return_value=(None,None,None,None)):
     assert not app.exception
     assert any(b.label == "Vaciar movimientos y empezar" for b in app.button)
     assert next(n for n in app.number_input if n.label == "Efectivo disponible para operar").value == 150
+    assert next(n for n in app.number_input if n.label == "Comisión · puntos base por operación").value == 10
+    assert (
+        next(t for t in app.text_input if t.label == "Fuente y vigencia de las tarifas aplicables").value
+        == "Contrato ficticio enero"
+    )
+    app.session_state["_lose_widget_values"] = True
+    app.run()
     assert next(n for n in app.number_input if n.label == "Comisión · puntos base por operación").value == 10
     assert (
         next(t for t in app.text_input if t.label == "Fuente y vigencia de las tarifas aplicables").value
