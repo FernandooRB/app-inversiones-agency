@@ -74,6 +74,7 @@ let browser;
   fs.writeFileSync(path.join(out,'controls.csv'),'Fecha,Tipo,InstrumentoReferencia,Moneda,Saldo,Fuente\n2026-01-10,CASH,,MXN,150.01,Estado ficticio\n');
   fs.writeFileSync(path.join(out,'invalid.zip'),'invalid fictional package');
   browser=await chromium.launch({channel:process.platform==='win32'?'msedge':'chrome',headless:true});
+  await require('./check_entrypoint_boot.cjs')({browser,out,root,python:process.env.SIG_PYTHON||'python'});
   if(process.env.SIG_GBM_ONLY==='1'){
     await require('./check_gbm_review.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
     console.log('GBM browser verification passed with fictional data');return;
