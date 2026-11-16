@@ -45,6 +45,13 @@ def review_key(name):
     return _context_key(name) + ("_" + token if token else "")
 
 
+def proposal_key(name):
+    # A package replacement starts new input widgets. Completing a NAV/FX form
+    # only renews review consent; it must preserve edited proposal assumptions.
+    token = st.session_state.get(_context_key("_ops_proposal_form_token"), "initial")
+    return _context_key(name) + "_" + token
+
+
 def review_defaults():
     return _recovery().get("settings", {})
 
@@ -62,7 +69,7 @@ def current_proposal(context, files, *, cutoff, base):
     binding = (context[2]["id"] if context[2] else None, context[3])
     if not proposal or proposal.get("context") != binding:
         return None
-    if not st.session_state.get(review_key("orders_confirmation")) or proposal.get(
+    if not st.session_state.get(proposal_key("orders_confirmation")) or proposal.get(
         "signature"
     ) != st.session_state.get(_context_key("orders_signature")):
         return None
@@ -154,15 +161,7 @@ def clear_review():
     keys.update(_open_key(name) for name in ("ops_review_open_panel", "ops_review_zip", "ops_review_open"))
     keys.add("_analysis_memo_" + _context_key("operations_calculations"))
     keys.add("_analysis_memo_" + _context_key("bridge_book"))
-    keys.update(
-        key
-        for key in st.session_state
-        if (
-            key.endswith("_" + st.session_state.get("_ops_context_key", "temporary"))
-            or ("_" + st.session_state.get("_ops_context_key", "temporary") + "_") in key
-        )
-        and key.startswith(("proposal_", "orders_"))
-    )
+    keys.add(_context_key("proposal_pdf"))
     keys.update(
         _context_key(name)
         for name in (
@@ -211,6 +210,7 @@ def _has_current_inputs():
     return (
         bool(_recovery().get("files"))
         or bool(movement_draft())
+        or bool(recovered_proposal())
         or any(st.session_state.get(review_key(name)) is not None for name in ROLE_WIDGETS)
     )
 
@@ -249,11 +249,12 @@ def open_review(context):
                 replacing = _has_current_inputs()
                 if replacing:
                     st.warning(
-                        "Se reemplazarán los CSV, el corte y la moneda de esta revisión. "
+                        "Se reemplazarán los CSV, el corte, la moneda y la propuesta de esta revisión. "
                         "Conserva una copia de lo que necesites antes de continuar."
                     )
                 label = "Reemplazar revisión con este paquete" if replacing else "Retomar movimientos"
                 if st.button(label, key=_open_key("ops_review_open")):
+                    st.session_state[_context_key("_ops_proposal_form_token")] = uuid4().hex
                     st.session_state[_context_key("_ops_review")] = {
                         "token": uuid4().hex,
                         "files": files,

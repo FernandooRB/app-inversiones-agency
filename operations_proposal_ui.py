@@ -9,7 +9,7 @@ from analysis_session import analysis_key, session_compute
 from operations_proposal import proposal_positions, reviewed_quote_defaults
 from operations_proposal_bridge import proposal_book, proposal_code_fingerprints, proposal_inputs
 from operations_review import review_code_fingerprints
-from operations_review_ui import current_review_files, recovered_proposal, review_key
+from operations_review_ui import current_review_files, proposal_key, recovered_proposal, review_key
 from portfolio_core import PortfolioError
 
 
@@ -19,7 +19,7 @@ def _key(name):
 
 def hydrate_proposal():
     payload = recovered_proposal()
-    token = review_key("proposal_recovery")
+    token = proposal_key("proposal_recovery")
     if not payload or st.session_state.get(_key("proposal_recovered")) == token:
         return payload
     values = payload["inputs"]
@@ -37,19 +37,19 @@ def hydrate_proposal():
     }
     for source, target in mapping.items():
         value = date.fromisoformat(values[source]) if source == "date" else values[source]
-        st.session_state[review_key("proposal_" + target)] = value
+        st.session_state[proposal_key("proposal_" + target)] = value
     for source, target in {
         "commission_bps": "commission",
         "minimum_commission": "minimum",
         "market_cost_bps": "market",
         "vat_rate": "vat",
     }.items():
-        st.session_state[review_key("proposal_" + target)] = float(values["tariff"][source]) * (
+        st.session_state[proposal_key("proposal_" + target)] = float(values["tariff"][source]) * (
             100 if source == "vat_rate" else 1
         )
     # Models are session-bound; saved model output is retained as an explicit target, not reactivated.
-    st.session_state[review_key("proposal_optimize")] = False
-    st.session_state[review_key("orders_confirmation")] = False
+    st.session_state[proposal_key("proposal_optimize")] = False
+    st.session_state[proposal_key("orders_confirmation")] = False
     origin = values["book_origin"]
     if origin:
         reference = st.session_state.get(_key("_ops_last_book"), {})
@@ -188,7 +188,7 @@ def prepare_book_proposal():
                     )
                     saved = {"signature": base_signature, "input_signature": signature, "data": prepared}
                     st.session_state[_key("_ops_proposal_bridge")] = saved
-                    st.session_state[review_key("proposal_origin")] = "Libro de movimientos"
+                    st.session_state[proposal_key("proposal_origin")] = "Libro de movimientos"
                 except PortfolioError as error:
                     st.text(str(error))
         if saved:

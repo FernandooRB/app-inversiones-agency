@@ -261,6 +261,7 @@ def test_reopening_manual_proposal_prefills_terms_but_requires_fresh_confirmatio
     )
     payload = portable_proposal(saved)
     key = sha256(str((None, None, None)).encode()).hexdigest()[:16]
+    nav_raw = b"Fecha,NAV,Fuente\n2026-01-30,150,Ficticia\n"
     app = AppTest.from_string(
         f"""
 from unittest.mock import patch
@@ -270,12 +271,17 @@ st.session_state.setdefault('_ops_review_{key}', {{
  'token':'portable-test','files':{{}},'settings':{{'cutoff':'2026-01-30','base':'MXN'}},
  'proposal':{payload!r}
 }})
+if st.session_state.pop('_complete_nav',False):
+ from operations_review_ui import save_review_input
+ st.session_state['_ops_context_key']='{key}'
+ save_review_input('nav',{nav_raw!r})
 with patch('operations_ui._context',return_value=(None,None,None,None)):
  render_account_operations()
 """,
         default_timeout=40,
     ).run()
     assert not app.exception
+    assert any(b.label == "Vaciar movimientos y empezar" for b in app.button)
     assert next(n for n in app.number_input if n.label == "Efectivo disponible para operar").value == 150
     assert next(n for n in app.number_input if n.label == "Comisión · puntos base por operación").value == 10
     assert (
@@ -289,3 +295,10 @@ with patch('operations_ui._context',return_value=(None,None,None,None)):
     next(b for b in app.button if b.label == "Calcular propuesta de títulos").click().run()
     assert not app.exception and not app.error
     assert app.session_state["_execution_proposal"]["result"]["cash"] == pytest.approx(expected_cash)
+    commission = next(n for n in app.number_input if n.label == "Comisión · puntos base por operación")
+    commission.set_value(20.0).run()
+    app.session_state["_complete_nav"] = True
+    app.run()
+    assert not app.exception
+    assert next(n for n in app.number_input if n.label == "Comisión · puntos base por operación").value == 20
+    assert not next(c for c in app.checkbox if c.label.startswith("Confirmé precios sin ajuste")).value
