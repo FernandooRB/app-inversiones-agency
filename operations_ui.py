@@ -883,7 +883,7 @@ def _implementation(context):
     recovery = hydrate_proposal()
     prepared = prepare_book_proposal()
     origin = st.radio(
-        "Origen de la propuesta", ["CSV manual", "Libro de movimientos"], key=_key("proposal_origin")
+        "Origen de la propuesta", ["CSV manual", "Libro de movimientos"], key=review_key("proposal_origin")
     )
     using_book = origin == "Libro de movimientos" and prepared is not None
     _template(
@@ -892,7 +892,7 @@ def _implementation(context):
         "execution_template",
     )
     upload = st.file_uploader(
-        "Posiciones, cotizaciones sin ajuste y pesos objetivo", ["csv"], key=_key("ops_execution")
+        "Posiciones, cotizaciones sin ajuste y pesos objetivo", ["csv"], key=review_key("ops_execution")
     )
     source_raw = (
         prepared["positions"].to_csv(index=False).encode()
@@ -926,42 +926,51 @@ def _implementation(context):
         if origin == "Libro de movimientos":
             st.info("Prepara primero las posiciones y sus fuentes en Preparar desde el libro de movimientos.")
         cash = st.number_input(
-            "Efectivo disponible para operar", min_value=0.0, value=0.0, key=_key("proposal_cash")
+            "Efectivo disponible para operar", min_value=0.0, value=0.0, key=review_key("proposal_cash")
         )
-        currency = st.selectbox("Moneda de las órdenes", ["MXN", "USD"], key=_key("proposal_currency"))
+        currency = st.selectbox("Moneda de las órdenes", ["MXN", "USD"], key=review_key("proposal_currency"))
         quote_day = st.date_input(
             "Fecha de cotización de las órdenes",
             date.today(),
             max_value=date.today(),
-            key=_key("proposal_date"),
+            key=review_key("proposal_date"),
         )
-        quote_source = st.text_input("Fuente de cotizaciones y lotes", key=_key("proposal_quote_source"))
+        quote_source = st.text_input(
+            "Fuente de cotizaciones y lotes", key=review_key("proposal_quote_source")
+        )
     floor = st.number_input(
-        "Efectivo mínimo que deseas conservar", min_value=0.0, value=0.0, key=_key("proposal_floor")
+        "Efectivo mínimo que deseas conservar", min_value=0.0, value=0.0, key=review_key("proposal_floor")
     )
     commission = st.number_input(
-        "Comisión · puntos base por operación", 0.0, 500.0, 0.0, key=_key("proposal_commission")
+        "Comisión · puntos base por operación", 0.0, 500.0, 0.0, key=review_key("proposal_commission")
     )
-    minimum = st.number_input("Comisión mínima por orden", 0.0, 100000.0, 0.0, key=_key("proposal_minimum"))
-    market = st.number_input("Costo de mercado · puntos base", 0.0, 500.0, 0.0, key=_key("proposal_market"))
-    vat = st.number_input("IVA sobre comisión · %", 0.0, 100.0, 0.0, key=_key("proposal_vat")) / 100
+    minimum = st.number_input(
+        "Comisión mínima por orden", 0.0, 100000.0, 0.0, key=review_key("proposal_minimum")
+    )
+    market = st.number_input(
+        "Costo de mercado · puntos base", 0.0, 500.0, 0.0, key=review_key("proposal_market")
+    )
+    vat = st.number_input("IVA sobre comisión · %", 0.0, 100.0, 0.0, key=review_key("proposal_vat")) / 100
     tariff_source = st.text_input(
-        "Fuente y vigencia de las tarifas aplicables", key=_key("proposal_tariff_source")
+        "Fuente y vigencia de las tarifas aplicables", key=review_key("proposal_tariff_source")
     )
     turnover = st.slider(
         "Rotación máxima · suma de compras y ventas / patrimonio",
         0.0,
         2.0,
         0.5,
-        key=_key("proposal_turnover"),
+        key=review_key("proposal_turnover"),
     )
     cap = st.slider(
-        "Concentración máxima por activo sobre capital inicial", 0.01, 1.0, 1.0, key=_key("proposal_cap")
+        "Concentración máxima por activo sobre capital inicial",
+        0.01, 1.0, 1.0, key=review_key("proposal_cap")
     )
-    min_trade = st.number_input("Importe mínimo por orden", 0.0, value=0.0, key=_key("proposal_min_trade"))
+    min_trade = st.number_input(
+        "Importe mínimo por orden", 0.0, value=0.0, key=review_key("proposal_min_trade")
+    )
     optimize = st.checkbox(
         "Usar modelo de costos y riesgo del análisis de cuenta abierto en esta sesión",
-        key=_key("proposal_optimize"),
+        key=review_key("proposal_optimize"),
     )
     flow = st.session_state.get("_account_flow", {})
     completed = flow.get("completed")
@@ -997,11 +1006,11 @@ def _implementation(context):
         Path(__file__).with_name("executable_allocation.py").read_bytes().replace(b"\r\n", b"\n"),
     )
     if st.session_state.get(_key("orders_signature")) != signature:
-        st.session_state[_key("orders_confirmation")] = False
+        st.session_state[review_key("orders_confirmation")] = False
         st.session_state[_key("orders_signature")] = signature
     confirmed = st.checkbox(
         "Confirmé precios sin ajuste, títulos, lotes, moneda y tarifas de esta cuenta",
-        key=_key("orders_confirmation"),
+        key=review_key("orders_confirmation"),
     )
     if st.button("Calcular propuesta de títulos", disabled=not source_raw or not confirmed):
         if not quote_source.strip() or not tariff_source.strip():
@@ -1095,13 +1104,13 @@ def _implementation(context):
             source_raw,
             "insumos_propuesta_titulos.csv",
             "text/csv",
-            key=_key("proposal_inputs_download"),
+            key=review_key("proposal_inputs_download"),
             on_click="ignore",
         )
         portable = portable_proposal(proposal)
         status = st.session_state.get(_key("_ops_status"))
         snapshot = status.snapshot("Libro de origen") if using_book and status else None
-        if st.button("Preparar PDF de la propuesta", key=_key("proposal_pdf_prepare")):
+        if st.button("Preparar PDF de la propuesta", key=review_key("proposal_pdf_prepare")):
             st.session_state[_key("proposal_pdf")] = {
                 "signature": analysis_key(portable, snapshot),
                 "bytes": proposal_pdf(portable, snapshot),

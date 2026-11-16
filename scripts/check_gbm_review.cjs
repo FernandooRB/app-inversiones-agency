@@ -164,6 +164,8 @@ module.exports=async({browser,out,url})=>{
   const recoveredBridge=await expand('Preparar desde el libro de movimientos',restored);
   assert.equal(await recoveredBridge.getByRole('textbox',{name:'Precio sin ajuste · SIM-NEW',exact:true}).inputValue(),'10');
   assert.equal(await recoveredBridge.getByRole('textbox',{name:'Lote · SIM-NEW',exact:true}).inputValue(),'1');
+  assert.equal(Number(await restored.getByRole('spinbutton',{name:'Comisión · puntos base por operación',exact:true}).inputValue()),10);
+  assert.equal(await restored.getByRole('textbox',{name:'Fuente y vigencia de las tarifas aplicables',exact:true}).inputValue(),'Tarifa ficticia del PDF de práctica');
   assert.equal(await restored.getByRole('checkbox',{name:'Confirmé precios sin ajuste, títulos, lotes, moneda y tarifas de esta cuenta',exact:true}).isChecked(),false);
   assert.equal(await restored.getByText('Descargar propuesta CSV',{exact:true}).count(),0);
   await recoveredBridge.getByRole('checkbox',{name:'Cotejé títulos, efectivo liquidado, precios, lotes y pesos con sus fuentes',exact:true}).press('Space');

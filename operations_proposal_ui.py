@@ -37,19 +37,19 @@ def hydrate_proposal():
     }
     for source, target in mapping.items():
         value = date.fromisoformat(values[source]) if source == "date" else values[source]
-        st.session_state[_key("proposal_" + target)] = value
+        st.session_state[review_key("proposal_" + target)] = value
     for source, target in {
         "commission_bps": "commission",
         "minimum_commission": "minimum",
         "market_cost_bps": "market",
         "vat_rate": "vat",
     }.items():
-        st.session_state[_key("proposal_" + target)] = float(values["tariff"][source]) * (
+        st.session_state[review_key("proposal_" + target)] = float(values["tariff"][source]) * (
             100 if source == "vat_rate" else 1
         )
     # Models are session-bound; saved model output is retained as an explicit target, not reactivated.
-    st.session_state[_key("proposal_optimize")] = False
-    st.session_state[_key("orders_confirmation")] = False
+    st.session_state[review_key("proposal_optimize")] = False
+    st.session_state[review_key("orders_confirmation")] = False
     origin = values["book_origin"]
     if origin:
         reference = st.session_state.get(_key("_ops_last_book"), {})
@@ -188,7 +188,7 @@ def prepare_book_proposal():
                     )
                     saved = {"signature": base_signature, "input_signature": signature, "data": prepared}
                     st.session_state[_key("_ops_proposal_bridge")] = saved
-                    st.session_state[_key("proposal_origin")] = "Libro de movimientos"
+                    st.session_state[review_key("proposal_origin")] = "Libro de movimientos"
                 except PortfolioError as error:
                     st.text(str(error))
         if saved:

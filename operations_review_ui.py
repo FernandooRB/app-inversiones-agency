@@ -62,7 +62,7 @@ def current_proposal(context, files, *, cutoff, base):
     binding = (context[2]["id"] if context[2] else None, context[3])
     if not proposal or proposal.get("context") != binding:
         return None
-    if not st.session_state.get(_context_key("orders_confirmation")) or proposal.get(
+    if not st.session_state.get(review_key("orders_confirmation")) or proposal.get(
         "signature"
     ) != st.session_state.get(_context_key("orders_signature")):
         return None
@@ -157,7 +157,10 @@ def clear_review():
     keys.update(
         key
         for key in st.session_state
-        if key.endswith("_" + st.session_state.get("_ops_context_key", "temporary"))
+        if (
+            key.endswith("_" + st.session_state.get("_ops_context_key", "temporary"))
+            or ("_" + st.session_state.get("_ops_context_key", "temporary") + "_") in key
+        )
         and key.startswith(("proposal_", "orders_"))
     )
     keys.update(
