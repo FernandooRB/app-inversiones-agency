@@ -6,9 +6,10 @@ from hashlib import sha256
 import streamlit as st
 
 from analysis_session import analysis_key, session_compute
+from operations_proposal import reviewed_quote_defaults
 from operations_proposal_bridge import proposal_book, proposal_code_fingerprints, proposal_inputs
 from operations_review import review_code_fingerprints
-from operations_review_ui import current_review_files, review_key
+from operations_review_ui import current_review_files, proposal_key, recovered_proposal, review_key
 from portfolio_core import PortfolioError
 
 
@@ -17,6 +18,7 @@ def _key(name):
 
 
 def prepare_book_proposal():
+    recovery = recovered_proposal()
     raw = current_review_files().get("ledger")
     reference = st.session_state.get(_key("_ops_last_book"))
     valid = raw is not None and reference and reference.get("ledger_sha256") == sha256(raw).hexdigest()
@@ -27,6 +29,7 @@ def prepare_book_proposal():
             reference["cutoff"],
             review_code_fingerprints(),
             proposal_code_fingerprints(),
+            current_review_files().get("quotes"),
         )
         if valid
         else None
@@ -43,8 +46,12 @@ def prepare_book_proposal():
             )
             return None
         cutoff = date.fromisoformat(reference["cutoff"])
+        origin = recovery["inputs"].get("book_origin") if recovery else None
         currency = st.selectbox(
-            "Moneda del libro para la propuesta", ["MXN", "USD"], key=review_key("bridge_currency")
+            "Moneda del libro para la propuesta",
+            ["MXN", "USD"],
+            index=1 if origin and origin["currency"] == "USD" else 0,
+            key=review_key("bridge_currency"),
         )
         try:
             book = session_compute(
@@ -57,8 +64,22 @@ def prepare_book_proposal():
         except PortfolioError as error:
             st.text(str(error))
             return None
+        restored_assets = (
+            [
+                row["Instrumento"]
+                for row in origin["quotes"]
+                if (row["Instrumento"], currency) not in book["positions"]
+            ]
+            if origin
+            and origin["ledger_sha256"] == sha256(raw).hexdigest()
+            and origin["cutoff"] == str(cutoff)
+            and origin["currency"] == currency
+            else []
+        )
         additional = st.text_input(
-            "Instrumentos adicionales, separados por coma", key=review_key("bridge_additional")
+            "Instrumentos adicionales, separados por coma",
+            value=", ".join(restored_assets),
+            key=review_key("bridge_additional"),
         )
         assets = [asset for asset, _ in book["positions"]]
         assets.extend(asset.strip() for asset in additional.split(",") if asset.strip())
@@ -78,6 +99,30 @@ def prepare_book_proposal():
         if not assets:
             st.info("Este libro sólo tiene efectivo. Añade arriba los instrumentos que quieras evaluar.")
             return None
+        defaults = (
+            reviewed_quote_defaults(
+                current_review_files().get("quotes"), assets=assets, cutoff=cutoff, currency=currency
+            )
+            if st.session_state.get(review_key("raw_confirmation"))
+            else {}
+        )
+        if (
+            origin
+            and origin["ledger_sha256"] == sha256(raw).hexdigest()
+            and origin["cutoff"] == str(cutoff)
+            and origin["currency"] == currency
+        ):
+            defaults.update(
+                {
+                    row["Instrumento"]: {**row, "PesoObjetivo": str(target)}
+                    for row, target in zip(origin["quotes"], recovery["inputs"]["target"], strict=True)
+                }
+            )
+        if defaults:
+            st.caption(
+                "Se precargan datos con fuente, instrumento, moneda y corte coincidentes. "
+                "Revisa los lotes y los pesos antes de confirmar."
+            )
         with st.form(review_key("bridge_form") + signature[:12]):
             rows = []
             for asset in assets:
@@ -87,10 +132,20 @@ def prepare_book_proposal():
                     {
                         "Instrumento": asset,
                         "Fecha": str(cutoff),
-                        "Precio": left.text_input("Precio sin ajuste · " + asset),
-                        "Lote": right.text_input("Lote · " + asset),
-                        "PesoObjetivo": left.text_input("Peso objetivo entre 0 y 1 · " + asset),
-                        "Fuente": right.text_input("Fuente de precio y lote · " + asset),
+                        "Precio": left.text_input(
+                            "Precio sin ajuste · " + asset, value=defaults.get(asset, {}).get("Precio", "")
+                        ),
+                        "Lote": right.text_input(
+                            "Lote · " + asset, value=defaults.get(asset, {}).get("Lote", "")
+                        ),
+                        "PesoObjetivo": left.text_input(
+                            "Peso objetivo entre 0 y 1 · " + asset,
+                            value=defaults.get(asset, {}).get("PesoObjetivo", ""),
+                        ),
+                        "Fuente": right.text_input(
+                            "Fuente de precio y lote · " + asset,
+                            value=defaults.get(asset, {}).get("Fuente", ""),
+                        ),
                     }
                 )
             checked = st.checkbox(
@@ -105,7 +160,7 @@ def prepare_book_proposal():
                     )
                     saved = {"signature": base_signature, "input_signature": signature, "data": prepared}
                     st.session_state[_key("_ops_proposal_bridge")] = saved
-                    st.session_state[_key("proposal_origin")] = "Libro de movimientos"
+                    st.session_state[proposal_key("proposal_origin")] = "Libro de movimientos"
                 except PortfolioError as error:
                     st.text(str(error))
         if saved:

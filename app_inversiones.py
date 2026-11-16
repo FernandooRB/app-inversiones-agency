@@ -1,6 +1,73 @@
 """Secure V2 Streamlit interface for the portfolio optimizer."""
+# ruff: noqa: E402
+# Area-specific imports follow authentication and navigation to keep first load bounded.
 
 import logging
+from pathlib import Path
+
+import streamlit as st
+
+from runtime_coherence import install_local_tracking, loaded_module_changes
+
+install_local_tracking(Path(__file__).resolve().parent)
+st.set_page_config(page_title="SIG | Análisis y seguimiento de portafolios", layout="wide")
+if loaded_module_changes(Path(__file__).resolve().parent):
+    st.error("La app se actualizó y requiere reiniciar el proceso para continuar con una versión coherente.")
+    st.info(
+        "Conserva el ZIP que hayas descargado. El administrador debe reiniciar la app; "
+        "después podrás reabrirlo y confirmar sus fuentes."
+    )
+    st.stop()
+
+from access import require_access
+from workspace_presentation import render_document_language, render_shell
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+LOGGER = logging.getLogger(__name__)
+
+render_document_language()
+require_access()
+
+if st.query_params.get("demo_operacion") == "1":
+    from operations_ui import render_account_operations
+
+    render_shell(areas=("Operación",))
+    render_account_operations(demo=True)
+    st.stop()
+
+work_area = render_shell()
+if work_area == "Operación":
+    from operations_ui import render_account_operations
+
+    render_account_operations()
+    st.stop()
+if work_area == "Seguimiento":
+    from technical_ui import render_technical
+
+    render_technical()
+    st.stop()
+
+if work_area in {"Expedientes", "Guía operativa"}:
+    from workspace_ui import render_operations, render_workspace
+
+    if work_area == "Expedientes":
+        render_workspace()
+    else:
+        render_operations()
+    st.stop()
+
+
+analysis_mode = st.pills(
+    "Modo de análisis", ["Por cuenta", "Análisis avanzado"],
+    default="Análisis avanzado", key="analysis_mode",
+)
+if analysis_mode == "Por cuenta":
+    from account_workflow_ui import render_account_workflow
+
+    render_account_workflow()
+    st.stop()
+
+
 from datetime import date
 from hashlib import sha256
 
@@ -8,9 +75,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import streamlit as st
 
-from access import require_access
 from account_scope import read_account_scope_csv
 from allocation_analysis import calculate_allocation
 from allocation_policy import parse_asset_classes, parse_class_limits, policy_table
@@ -84,53 +149,6 @@ from stress import (
 from tax_cash_flows import read_tax_cash_flows_csv
 from tax_impact import estimate_tax_reserve, read_tax_basis_csv
 from walk_forward import run_walk_forward_backtest
-from workspace_presentation import render_document_language, render_shell
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-LOGGER = logging.getLogger(__name__)
-
-st.set_page_config(page_title="SIG | Análisis y seguimiento de portafolios", layout="wide")
-render_document_language()
-require_access()
-
-if st.query_params.get("demo_operacion") == "1":
-    from operations_ui import render_account_operations
-
-    render_shell(areas=("Operación",))
-    render_account_operations(demo=True)
-    st.stop()
-
-work_area = render_shell()
-if work_area == "Operación":
-    from operations_ui import render_account_operations
-
-    render_account_operations()
-    st.stop()
-if work_area == "Seguimiento":
-    from technical_ui import render_technical
-
-    render_technical()
-    st.stop()
-
-if work_area in {"Expedientes", "Guía operativa"}:
-    from workspace_ui import render_operations, render_workspace
-
-    if work_area == "Expedientes":
-        render_workspace()
-    else:
-        render_operations()
-    st.stop()
-
-
-analysis_mode = st.pills(
-    "Modo de análisis", ["Por cuenta", "Análisis avanzado"],
-    default="Análisis avanzado", key="analysis_mode",
-)
-if analysis_mode == "Por cuenta":
-    from account_workflow_ui import render_account_workflow
-
-    render_account_workflow()
-    st.stop()
 
 
 @st.cache_data(ttl=3_600, show_spinner=False)

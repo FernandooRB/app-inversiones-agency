@@ -1,13 +1,20 @@
 """Synthetic market fixtures; no provider access or real account documents."""
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from technical_analysis import MarketHistory
+from runtime_coherence import install_local_tracking
+
+# AppTest and its synthetic adapters share this interpreter. Track production
+# modules before collection imports them, exactly as the application entrypoint does.
+install_local_tracking(Path(__file__).resolve().parents[1])
+
+from technical_analysis import MarketHistory  # noqa: E402 - tracked before collection
 
 
 @pytest.fixture

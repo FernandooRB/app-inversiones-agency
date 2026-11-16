@@ -18,8 +18,9 @@ por pulsar el acceso o el botón de descarga.
 Puede incluir el libro, controles de cierre, cotizaciones, FX del cierre, valores
 de reportos, NAV histórico y FX de flujos. Se conservan los bytes originales:
 el paquete no corrige centavos, completa valores vacíos ni clasifica transferencias.
-No incluye PDF/XML de la pestaña Originales GBM, propuestas de implementación,
-credenciales, el expediente completo ni resultados financieros archivados.
+Los originales PDF/XML, las credenciales y el expediente completo quedan fuera.
+Las versiones 1 y 2 no incluyen propuestas de implementación; la versión 3 puede
+conservar una propuesta completa y su resultado histórico, siempre sin aprobación.
 
 Para retomarlo, abre **Abrir paquete de movimientos** y carga el ZIP. La vista
 previa indica el corte, la moneda y los tipos de CSV incluidos. Cargarlo sólo
@@ -67,6 +68,8 @@ nuevo sus fuentes y flujos.
 
 Las descargas en tu dispositivo, los expedientes, las otras cuentas y los archivos
 de Implementación, Fuentes y alertas, Patrimonio y Originales GBM se conservan.
+Las propuestas derivadas de la revisión vaciada dejan de estar vigentes y deben
+prepararse y confirmarse de nuevo.
 La acción vacía el estado de trabajo de Movimientos; no es un borrado certificado
 del servidor, sus registros, las copias descargadas ni el almacenamiento externo.
 
@@ -95,3 +98,25 @@ No se pueden intercambiar ambos ZIP. La lectura usa las capacidades documentadas
 [zipfile de Python](https://docs.python.org/3.12/library/zipfile.html), con límites
 y lista de miembros definidos por la app, además del filtro visual de tipos de
 [Streamlit](https://docs.streamlit.io/develop/api-reference/widgets/st.file_uploader).
+
+## Borradores y propuestas: versiones 2 y 3
+
+La versión 2 añade un borrador GBM con procedencia y correcciones bajo `draft/gbm.json`
+y, opcionalmente, el resumen bajo `evidence/review.txt`. Puede guardarse sin libro,
+con sus incidencias pendientes. Los originales se vuelven a adjuntar y cotejar por
+huella cuando sean necesarios.
+
+La versión 3 añade `proposal/proposal.json`, acotado a 500 KB. Conserva el CSV de
+posiciones, los pesos efectivos, moneda, fecha, fuentes, tarifas, límites y resultado
+histórico de una propuesta. También puede guardar una propuesta manual sin libro.
+Si procede del libro, su huella debe coincidir con el CSV incluido y con el corte y
+la moneda declarados. Los límites del ZIP y de los demás miembros se mantienen.
+
+Se revisan formato, integridad y consistencia aritmética sin ejecutar el optimizador
+al leer. El resultado guardado nunca se muestra como una ejecución nueva: al retomar
+se precargan los datos, se renuevan las confirmaciones y se vuelve a calcular.
+Un modelo de riesgo de otra sesión no se reactiva. Los lectores v1/v2 permanecen
+compatibles aunque difieran las huellas del motor.
+
+En **Implementación → Guardar propuesta y revisión** se descarga la versión 3;
+el [PDF de propuesta](ledger_proposals.md) se prepara por separado bajo demanda.

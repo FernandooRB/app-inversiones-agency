@@ -19,6 +19,37 @@ render_shell(areas=("Operación",))
 st.caption("Cuenta ficticia SIM-REVISION · comprobación local")
 with patch("operations_ui._context",return_value=(None,None,None,None)):
     render_account_operations(demo=st.query_params.get("demo_operacion")=="1")
+import json
+from hashlib import sha256
+from pathlib import Path
+from uuid import uuid4
+from operations_review_ui import _context_key,_open_key,_recovery,proposal_key,recovered_proposal,review_key
+from operations_review import read_operations_review
+from portfolio_core import PortfolioError
+probe_id=st.session_state.setdefault('_synthetic_probe_id',uuid4().hex)
+recovered=recovered_proposal()
+selected=st.session_state.get(_open_key('ops_review_zip'))
+package={}
+if selected:
+    try:
+        package=read_operations_review(selected.getvalue())[0]
+    except PortfolioError:
+        package={'rejected':True}
+probe={
+    'fictional_only':True,'proposal_present':bool(recovered),
+    'proposal_expected_fee':recovered['inputs']['tariff']['commission_bps'] if recovered else None,
+    'proposal_expected_source':bool(recovered and recovered['inputs']['tariff_source']),
+    'hydrate_marker':st.session_state.get(_context_key('proposal_recovered')),
+    'form_token':proposal_key('proposal_recovery'),
+    'commission_state':st.session_state.get(proposal_key('proposal_commission')),
+    'source_present':bool(st.session_state.get(proposal_key('proposal_tariff_source'))),
+    'additional_state':st.session_state.get(review_key('bridge_additional')),
+    'review_token':_recovery().get('token'),'roles':sorted(_recovery().get('files',{})),
+    'uploaded_package_schema':package.get('schema'),
+    'uploaded_package_has_proposal':bool(package.get('proposal_data')),
+    'uploaded_package_sha256':sha256(selected.getvalue()).hexdigest() if selected else None,
+}
+_probe_written=Path(${JSON.stringify(out)},'synthetic-state-'+probe_id+'.json').write_text(json.dumps(probe),encoding='utf-8')
 `);
 const server=spawn(process.env.SIG_PYTHON||'python',['-u','-m','streamlit','run',appFile,
   '--server.address','127.0.0.1','--server.port',String(port),'--server.fileWatcherType','none',
