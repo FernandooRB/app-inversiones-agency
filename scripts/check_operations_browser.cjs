@@ -17,6 +17,14 @@ from workspace_presentation import render_shell
 st.set_page_config(page_title="SIG | Revisión portable ficticia", layout="wide")
 render_shell(areas=("Operación",))
 st.caption("Cuenta ficticia SIM-REVISION · comprobación local")
+if st.query_params.get("strategy_fixture")=="1" and "_account_flow" not in st.session_state:
+    from dataclasses import asdict
+    from account_demo import demo_account
+    from account_workflow import AccountSettings,run_account_analysis
+    files,metadata,defaults=demo_account()
+    settings=AccountSettings(**defaults)
+    result=run_account_analysis(files,settings,metadata)
+    st.session_state['_account_flow']={'context':(None,None,None,None),'files':files,'metadata':metadata,'defaults':asdict(settings),'completed':{'settings':settings,'result':result,'files':dict(files),'metadata':metadata,'run_id':'b'*32},'selected_alternative':'Mínima volatilidad'}
 with patch("operations_ui._context",return_value=(None,None,None,None)):
     render_account_operations(demo=st.query_params.get("demo_operacion")=="1")
 import json
@@ -75,6 +83,10 @@ let browser;
   fs.writeFileSync(path.join(out,'invalid.zip'),'invalid fictional package');
   browser=await chromium.launch({channel:process.platform==='win32'?'msedge':'chrome',headless:true});
   await require('./check_entrypoint_boot.cjs')({browser,out,root,python:process.env.SIG_PYTHON||'python'});
+  if(process.env.SIG_STRATEGY_ONLY==='1'){
+    await require('./check_strategy_comparison.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
+    console.log('Strategy comparison browser verification passed with fictional data');return;
+  }
   if(process.env.SIG_GBM_ONLY==='1'){
     await require('./check_gbm_review.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
     console.log('GBM browser verification passed with fictional data');return;
@@ -331,6 +343,7 @@ let browser;
   await require('./check_operations_replace.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
   await require('./check_operations_clear.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
   await require('./check_gbm_review.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
+  await require('./check_strategy_comparison.cjs')({browser,out,url:`http://127.0.0.1:${port}/`});
   fs.writeFileSync(path.join(out,'browser_verification.json'),JSON.stringify({fictional_only:true,visible_save_shortcut:true,keyboard_save_access:true,incomplete_review_native_zip_restored:true,save_does_not_confirm:true,no_stale_save_after_rejection:true,next_step_guidance:true,calendar_does_not_confirm_flows:true,summary_action_preserves_pending:true,native_zip_download:true,new_session_reopen:true,cutoff_and_currency_restored:true,nondefault_usd_restored:true,confirmations_reset:true,cent_difference_preserved:true,eod_neutral_twr_zero:true,currency_change_invalidates_consent:true,replacement_removal_does_not_resurrect:true,bad_zip_keeps_current_review:true,ledger_removal_clears_screen:true,validation_names_input:true,bad_nav_has_no_stale_return:true,other_tabs_work_after_bad_nav:true,removing_bad_nav_recovers:true,widths:[1440,768,390],page_errors:errors},null,2));
   console.log('Operations browser verification passed with fictional data');
 })().catch(async e=>{

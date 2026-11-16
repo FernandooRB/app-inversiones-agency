@@ -78,3 +78,21 @@ guía de propuestas y las oportunidades del proyecto. Se mantuvieron las decisio
 más recientes de uso personal/USD 0 sobre el alcance comercial histórico. No se
 modificó código, no se publicó una versión ni se reejecutaron las 925 pruebas para
 este cambio documental.
+
+## Avance técnico del 16 de noviembre de 2026
+
+La lista anterior conserva el corte original del 15 de noviembre. Avance posterior:
+
+| Puntos | Estado y alcance |
+|---|---|
+| 08–10 | Implementados en PR94/95: propuesta portátil v3, PDF y cotizaciones revisadas; comprobación publicada ficticia completada. |
+| 11–13 | Implementación de conexión explícita de estrategia, tres alternativas realizables y riesgo postcosto. La guía `docs/operations_comparison.md` describe su funcionamiento; la auditoría de esta entrega registra CI y publicación por separado. |
+| 19 | Mejora medida del acceso local; falta una medición de campo de toda la app autenticada. |
+| 20 | Protección de módulos cargados y arranque real corregidos y comprobados. |
+| 24 | Recuperación de propuestas con procedencia v4, lectura v1/v2/v3, confirmaciones renovadas y casos hostiles. La conservación permanente corresponde al punto 28. |
+| 01–07 | Siguen pendientes las observaciones humanas completas y la evidencia real faltante. Samsung S23 con Chrome ya identificado; no volver a solicitar documentos que el usuario indicó que no tiene. |
+| 14–18, 21–23, 25–32 | Conservan los criterios y pendientes de la tabla original; las pruebas parciales no equivalen a completar cada punto. |
+
+El siguiente bloque técnico es ampliar la explicación de rendimiento y la
+comparación de cortes, conservando los requisitos de evidencia de las tarifas.
+Sólo se dispone de muestras GBM; no se anuncia otro intermediario soportado.

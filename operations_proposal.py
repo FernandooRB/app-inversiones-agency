@@ -12,6 +12,7 @@ from hashlib import sha256
 from io import BytesIO, StringIO
 
 from implementation_costs import ImplementationCostAssumptions, _validate_assumptions
+from operations_comparison import validate_strategy
 from portfolio_core import PortfolioError
 from portfolio_exposure import _text
 
@@ -101,12 +102,14 @@ def validate_proposal(payload):
             not isinstance(payload, dict)
             or set(payload) != {"schema", "kind", "inputs", "result"}
             or type(payload["schema"]) is not int
-            or payload["schema"] != 1
+            or payload["schema"] not in {1, 2}
             or payload["kind"] != "sig.operations.proposal"
         ):
             raise ValueError
         inputs, result = payload["inputs"], payload["result"]
-        if not isinstance(inputs, dict) or set(inputs) != INPUT_FIELDS:
+        if not isinstance(inputs, dict) or set(inputs) != INPUT_FIELDS | (
+            {"strategy"} if payload["schema"] == 2 else set()
+        ):
             raise ValueError
         if inputs["currency"] not in {"MXN", "USD"} or type(inputs["optimize"]) is not bool:
             raise ValueError
@@ -145,6 +148,16 @@ def validate_proposal(payload):
             raise ValueError
         if sum(_number(v, high=1) for v in target) > 1 + 1e-9:
             raise ValueError
+        if payload["schema"] == 2:
+            if inputs["optimize"]:
+                raise ValueError
+            validate_strategy(
+                inputs["strategy"],
+                [r["Instrumento"] for r in rows],
+                inputs["date"],
+                inputs["currency"],
+                target,
+            )
         origin = inputs["book_origin"]
         if inputs["origin"] == "Libro de movimientos":
             if not isinstance(origin, dict) or set(origin) != {
@@ -273,7 +286,12 @@ def validate_proposal(payload):
 def portable_proposal(proposal):
     result = {**proposal["result"], "detail": proposal["result"]["detail"].to_dict("records")}
     return validate_proposal(
-        {"schema": 1, "kind": "sig.operations.proposal", "inputs": proposal["inputs"], "result": result}
+        {
+            "schema": 2 if "strategy" in proposal["inputs"] else 1,
+            "kind": "sig.operations.proposal",
+            "inputs": proposal["inputs"],
+            "result": result,
+        }
     )
 
 
@@ -382,6 +400,19 @@ def proposal_pdf(payload, snapshot=None):
         ),
     ]
     origin = inputs["book_origin"]
+    strategy = inputs.get("strategy")
+    if strategy:
+        story += [
+            p("Estrategia: " + strategy["name"][:80]),
+            p(
+                f"Historia {strategy['sample_start']} a {strategy['sample_end']} · "
+                f"Ejecución {strategy['run_id'][:12]}"
+            ),
+            p(
+                "Procedencia completa y huellas del análisis: ZIP. "
+                "La estrategia conserva los pendientes de revisión de sus fuentes."
+            ),
+        ]
     if origin:
         story += [p("Libro SHA-256 " + origin["ledger_sha256"])]
         for row in origin["quotes"][:8]:
