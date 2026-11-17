@@ -117,3 +117,18 @@ El ZIPv5 conserva la política sin confirmaciones; la evaluación se renueva y m
 pendientes los criterios o datos no acreditados. `docs/operations_policy.md` detalla
 el recorrido. Auditorías y publicación se registran por entrega, separadas de las
 pruebas humanas. El siguiente bloque técnico es18: conectar varias cuentas y monedas.
+
+## Bloque de consolidación — 16 de noviembre de 2026
+
+El punto18 conecta cortes JSON de cuentas revisadas, con fecha común, pertenencia
+declarada, FX fechado y fuentes. Conserva saldos/pendientes por cuenta, propone
+coincidencias de transferencias sin acreditarlas automáticamente y exige vínculo
+documentado para reconocer pares. No suma rendimientos de cuentas ni fabrica FX.
+El paquete de grupo es independiente del ZIP de movimientos v1–v5 y recupera
+propuestas con confirmaciones renovadas. `docs/book_consolidation.md` documenta
+uso, cobertura y límites; auditorías/publicación se registran por entrega.
+
+Siguen pendientes evidencia GBM y tarifas reales, prueba humana de estos recorridos,
+segunda identidad autorizada y datos de otros intermediarios. Los siguientes
+bloques técnicos son accesibilidad/recuperación y conservación personal local,
+sin contratar alojamiento ni trasladar originales reales a la web.
