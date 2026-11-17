@@ -5,7 +5,7 @@ const assert=require('node:assert/strict');
 const {execFileSync}=require('node:child_process');
 module.exports=async({browser,out,url})=>{
   const python=process.env.SIG_PYTHON||'python';
-  execFileSync(python,[path.join(__dirname,'strategy_comparison_fixture.py'),out]);
+  execFileSync(python,[path.join(__dirname,'strategy_comparison_fixture.py'),out],{env:{...process.env,OPENBLAS_NUM_THREADS:'1',OMP_NUM_THREADS:'1'}});
   const page=await browser.newPage({viewport:{width:1440,height:900}});
   const settle=async p=>{await p.waitForTimeout(200);await p.locator('[data-stale="true"]').first().waitFor({state:'detached'});};
   const expand=async(p,label)=>{

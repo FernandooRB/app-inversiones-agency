@@ -7,12 +7,13 @@ import sys
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from account_demo import demo_account
-from account_workflow import AccountSettings, run_account_analysis
+from account_workflow import AccountSettings, make_run_bundle, run_account_analysis
 from executable_allocation import executable_plan
 from implementation_costs import ImplementationCostAssumptions
 from operations_proposal import portable_proposal
@@ -21,7 +22,10 @@ from operations_review import build_operations_review
 
 
 def create_fixture(out):
-    files, metadata, defaults = demo_account()
+    # Fixed past date: browser checks must not change when runners cross midnight.
+    with patch("account_demo.date") as clock:
+        clock.today.return_value = date(2026, 11, 13)
+        files, metadata, defaults = demo_account()
     settings = AccountSettings(**defaults)
     result = run_account_analysis(files, settings, metadata)
     frame = pd.DataFrame(
@@ -76,6 +80,8 @@ def create_fixture(out):
         {"ledger": ledger}, cutoff=settings.as_of, base="MXN", proposal=portable_proposal(proposal)
     )
     out.mkdir(parents=True, exist_ok=True)
+    _, analysis = make_run_bundle(files, settings, metadata, result, run_id="b" * 32)
+    (out / "strategy_account_analysis.zip").write_bytes(analysis)
     (out / "strategy_fixture_v3.zip").write_bytes(package)
     weights = next(a.metrics.weights.tolist() for a in result["alternatives"] if a.name == "Máximo Sharpe")
     (out / "strategy_expected.json").write_text(

@@ -19,10 +19,10 @@ render_shell(areas=("Operación",))
 st.caption("Cuenta ficticia SIM-REVISION · comprobación local")
 if st.query_params.get("strategy_fixture")=="1" and "_account_flow" not in st.session_state:
     from dataclasses import asdict
-    from account_demo import demo_account
-    from account_workflow import AccountSettings,run_account_analysis
-    files,metadata,defaults=demo_account()
-    settings=AccountSettings(**defaults)
+    from pathlib import Path
+    from account_workflow import read_run_bundle,run_account_analysis
+    manifest,files,settings=read_run_bundle(Path(${JSON.stringify(out)},'strategy_account_analysis.zip').read_bytes())
+    metadata=manifest['metadata']
     result=run_account_analysis(files,settings,metadata)
     st.session_state['_account_flow']={'context':(None,None,None,None),'files':files,'metadata':metadata,'defaults':asdict(settings),'completed':{'settings':settings,'result':result,'files':dict(files),'metadata':metadata,'run_id':'b'*32},'selected_alternative':'Mínima volatilidad'}
 with patch("operations_ui._context",return_value=(None,None,None,None)):

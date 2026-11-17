@@ -96,7 +96,10 @@ def proposal_inputs(raw, *, cutoff, currency, market_rows, confirmed=False):
             }
         )
         quotes.append(dict(entry))
-    if target_total > 1:
+    # Calculated float targets can serialize just above one (e.g. 1 + 9e-17).
+    # Keep every supplied weight and money amount unchanged; tolerate only this
+    # numeric noise in the dimensionless objective, never in cash or quantities.
+    if target_total > 1 + decimal("0.000000000001"):
         raise PortfolioError("Los pesos objetivo no pueden sumar más de 1; el resto corresponde al efectivo.")
     if {asset for asset, _ in book["positions"]} - assets:
         raise PortfolioError(

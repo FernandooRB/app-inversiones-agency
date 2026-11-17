@@ -41,6 +41,11 @@ análisis compatible o historia suficiente, el riesgo queda **pendiente**.
 Estas cifras describen una exposición al modelo, no una ganancia futura ni el
 rendimiento histórico del libro.
 
+Los pesos objetivo calculados pueden contener ruido numérico al guardarse como
+decimales. El puente admite hasta 0.000000000001 de exceso en su suma, sin cambiar
+ningún peso. Esa tolerancia no se aplica a efectivo, cantidades, importes ni a
+diferencias de centavos documentadas.
+
 ## Guardar y retomar
 
 Descarga el CSV comparativo por separado. El PDF de propuesta se prepara bajo

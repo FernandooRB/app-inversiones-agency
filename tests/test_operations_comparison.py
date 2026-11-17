@@ -466,3 +466,32 @@ _implementation((None,None,None,None))
     next(s for s in app.selectbox if s.label == "Moneda de las órdenes").select("USD").run()
     next(c for c in app.checkbox if c.label.startswith("Confirmé precios sin ajuste")).check().run()
     assert next(b for b in app.button if b.label == "Calcular propuesta de títulos").disabled
+
+
+def test_computed_weight_roundoff_can_reopen_without_changing_any_weight():
+    from operations_proposal_bridge import proposal_inputs
+
+    day = date(2026, 1, 30)
+    raw = (
+        b"ID,Fecha,Liquidacion,Tipo,Instrumento,Moneda,Cantidad,Precio,Importe,Comision,Impuesto,"
+        b"Referencia,MomentoFlujo,Interes\n"
+        b"opening,2026-01-30,2026-01-30,OPEN_CASH,,MXN,0,0,1000,0,0,,UNKNOWN,0\n"
+    )
+    weights = ["0.6", "0.11798677449484879", "0.2820132255051513"]
+    rows = [
+        {
+            "Instrumento": f"SIM-{i}",
+            "Fecha": str(day),
+            "Precio": "10",
+            "Lote": "1",
+            "PesoObjetivo": w,
+            "Fuente": "Modelo ficticio",
+        }
+        for i, w in enumerate(weights)
+    ]
+    ready = proposal_inputs(raw, cutoff=day, currency="MXN", market_rows=rows, confirmed=True)
+    assert [q["PesoObjetivo"] for q in ready["quotes"]] == weights
+    assert ready["cash"] == "1000"
+    rows[0]["PesoObjetivo"] = "0.60000000001"
+    with pytest.raises(PortfolioError, match="pesos objetivo"):
+        proposal_inputs(raw, cutoff=day, currency="MXN", market_rows=rows, confirmed=True)
