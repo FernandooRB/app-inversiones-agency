@@ -338,7 +338,11 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
             st.session_state,
             "operations_zip",
             analysis_key(
-                present, args, review_code_fingerprints(schema=3 if proposal else 2 if draft else 1)
+                present,
+                args,
+                review_code_fingerprints(
+                    schema=(4 if proposal["schema"] == 2 else 3) if proposal else 2 if draft else 1
+                ),
             ),
             lambda: build_operations_review(present, **args),
             max_entries=1,

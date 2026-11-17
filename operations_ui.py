@@ -25,6 +25,7 @@ from implementation_costs import ImplementationCostAssumptions
 from ledger_reconciliation import COLUMNS as CONTROL_COLUMNS
 from ledger_reconciliation import read_closing_controls, reconcile_book
 from multi_currency_wealth import consolidate_wealth, consolidated_performance, match_internal_flows
+from operations_comparison import compare_plans, plan_risk, strategy_from_analysis, validate_strategy
 from operations_demo import DEMO_CONTEXT, DEMO_NAV_COMPLETE, DEMO_NAV_INVALID, demo_operations, demo_url
 from operations_input_forms import complete_input
 from operations_jobs import refresh_subscription
@@ -45,6 +46,7 @@ from operations_review_ui import (
 )
 from operations_status import OperationStatus, status_text
 from portfolio_core import PortfolioError
+from portfolio_exposure import _text
 from realized_performance import Flow, normalize_valuations, performance, valuation_requirements
 from transaction_ledger import COLUMNS, REPO_VALUE_COLUMNS, book_at, read_ledger, read_repo_values, value_book
 
@@ -151,7 +153,7 @@ def _status_panel(context, *, demo=False, review_available=False):
     snapshot = status.snapshot(scope)
     snapshot["demo"] = demo
     if status.performance_summary is not None:
-        st.subheader("Cuánto gané y por qué")
+        st.header("Cuánto gané y por qué")
         st.caption(status.performance_summary["state"])
         explanation = status.performance_summary
         figures, meaning = st.columns([2, 1], gap="large")
@@ -174,7 +176,7 @@ def _status_panel(context, *, demo=False, review_available=False):
         snapshot["code_sha256"]["operations_demo.py"] = sha256(
             Path(__file__).with_name("operations_demo.py").read_bytes().replace(b"\r\n", b"\n")
         ).hexdigest()
-    st.subheader("Estado de la revisión")
+    st.header("Estado de la revisión")
     st.text(f"{scope}\nCorte del libro: {status.cutoff or '—'} · Moneda: {status.base or '—'}")
     if status.calendar is not None:
         st.caption(f"Periodo del rendimiento: {status.calendar['start']} a {status.calendar['end']}.")
@@ -560,7 +562,7 @@ def _ledger(context, *, demo=False):
     st.session_state[_key("_ops_status")] = status
     # Rebuild the reference from current inputs before another tab may use it.
     st.session_state.pop(_key("_ops_last_book"), None)
-    st.subheader("Movimientos y rendimiento histórico")
+    st.header("Movimientos y rendimiento histórico")
     st.caption("Títulos a fecha de operación, efectivo a liquidación y pendientes separados. MXN y USD.")
     if not demo:
         new_review()
@@ -877,7 +879,7 @@ def _ledger(context, *, demo=False):
 
 
 def _implementation(context):
-    st.subheader("Propuesta por títulos y lotes")
+    st.header("Propuesta por títulos y lotes")
     st.caption(
         "Minimiza desvío del objetivo y costos sujetos a efectivo, lotes, concentración y rotación. "
         "Comprueba precios, lotes y tarifas con tu intermediario antes de usar una propuesta."
@@ -889,9 +891,10 @@ def _implementation(context):
         st.caption("Propuesta recuperada. Revisa sus datos y vuelve a confirmar para recalcular.")
     prepared = prepare_book_proposal()
     origin = st.radio(
-        "Origen de la propuesta", ["CSV manual", "Libro de movimientos"],
+        "Origen de la propuesta",
+        ["CSV manual", "Libro de movimientos"],
         index=1 if defaults.get("origin") == "Libro de movimientos" else 0,
-        key=proposal_key("proposal_origin")
+        key=proposal_key("proposal_origin"),
     )
     using_book = origin == "Libro de movimientos" and prepared is not None
     _template(
@@ -914,6 +917,13 @@ def _implementation(context):
     recovered_target = (
         recovery["inputs"]["target"] if recovery and origin == "CSV manual" and not upload else None
     )
+    if recovery and using_book and defaults.get("book_origin"):
+        origin_book = defaults["book_origin"]
+        if all(prepared[key] == origin_book[key] for key in ("ledger_sha256", "cutoff", "currency")):
+            if list(prepared["positions"]["Instrumento"]) == [
+                q["Instrumento"] for q in origin_book["quotes"]
+            ]:
+                recovered_target = defaults["target"]
     if recovered_target is not None:
         st.caption(
             "Insumos y pesos efectivos recuperados. "
@@ -934,12 +944,16 @@ def _implementation(context):
         if origin == "Libro de movimientos":
             st.info("Prepara primero las posiciones y sus fuentes en Preparar desde el libro de movimientos.")
         cash = st.number_input(
-            "Efectivo disponible para operar", min_value=0.0, value=float(defaults.get("cash", 0)),
-            key=proposal_key("proposal_cash")
+            "Efectivo disponible para operar",
+            min_value=0.0,
+            value=float(defaults.get("cash", 0)),
+            key=proposal_key("proposal_cash"),
         )
         currency = st.selectbox(
-            "Moneda de las órdenes", ["MXN", "USD"], index=1 if defaults.get("currency") == "USD" else 0,
-            key=proposal_key("proposal_currency")
+            "Moneda de las órdenes",
+            ["MXN", "USD"],
+            index=1 if defaults.get("currency") == "USD" else 0,
+            key=proposal_key("proposal_currency"),
         )
         quote_day = st.date_input(
             "Fecha de cotización de las órdenes",
@@ -948,59 +962,169 @@ def _implementation(context):
             key=proposal_key("proposal_date"),
         )
         quote_source = st.text_input(
-            "Fuente de cotizaciones y lotes", value=defaults.get("quote_source", ""),
-            key=proposal_key("proposal_quote_source")
+            "Fuente de cotizaciones y lotes",
+            value=defaults.get("quote_source", ""),
+            key=proposal_key("proposal_quote_source"),
         )
     floor = st.number_input(
-        "Efectivo mínimo que deseas conservar", min_value=0.0, value=float(defaults.get("cash_floor", 0)),
-        key=proposal_key("proposal_floor")
+        "Efectivo mínimo que deseas conservar",
+        min_value=0.0,
+        value=float(defaults.get("cash_floor", 0)),
+        key=proposal_key("proposal_floor"),
     )
     commission = st.number_input(
-        "Comisión · puntos base por operación", 0.0, 500.0, float(default_tariff.get("commission_bps", 0)),
-        key=proposal_key("proposal_commission")
+        "Comisión · puntos base por operación",
+        0.0,
+        500.0,
+        float(default_tariff.get("commission_bps", 0)),
+        key=proposal_key("proposal_commission"),
     )
     minimum = st.number_input(
-        "Comisión mínima por orden", 0.0, 100000.0, float(default_tariff.get("minimum_commission", 0)),
-        key=proposal_key("proposal_minimum")
+        "Comisión mínima por orden",
+        0.0,
+        100000.0,
+        float(default_tariff.get("minimum_commission", 0)),
+        key=proposal_key("proposal_minimum"),
     )
     market = st.number_input(
-        "Costo de mercado · puntos base", 0.0, 500.0, float(default_tariff.get("market_cost_bps", 0)),
-        key=proposal_key("proposal_market")
+        "Costo de mercado · puntos base",
+        0.0,
+        500.0,
+        float(default_tariff.get("market_cost_bps", 0)),
+        key=proposal_key("proposal_market"),
     )
-    vat = st.number_input(
-        "IVA sobre comisión · %", 0.0, 100.0, float(default_tariff.get("vat_rate", 0)) * 100,
-        key=proposal_key("proposal_vat")
-    ) / 100
+    vat = (
+        st.number_input(
+            "IVA sobre comisión · %",
+            0.0,
+            100.0,
+            float(default_tariff.get("vat_rate", 0)) * 100,
+            key=proposal_key("proposal_vat"),
+        )
+        / 100
+    )
     tariff_source = st.text_input(
-        "Fuente y vigencia de las tarifas aplicables", value=defaults.get("tariff_source", ""),
-        key=proposal_key("proposal_tariff_source")
+        "Fuente y vigencia de las tarifas aplicables",
+        value=defaults.get("tariff_source", ""),
+        key=proposal_key("proposal_tariff_source"),
+    )
+    flow = st.session_state.get("_account_flow", {})
+    completed = flow.get("completed")
+    binding = (
+        str(context[0].path) if context[0] else None,
+        context[1].actor if context[1] else None,
+        context[2]["id"] if context[2] else None,
+        context[3],
+    )
+    strategy = None
+    analysis_model = None
+    analysis_notice = "Abre un análisis calculado de esta misma cuenta, corte, moneda y universo."
+    selected_name = flow.get("selected_alternative", "Mínima volatilidad")
+    names = [a.name for a in completed["result"]["alternatives"]] if completed else []
+    if names and selected_name not in names:
+        selected_name = names[0]
+    target_origin = st.radio(
+        "Pesos objetivo",
+        (["Pesos guardados"] if recovery else [])
+        + ["Pesos del insumo", "Alternativa del análisis de cuenta"],
+        key=proposal_key("target_origin"),
+    )
+    saved_target_available = recovered_target is not None
+    if target_origin != "Pesos guardados":
+        recovered_target = None
+    if target_origin == "Alternativa del análisis de cuenta" and names:
+        selected_name = st.selectbox(
+            "Alternativa objetivo del análisis",
+            names,
+            index=names.index(selected_name),
+            key=proposal_key("target_alternative"),
+        )
+    if completed and source_raw:
+        try:
+            assets = tuple(_csv(BytesIO(source_raw))["Instrumento"])
+            reviewed_strategy = strategy_from_analysis(
+                flow, binding, assets, quote_day, currency, selected_name
+            )
+            analysis_model = completed["result"]["model"]
+            if target_origin == "Alternativa del análisis de cuenta":
+                strategy = reviewed_strategy
+        except (PortfolioError, ValueError, KeyError, TypeError):
+            pass
+    if target_origin == "Alternativa del análisis de cuenta":
+        if strategy:
+            st.caption(
+                f"Estrategia: {strategy['name']} · ejecución {strategy['run_id'][:12]} · "
+                f"historia {strategy['sample_start']} a {strategy['sample_end']}."
+            )
+            st.caption(
+                "Sus pesos objetivo se aplican al capital total disponible, incluido el efectivo. "
+                "La referencia Conservar de la comparación mantiene los títulos sin operar."
+            )
+            st.dataframe(
+                pd.DataFrame({"Instrumento": strategy["assets"], "Peso objetivo": strategy["weights"]}),
+                hide_index=True,
+                width="stretch",
+            )
+        else:
+            st.info(analysis_notice)
+    elif target_origin == "Pesos guardados":
+        if defaults.get("strategy") and recovered_target is not None:
+            try:
+                strategy = validate_strategy(
+                    defaults["strategy"],
+                    tuple(_csv(BytesIO(source_raw))["Instrumento"]),
+                    quote_day,
+                    currency,
+                    recovered_target,
+                )
+            except (PortfolioError, ValueError, KeyError, TypeError):
+                saved_target_available = False
+            else:
+                st.caption(
+                    f"Procedencia guardada: {strategy['name']} · ejecución {strategy['run_id'][:12]}. "
+                    "Los pesos se recuperan para revisión; el riesgo necesita el análisis de cuenta."
+                )
+        if not saved_target_available:
+            st.info(
+                "Los pesos guardados no coinciden con estos insumos, corte o moneda. "
+                "Revisa los pesos del insumo o elige una alternativa de un análisis compatible."
+            )
+    fraction = (
+        st.slider("Acercamiento del cambio parcial · %", 0, 100, 25, key=proposal_key("comparison_fraction"))
+        / 100
     )
     turnover = st.slider(
         "Rotación máxima · suma de compras y ventas / patrimonio",
         0.0,
         2.0,
-        float(defaults.get("max_turnover", .5)),
+        float(defaults.get("max_turnover", 0.5)),
         key=proposal_key("proposal_turnover"),
     )
     cap = st.slider(
         "Concentración máxima por activo sobre capital inicial",
-        0.01, 1.0, float(defaults.get("max_weight", 1)), key=proposal_key("proposal_cap")
+        0.01,
+        1.0,
+        float(defaults.get("max_weight", 1)),
+        key=proposal_key("proposal_cap"),
     )
     min_trade = st.number_input(
-        "Importe mínimo por orden", 0.0, value=float(defaults.get("minimum_trade", 0)),
-        key=proposal_key("proposal_min_trade")
+        "Importe mínimo por orden",
+        0.0,
+        value=float(defaults.get("minimum_trade", 0)),
+        key=proposal_key("proposal_min_trade"),
     )
+    if target_origin == "Alternativa del análisis de cuenta":
+        st.session_state[proposal_key("proposal_optimize")] = False
     optimize = st.checkbox(
         "Usar modelo de costos y riesgo del análisis de cuenta abierto en esta sesión",
         key=proposal_key("proposal_optimize"),
+        disabled=target_origin == "Alternativa del análisis de cuenta",
     )
-    flow = st.session_state.get("_account_flow", {})
-    completed = flow.get("completed")
     model_signature = None
-    if optimize and completed:
+    if analysis_model is not None:
         moments = completed["result"]["model"].moments
         model_signature = analysis_key(
-            completed["settings"], moments.mean, moments.covariance, flow.get("context")
+            completed["settings"], moments.mean, moments.covariance, flow.get("context"), completed["run_id"]
         )
     inputs = {
         "currency": currency,
@@ -1019,12 +1143,15 @@ def _implementation(context):
         if using_book
         else None,
     }
+    if strategy and not optimize:
+        inputs["strategy"] = strategy
     signature = analysis_key(
         review_key("proposal"),
         source_raw,
         inputs,
         model_signature,
         recovered_target,
+        fraction,
         Path(__file__).with_name("executable_allocation.py").read_bytes().replace(b"\r\n", b"\n"),
     )
     if st.session_state.get(_key("orders_signature")) != signature:
@@ -1034,8 +1161,16 @@ def _implementation(context):
         "Confirmé precios sin ajuste, títulos, lotes, moneda y tarifas de esta cuenta",
         key=proposal_key("orders_confirmation"),
     )
-    if st.button("Calcular propuesta de títulos", disabled=not source_raw or not confirmed):
-        if not quote_source.strip() or not tariff_source.strip():
+    can_calculate = bool(
+        source_raw
+        and confirmed
+        and (target_origin != "Alternativa del análisis de cuenta" or strategy is not None)
+        and (target_origin != "Pesos guardados" or saved_target_available)
+    )
+    calculate = st.button("Calcular propuesta de títulos", disabled=not can_calculate)
+    compare = st.button("Comparar alternativas con estos insumos", disabled=not can_calculate)
+    if calculate or compare:
+        if not all(_text(value.lstrip()) for value in (quote_source, tariff_source)):
             raise PortfolioError("Documenta las fuentes de cotizaciones y tarifas.")
         positions = _csv(BytesIO(source_raw))
         if "PesoObjetivo" not in positions:
@@ -1043,10 +1178,12 @@ def _implementation(context):
         target = pd.to_numeric(positions["PesoObjetivo"], errors="raise").to_numpy()
         if recovered_target is not None:
             target = pd.Series(recovered_target).to_numpy(dtype=float)
+        if strategy and not optimize:
+            target = pd.Series(strategy["weights"]).to_numpy(dtype=float)
         if optimize:
             _, _, state, account = context
             if (
-                not completed
+                analysis_model is None
                 or currency != "MXN"
                 or flow.get("context", (None,) * 4)[2:] != (state["id"] if state else None, account)
             ):
@@ -1067,27 +1204,106 @@ def _implementation(context):
                 max_turnover=turnover,
             )
         assumptions = ImplementationCostAssumptions(commission, market, vat, minimum)
-        result = executable_plan(
-            positions,
-            cash,
-            target,
-            assumptions,
+        limits = dict(
             cash_floor=floor,
             max_turnover=turnover,
             max_weight=cap,
             minimum_trade=min_trade,
             quotes_confirmed=confirmed,
         )
-        st.session_state["_execution_proposal"] = {
-            "signature": signature,
-            "context": (context[2]["id"] if context[2] else None, context[3]),
-            "result": result,
-            "inputs": {
-                **inputs,
-                "target": target.tolist(),
-                "csv": base64.b64encode(source_raw).decode(),
-            },
-        }
+        if calculate:
+            result = executable_plan(positions, cash, target, assumptions, **limits)
+            st.session_state["_execution_proposal"] = {
+                "signature": signature,
+                "context": (context[2]["id"] if context[2] else None, context[3]),
+                "result": result,
+                "inputs": {**inputs, "target": target.tolist(), "csv": base64.b64encode(source_raw).decode()},
+            }
+        if compare:
+            current = st.session_state.get("_execution_proposal")
+            reusable = (
+                current
+                if current and current["signature"] == signature and current["context"] == binding[2:]
+                else None
+            )
+            comparison = compare_plans(
+                positions, cash, target, assumptions, fraction=fraction, full_plan=reusable, **limits
+            )
+            st.session_state["_execution_comparison"] = {
+                "signature": signature,
+                "binding": binding,
+                "result": comparison,
+                "inputs": {**inputs, "target": target.tolist(), "csv": base64.b64encode(source_raw).decode()},
+                "risks": {
+                    name: plan_risk(plan, analysis_model) for name, plan in comparison["plans"].items()
+                },
+            }
+    comparison = st.session_state.get("_execution_comparison")
+    if comparison and comparison["signature"] == signature and comparison["binding"] == binding and confirmed:
+        st.subheader("Conservar, cambio parcial y propuesta")
+        table = comparison["result"]["summary"].copy()
+        risks = comparison["risks"]
+        table["Media anual del modelo"] = [risks[name]["annual_mean"] for name in table["Alternativa"]]
+        table["Volatilidad anual"] = [risks[name]["annual_volatility"] for name in table["Alternativa"]]
+        table["Riesgo"] = [risks[name]["status"] for name in table["Alternativa"]]
+        table["Fecha"] = str(quote_day)
+        table["Moneda"] = currency
+        table["Fuente de precios"] = quote_source
+        table["Fuente de tarifas"] = tariff_source
+        table["Fracción parcial"] = comparison["result"]["fraction"]
+        table["Cobertura de títulos"] = [risks[name]["coverage"] for name in table["Alternativa"]]
+        formats = {k: "{:,.2f}" for k in ("Compras", "Ventas", "Costo", "Efectivo")}
+        formats.update(
+            {
+                k: "{:.2%}"
+                for k in ("Rotación", "Media anual del modelo", "Volatilidad anual", "Cobertura de títulos")
+            }
+        )
+        visible = ["Alternativa", "Estado", "Costo", "Efectivo", "Rotación", "Volatilidad anual", "Riesgo"]
+        st.dataframe(
+            table[visible].style.format(formats, na_rep="Pendiente"), hide_index=True, width="stretch"
+        )
+        st.caption(
+            f"Corte {quote_day} · {currency}. Cambio parcial: {comparison['result']['fraction']:.0%} "
+            "de acercamiento en pesos antes de redondear lotes. Conservar no tiene transacciones. "
+            "Los cargos recurrentes e impuestos de una venta requieren revisión aparte."
+        )
+        if analysis_model is not None:
+            sample = next(iter(risks.values()))
+            st.caption(
+                f"Modelo de riesgo: {analysis_model.moments.description} · "
+                f"{sample['observations']} retornos · "
+                f"{sample['start']} a {sample['end']}. Pesos finales sobre patrimonio después de cargos. "
+                "El modelo supone efectivo constante en términos nominales; "
+                "no mide riesgo de contraparte, inflación ni FX."
+            )
+        else:
+            st.caption("Riesgo pendiente: " + analysis_notice)
+        with st.expander("Títulos finales y cobertura del riesgo"):
+            st.dataframe(table.style.format(formats, na_rep="Pendiente"), hide_index=True, width="stretch")
+            for name, plan in comparison["result"]["plans"].items():
+                st.write("**" + name + "**")
+                if plan is not None:
+                    st.dataframe(plan["detail"], hide_index=True, width="stretch")
+                risk = risks[name]
+                if risk["coverage"] is not None:
+                    st.caption(
+                        f"Cobertura de títulos: {risk['coverage']:.1%} · "
+                        f"Efectivo sobre patrimonio final: {risk['cash_weight']:.1%}."
+                    )
+                else:
+                    st.caption("Cobertura del riesgo pendiente de análisis compatible.")
+        st.download_button(
+            "Descargar comparación CSV",
+            table.to_csv(index=False).encode(),
+            "comparacion_titulos.csv",
+            "text/csv",
+            on_click="ignore",
+        )
+        st.caption(
+            "El ZIP conserva la propuesta y su procedencia. La comparación CSV se descarga por separado. "
+            "Para evaluar riesgo al retomar, abre también el análisis de cuenta."
+        )
     proposal = st.session_state.get("_execution_proposal")
     binding = (context[2]["id"] if context[2] else None, context[3])
     if proposal and proposal["context"] == binding and proposal.get("signature") == signature and confirmed:
@@ -1140,8 +1356,11 @@ def _implementation(context):
         pdf = st.session_state.get(_key("proposal_pdf"))
         if pdf and pdf["signature"] == analysis_key(portable, snapshot):
             st.download_button(
-                "Descargar PDF de la propuesta", pdf["bytes"], "propuesta_cartera.pdf",
-                "application/pdf", on_click="ignore"
+                "Descargar PDF de la propuesta",
+                pdf["bytes"],
+                "propuesta_cartera.pdf",
+                "application/pdf",
+                on_click="ignore",
             )
         download_review(context, {}, cutoff=quote_day, base=currency, suffix="_proposal", proposal=portable)
         _save_evidence(
@@ -1155,7 +1374,7 @@ def _implementation(context):
 
 
 def _feeds(context):
-    st.subheader("Fuentes aprobadas y alertas")
+    st.header("Fuentes aprobadas y alertas")
     store, principal, state, account = context
     catalogue_file = st.file_uploader(
         "Catálogo de instrumentos e identidades de emisor", ["csv"], key=_key("ops_catalogue")
@@ -1308,7 +1527,7 @@ def _feeds(context):
 
 
 def _wealth(context):
-    st.subheader("Patrimonio entre cuentas MXN y USD")
+    st.header("Patrimonio entre cuentas MXN y USD")
     cutoff = st.date_input("Corte común del patrimonio", date.today(), max_value=date.today())
     base = st.selectbox("Moneda base del patrimonio", ["MXN", "USD"])
     _template(
@@ -1413,7 +1632,7 @@ def _wealth(context):
 
 
 def _documents(context):
-    st.subheader("Revisión de originales GBM")
+    st.header("Revisión de originales GBM")
     files = st.file_uploader(
         "Estados PDF y comprobantes CFDI XML",
         ["pdf", "xml"],

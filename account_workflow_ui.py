@@ -674,6 +674,7 @@ def _results(flow, store, principal, state, account):
             key="account_selected_" + completed["run_id"],
         )
         alternative = next(item for item in result["alternatives"] if item.name == selected)
+        flow["selected_alternative"] = selected
         st.dataframe(
             pd.DataFrame(
                 {

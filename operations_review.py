@@ -40,6 +40,15 @@ V3_CODE_FILES = (
     "executable_allocation.py",
     "implementation_costs.py",
 )
+V4_CODE_FILES = (
+    *V3_CODE_FILES,
+    "operations_comparison.py",
+    "account_workflow.py",
+    "allocation_analysis.py",
+    "model_estimation.py",
+    "portfolio_core.py",
+    "covariance_calibration.py",
+)
 MAX_PACKAGE_BYTES = 15_000_000
 MAX_MANIFEST_BYTES = 32_000
 _FIELDS = {"schema", "kind", "created_at", "scope", "cutoff", "base", "files", "code_sha256", "review_state"}
@@ -50,7 +59,15 @@ def review_code_fingerprints(*, schema=1):
     # Normalize source line endings for Windows/Linux portability; input CSV bytes stay exact.
     return {
         name: sha256((root / name).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
-        for name in (V3_CODE_FILES if schema == 3 else V2_CODE_FILES if schema == 2 else CODE_FILES)
+        for name in (
+            V4_CODE_FILES
+            if schema == 4
+            else V3_CODE_FILES
+            if schema == 3
+            else V2_CODE_FILES
+            if schema == 2
+            else CODE_FILES
+        )
     }
 
 
@@ -148,10 +165,12 @@ def build_operations_review(
             ):
                 raise ValueError
             proposal_raw = json.dumps(data, ensure_ascii=False, allow_nan=False).encode()
+            schema = 4 if data["schema"] == 2 else 3
             manifest.update(
-                schema=3, proposal={"size": len(proposal_raw), "sha256": sha256(proposal_raw).hexdigest()}
+                schema=schema,
+                proposal={"size": len(proposal_raw), "sha256": sha256(proposal_raw).hexdigest()},
             )
-            manifest["code_sha256"] = review_code_fingerprints(schema=3)
+            manifest["code_sha256"] = review_code_fingerprints(schema=schema)
         stream = BytesIO()
         with ZipFile(stream, "w", compression=ZIP_DEFLATED) as archive:
             data = {"review.json": json.dumps(manifest, ensure_ascii=False, allow_nan=False).encode()}
@@ -223,14 +242,14 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         if (
             not isinstance(manifest, dict)
             or type(manifest.get("schema")) is not int
-            or manifest["schema"] not in {1, 2, 3}
+            or manifest["schema"] not in {1, 2, 3, 4}
             or set(manifest)
             != (
                 _FIELDS
                 | {"proposal"}
                 | ({"draft"} if "draft" in manifest else set())
                 | ({"summary"} if "summary" in manifest else set())
-                if manifest["schema"] == 3
+                if manifest["schema"] in {3, 4}
                 else _FIELDS | {"draft"} | ({"summary"} if "summary" in manifest else set())
                 if manifest["schema"] == 2
                 else _FIELDS
@@ -243,7 +262,7 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         summary_raw = raw_files.pop("evidence/review.txt", None)
         proposal_raw = raw_files.pop("proposal/proposal.json", None)
         proposal_data = None
-        if (manifest["schema"] == 3) != (proposal_raw is not None):
+        if (manifest["schema"] in {3, 4}) != (proposal_raw is not None):
             raise ValueError
         if proposal_raw is not None:
             detail = manifest["proposal"]
@@ -258,6 +277,8 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             proposal_data = validate_proposal(
                 json.loads(proposal_raw, object_pairs_hook=_unique_object, parse_constant=_no_constant)
             )
+            if proposal_data["schema"] != (2 if manifest["schema"] == 4 else 1):
+                raise ValueError
             if (
                 proposal_data["inputs"]["date"] != manifest["cutoff"]
                 or proposal_data["inputs"]["currency"] != manifest["base"]
@@ -318,7 +339,9 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             not isinstance(code, dict)
             or set(code)
             != set(
-                V3_CODE_FILES
+                V4_CODE_FILES
+                if manifest["schema"] == 4
+                else V3_CODE_FILES
                 if manifest["schema"] == 3
                 else V2_CODE_FILES
                 if manifest["schema"] == 2
