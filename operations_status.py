@@ -39,6 +39,8 @@ class OperationStatus:
     documents: list = field(default_factory=list)
     failed_ledger: bool = False
     performance_summary: dict | None = None
+    ledger_events: tuple = ()
+    cut_comparison: dict | None = None
 
     def input(self, role, source):
         if source is not None:
@@ -51,6 +53,8 @@ class OperationStatus:
             self.failed_ledger = True
             self.book = self.valuation = self.returns = None
             self.performance_summary = None
+            self.ledger_events = ()
+            self.cut_comparison = None
 
     def evidence(self, role):
         source = self.inputs.get(role)
@@ -380,6 +384,7 @@ class OperationStatus:
             "valuation": self.valuation,
             "returns": self.returns,
             "performance_summary": self.performance_summary,
+            "cut_comparison": self.cut_comparison,
             "calendar": self.calendar,
             "documents": self.documents,
             "guidance": self.guidance(),
@@ -399,6 +404,8 @@ class OperationStatus:
                     "gbm_movement_review.py",
                     "operations_input_forms.py",
                     "operations_report.py",
+                    "operations_attribution.py",
+                    "operations_cuts.py",
                 )
             },
         }
@@ -470,7 +477,10 @@ def status_text(snapshot):
     lines += [
         "Resultados del motor y calendario",
         json.dumps(
-            {key: snapshot[key] for key in ("valuation", "returns", "calendar", "performance_summary")},
+            {
+                key: snapshot.get(key)
+                for key in ("valuation", "returns", "calendar", "performance_summary", "cut_comparison")
+            },
             ensure_ascii=False,
             default=str,
             allow_nan=False,

@@ -1,6 +1,7 @@
 """One current-run explanation shared by screen and on-demand PDF."""
 
 import json
+from decimal import Decimal
 from hashlib import sha256
 from io import BytesIO
 from xml.sax.saxutils import escape
@@ -10,6 +11,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+from operations_attribution import documented_amounts
 
 
 def explain_performance(events, nav, result, flows, *, base):
@@ -28,6 +31,7 @@ def explain_performance(events, nav, result, flows, *, base):
         "fees": None,
         "tax": None,
         "unexplained": None,
+        "by_instrument": [],
         "state": "Borrador: faltan datos o confirmaciones",
     }
     if nav is not None:
@@ -47,12 +51,11 @@ def explain_performance(events, nav, result, flows, *, base):
         xirr=result["xirr"],
         state="Cálculo con insumos confirmados; revisa los pendientes",
     )
-    period = [e for e in events if summary["start"] < e.settled.isoformat() <= summary["end"]]
-    if all(e.currency == base for e in period):
-        income = sum(float(e.amount) for e in period if e.kind in {"DIVIDEND", "COUPON", "INTEREST"})
-        income += sum(float(e.interest) for e in period if e.kind == "REPO_MATURITY")
-        fees = sum(float(e.fee) for e in period) + sum(float(e.amount) for e in period if e.kind == "FEE")
-        tax = sum(float(e.tax) for e in period) + sum(float(e.amount) for e in period if e.kind == "TAX")
+    summary["by_instrument"] = documented_amounts(events, summary["start"], summary["end"], base=base)
+    if all(row["converted"] for row in summary["by_instrument"]):
+        income, fees, tax = (
+            sum(float(row[name]) for row in summary["by_instrument"]) for name in ("income", "fees", "tax")
+        )
         summary.update(income=income, fees=fees, tax=tax, unexplained=result["gain"] - income + fees + tax)
     return summary
 
@@ -68,7 +71,7 @@ def summary_lines(summary):
         ("income", "Ingresos documentados"),
         ("fees", "Comisiones y cargos"),
         ("tax", "Impuestos registrados"),
-        ("unexplained", "Variación no desglosada"),
+        ("unexplained", "Resto tras ingresos y cargos"),
     )
     rows = [
         [
@@ -123,7 +126,7 @@ def performance_pdf(snapshot):
             [
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("LINEBELOW", (0, 0), (-1, -1), 0.35, colors.HexColor("#dddddd")),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
             ]
         )
     )
@@ -133,16 +136,66 @@ def performance_pdf(snapshot):
         p(
             "La ganancia separa la variación del patrimonio de las aportaciones y retiros. "
             "Los ingresos y cargos sólo se desglosan cuando la moneda del registro permite compararlos. "
-            "La variación no desglosada conserva lo que aún no se ha atribuido."
+            "El resto tras ingresos y cargos puede incluir precios, divisas y otras variaciones."
         ),
         p(
             "Las cifras pendientes requieren datos o confirmaciones. "
             "XIRR es anualizada; TWR corresponde al periodo. "
             "Los pendientes de conciliación y evidencia se conservan en la página siguiente."
         ),
-        PageBreak(),
-        p("Pendientes y procedencia", "Heading1"),
     ]
+    if comparison := snapshot.get("cut_comparison"):
+        story += [
+            p("Comparación de cortes", "Heading2"),
+            p(f"{comparison['start']} a {comparison['end']} · {comparison['base']}", "Evidence"),
+        ]
+        for name, label in (
+            ("wealth_change", "Cambio de patrimonio"),
+            ("contributions", "Aportaciones"),
+            ("withdrawals", "Retiros"),
+            ("gain", "Ganancia monetaria"),
+            ("price", "Precios"),
+            ("income", "Ingresos documentados"),
+            ("fees", "Comisiones y cargos"),
+            ("tax", "Impuestos registrados"),
+            ("fx", "Divisas"),
+            ("repo", "Valuación de reportos"),
+            ("unexplained", "Sin desglose"),
+        ):
+            value = comparison.get(name)
+            story.append(
+                p(
+                    label
+                    + ": "
+                    + ("Pendiente" if value is None else f"{Decimal(value):,.2f} {comparison['base']}"),
+                    "Evidence",
+                )
+            )
+        component_labels = {
+            "price": "Precios",
+            "fx": "Divisas",
+            "income": "Ingresos",
+            "fees": "Cargos",
+            "tax": "Impuestos",
+            "repo": "Reportos",
+        }
+        partial = [
+            f"{component_labels[name]}: {Decimal(value):,.2f}"
+            for name, value in comparison.get("known_components", {}).items()
+            if not comparison.get("coverage", {}).get(name, True)
+        ]
+        if partial:
+            story.append(
+                p("Subtotales documentados · " + comparison["base"] + ": " + "; ".join(partial), "Evidence")
+            )
+        story.append(
+            p(
+                f"{len(comparison['pending'])} pendientes de comparación. Detalle: CSV/TXT. "
+                "El cambio de patrimonio incluye flujos; no equivale a rendimiento.",
+                "Evidence",
+            )
+        )
+    story += [PageBreak(), p("Pendientes y procedencia", "Heading1")]
     issues = snapshot.get("issues", [])
     story.append(
         p(

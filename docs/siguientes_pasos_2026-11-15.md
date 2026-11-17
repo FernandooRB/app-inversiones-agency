@@ -96,3 +96,15 @@ La lista anterior conserva el corte original del 15 de noviembre. Avance posteri
 El siguiente bloque técnico es ampliar la explicación de rendimiento y la
 comparación de cortes, conservando los requisitos de evidencia de las tarifas.
 Sólo se dispone de muestras GBM; no se anuncia otro intermediario soportado.
+
+## Bloque de rendimiento y cortes — 16 de noviembre de 2026
+
+Los puntos 15–16 incorporan desglose por instrumento/moneda, cortes JSON inmutables
+y comparación patrimonial con atribución conservadora de precio, ingresos, cargos,
+FX y reportos. `docs/performance_cuts.md` describe requisitos, subtotales parciales,
+descargas y límites. Esta implementación no completa evidencia financiera real,
+atribución intradía en divisas, validación humana ni todos los pasos posteriores.
+La auditoría de la entrega registra por separado pruebas, integración y publicación.
+
+El siguiente bloque es 17: desvíos frente a política confirmada. Las tarifas reales
+(14) y la evidencia de 03–07 siguen pendientes; el desarrollo no las sustituye.

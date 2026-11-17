@@ -155,12 +155,20 @@ def clear_review():
         "signature_flows_confirmation",
         "ops_review_save_panel",
         "ops_review_download",
+        "cuts_panel",
+        "cut_previous",
+        "cuts_confirmed",
+        "cuts_consent_signature",
+        "cut_comparison_result",
+        "cut_download",
+        "cut_csv",
         *("remove_" + role for role in ROLE_LABELS),
     )
     keys = {_context_key(name) for name in names} | {review_key(name) for name in names}
     keys.update(_open_key(name) for name in ("ops_review_open_panel", "ops_review_zip", "ops_review_open"))
     keys.add("_analysis_memo_" + _context_key("operations_calculations"))
     keys.add("_analysis_memo_" + _context_key("bridge_book"))
+    keys.update("_analysis_memo_" + review_key(name) for name in ("cut_build", "cut_compare"))
     keys.add(_context_key("proposal_pdf"))
     keys.update(
         _context_key(name)
