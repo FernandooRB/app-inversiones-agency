@@ -900,6 +900,9 @@ def _ledger(context, *, demo=False):
         if status.performance_summary is None:
             status.performance_summary = explain_performance(events, nav, status.returns, flows, base=base)
     if not demo:
+        from operations_policy_ui import render_policy
+
+        render_policy(context, status)
         _checked_input("Paquete de movimientos", download_review, context, files, cutoff=cutoff, base=base)
         return True
 

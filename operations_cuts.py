@@ -245,6 +245,19 @@ def _balances(payload):
     return rows
 
 
+def cut_state(contents):
+    """Validated data for local read-only checks; no saved consent is consumed."""
+    cut = read_cut(contents if isinstance(contents, bytes) else _json(contents))
+    payload = cut["payload"]
+    events = _events(payload)
+    return {
+        "cut": cut,
+        "events": events,
+        "book": book_at(events, _day(payload["cutoff"])),
+        "values": _values(payload),
+    }
+
+
 def _position_value(values, key):
     return values.get(key, (ZERO, None, ZERO))[0]
 

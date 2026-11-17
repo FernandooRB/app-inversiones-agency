@@ -162,6 +162,26 @@ def clear_review():
         "cut_comparison_result",
         "cut_download",
         "cut_csv",
+        *(
+            "policy_" + name
+            for name in (
+                "panel",
+                "strategy",
+                "copy",
+                "source",
+                "date",
+                "basis",
+                "targets",
+                "tolerance",
+                "max_weight",
+                "min_cash",
+                "confirmed",
+                "reference",
+                "csv",
+                "json",
+            )
+        ),
+        "signature_policy_confirmed",
         *("remove_" + role for role in ROLE_LABELS),
     )
     keys = {_context_key(name) for name in names} | {review_key(name) for name in names}
@@ -169,6 +189,7 @@ def clear_review():
     keys.add("_analysis_memo_" + _context_key("operations_calculations"))
     keys.add("_analysis_memo_" + _context_key("bridge_book"))
     keys.update("_analysis_memo_" + review_key(name) for name in ("cut_build", "cut_compare"))
+    keys.add("_analysis_memo_" + review_key("policy_evaluation"))
     keys.add(_context_key("proposal_pdf"))
     keys.update(
         _context_key(name)
@@ -250,6 +271,11 @@ def open_review(context):
                         "Incluye propuesta, tarifas, fuentes y límites. "
                         "El resultado guardado es histórico; requiere revisión y nuevo cálculo."
                     )
+                if manifest.get("policy_data"):
+                    st.caption(
+                        "Incluye política propuesta. "
+                        "Sus criterios requieren nuevas confirmaciones y evaluación."
+                    )
                 st.caption(
                     "Cargar el ZIP no cambia la revisión. Las vistas se recalculan al abrirlo; "
                     "el paquete no confirma fuentes ni flujos."
@@ -271,6 +297,7 @@ def open_review(context):
                         != review_code_fingerprints(schema=manifest["schema"]),
                         "draft": manifest.get("draft_data"),
                         "proposal": manifest.get("proposal_data"),
+                        "policy": manifest.get("policy_data"),
                     }
                     st.session_state.pop(_context_key("_ops_last_book"), None)
                     st.session_state.pop(_context_key("_gbm_attached"), None)
@@ -333,13 +360,23 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
         draft = movement_draft()
         proposal = proposal or current_proposal(context, present, cutoff=cutoff, base=base)
         status = st.session_state.get(_context_key("_ops_status"))
-        summary = status_text(status.snapshot("Revisión de movimientos")) if status and draft else None
+        policy = _recovery().get("policy")
+        if policy and (policy["scope"] != _scope(context) or policy["base"] != base):
+            st.caption(
+                "La política guardada corresponde a otra moneda o cuenta; "
+                "revisa Política y avisos de cartera."
+            )
+            policy = None
+        summary = (
+            status_text(status.snapshot("Revisión de movimientos")) if status and (draft or policy) else None
+        )
         args = {
             "cutoff": cutoff.isoformat(),
             "base": base,
             "draft": draft,
             "summary": summary,
             "proposal": proposal,
+            "policy": policy,
             **_scope(context),
         }
         _manifest, contents = session_compute(
@@ -349,7 +386,13 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
                 present,
                 args,
                 review_code_fingerprints(
-                    schema=(4 if proposal["schema"] == 2 else 3) if proposal else 2 if draft else 1
+                    schema=5
+                    if policy
+                    else (4 if proposal["schema"] == 2 else 3)
+                    if proposal
+                    else 2
+                    if draft
+                    else 1
                 ),
             ),
             lambda: build_operations_review(present, **args),
@@ -388,4 +431,6 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
             labels.append("Resumen TXT")
         if proposal:
             labels.append("Propuesta completa con fuentes, tarifas, límites y resultado histórico")
+        if policy:
+            labels.append("Política propuesta sin confirmaciones ni avisos reutilizables")
         st.write("Incluye: " + ", ".join(labels) + ".")
