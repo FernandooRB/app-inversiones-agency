@@ -11,6 +11,7 @@ from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile, ZipInfo
 from zlib import error as ZlibError
 
 from gbm_movement_review import validate_draft
+from operations_policy import MAX_POLICY_BYTES, validate_policy
 from operations_proposal import MAX_PROPOSAL_BYTES, validate_proposal
 from portfolio_core import PortfolioError
 
@@ -49,6 +50,13 @@ V4_CODE_FILES = (
     "portfolio_core.py",
     "covariance_calibration.py",
 )
+V5_CODE_FILES = (
+    *V4_CODE_FILES,
+    "operations_policy.py",
+    "operations_policy_ui.py",
+    "operations_cuts.py",
+    "operations_status.py",
+)
 MAX_PACKAGE_BYTES = 15_000_000
 MAX_MANIFEST_BYTES = 32_000
 _FIELDS = {"schema", "kind", "created_at", "scope", "cutoff", "base", "files", "code_sha256", "review_state"}
@@ -60,7 +68,9 @@ def review_code_fingerprints(*, schema=1):
     return {
         name: sha256((root / name).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
         for name in (
-            V4_CODE_FILES
+            V5_CODE_FILES
+            if schema == 5
+            else V4_CODE_FILES
             if schema == 4
             else V3_CODE_FILES
             if schema == 3
@@ -110,7 +120,16 @@ def _no_constant(_value):
 
 
 def build_operations_review(
-    files, *, cutoff, base, case_id=None, account_id=None, draft=None, summary=None, proposal=None
+    files,
+    *,
+    cutoff,
+    base,
+    case_id=None,
+    account_id=None,
+    draft=None,
+    summary=None,
+    proposal=None,
+    policy=None,
 ):
     """Preserve exact CSV bytes and settings, including incomplete drafts, without approvals."""
     try:
@@ -147,7 +166,7 @@ def build_operations_review(
             manifest["code_sha256"] = review_code_fingerprints(schema=2)
         if summary is not None:
             if (
-                (draft is None and proposal is None)
+                (draft is None and proposal is None and policy is None)
                 or not isinstance(summary, bytes)
                 or not 0 < len(summary) <= MAX_FILE_BYTES
             ):
@@ -171,6 +190,16 @@ def build_operations_review(
                 proposal={"size": len(proposal_raw), "sha256": sha256(proposal_raw).hexdigest()},
             )
             manifest["code_sha256"] = review_code_fingerprints(schema=schema)
+        policy_raw = None
+        if policy is not None:
+            proposed = validate_policy(policy)
+            if "ledger" not in files or proposed["scope"] != scope or proposed["base"] != base:
+                raise ValueError
+            policy_raw = json.dumps(proposed, ensure_ascii=False, allow_nan=False).encode()
+            manifest.update(
+                schema=5, policy={"size": len(policy_raw), "sha256": sha256(policy_raw).hexdigest()}
+            )
+            manifest["code_sha256"] = review_code_fingerprints(schema=5)
         stream = BytesIO()
         with ZipFile(stream, "w", compression=ZIP_DEFLATED) as archive:
             data = {"review.json": json.dumps(manifest, ensure_ascii=False, allow_nan=False).encode()}
@@ -181,6 +210,8 @@ def build_operations_review(
                 data["evidence/review.txt"] = summary
             if proposal_raw is not None:
                 data["proposal/proposal.json"] = proposal_raw
+            if policy_raw is not None:
+                data["policy/policy.json"] = policy_raw
             for name, raw in sorted(data.items()):
                 archive.writestr(ZipInfo(name, (1980, 1, 1, 0, 0, 0)), raw, compress_type=ZIP_DEFLATED)
         contents = stream.getvalue()
@@ -202,9 +233,13 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         with ZipFile(BytesIO(contents)) as archive:
             entries = archive.infolist()
             names = {entry.filename for entry in entries}
-            allowed = {"review.json", "draft/gbm.json", "evidence/review.txt", "proposal/proposal.json"} | {
-                f"inputs/{role}.csv" for role in FILE_ROLES
-            }
+            allowed = {
+                "review.json",
+                "draft/gbm.json",
+                "evidence/review.txt",
+                "proposal/proposal.json",
+                "policy/policy.json",
+            } | {f"inputs/{role}.csv" for role in FILE_ROLES}
             if (
                 len(entries) > len(allowed)
                 or len(entries) != len(names)
@@ -215,7 +250,9 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             raw_files = {}
             for entry in entries:
                 limit = (
-                    MAX_MANIFEST_BYTES
+                    MAX_POLICY_BYTES
+                    if entry.filename == "policy/policy.json"
+                    else MAX_MANIFEST_BYTES
                     if entry.filename == "review.json"
                     else MAX_PROPOSAL_BYTES
                     if entry.filename == "proposal/proposal.json"
@@ -242,10 +279,16 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         if (
             not isinstance(manifest, dict)
             or type(manifest.get("schema")) is not int
-            or manifest["schema"] not in {1, 2, 3, 4}
+            or manifest["schema"] not in {1, 2, 3, 4, 5}
             or set(manifest)
             != (
                 _FIELDS
+                | {"policy"}
+                | ({"proposal"} if "proposal" in manifest else set())
+                | ({"draft"} if "draft" in manifest else set())
+                | ({"summary"} if "summary" in manifest else set())
+                if manifest["schema"] == 5
+                else _FIELDS
                 | {"proposal"}
                 | ({"draft"} if "draft" in manifest else set())
                 | ({"summary"} if "summary" in manifest else set())
@@ -261,8 +304,30 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         draft_raw = raw_files.pop("draft/gbm.json", None)
         summary_raw = raw_files.pop("evidence/review.txt", None)
         proposal_raw = raw_files.pop("proposal/proposal.json", None)
+        policy_raw = raw_files.pop("policy/policy.json", None)
+        policy_data = None
+        if (manifest["schema"] == 5) != (policy_raw is not None):
+            raise ValueError
+        if policy_raw is not None:
+            detail = manifest["policy"]
+            if (
+                not isinstance(detail, dict)
+                or set(detail) != {"size", "sha256"}
+                or type(detail["size"]) is not int
+                or detail["size"] != len(policy_raw)
+                or detail["sha256"] != sha256(policy_raw).hexdigest()
+                or "inputs/ledger.csv" not in raw_files
+            ):
+                raise ValueError
+            policy_data = validate_policy(
+                json.loads(policy_raw, object_pairs_hook=_unique_object, parse_constant=_no_constant)
+            )
+            if policy_data["scope"] != manifest["scope"] or policy_data["base"] != manifest["base"]:
+                raise ValueError
         proposal_data = None
-        if (manifest["schema"] in {3, 4}) != (proposal_raw is not None):
+        if (("proposal" in manifest) if manifest["schema"] == 5 else manifest["schema"] in {3, 4}) != (
+            proposal_raw is not None
+        ):
             raise ValueError
         if proposal_raw is not None:
             detail = manifest["proposal"]
@@ -277,7 +342,7 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             proposal_data = validate_proposal(
                 json.loads(proposal_raw, object_pairs_hook=_unique_object, parse_constant=_no_constant)
             )
-            if proposal_data["schema"] != (2 if manifest["schema"] == 4 else 1):
+            if manifest["schema"] != 5 and proposal_data["schema"] != (2 if manifest["schema"] == 4 else 1):
                 raise ValueError
             if (
                 proposal_data["inputs"]["date"] != manifest["cutoff"]
@@ -339,7 +404,9 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             not isinstance(code, dict)
             or set(code)
             != set(
-                V4_CODE_FILES
+                V5_CODE_FILES
+                if manifest["schema"] == 5
+                else V4_CODE_FILES
                 if manifest["schema"] == 4
                 else V3_CODE_FILES
                 if manifest["schema"] == 3
@@ -372,6 +439,8 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             manifest = {**manifest, "draft_data": json.loads(draft_raw)}
         if proposal_data is not None:
             manifest = {**manifest, "proposal_data": proposal_data}
+        if policy_data is not None:
+            manifest = {**manifest, "policy_data": policy_data}
         return manifest, files
     except PortfolioError:
         raise

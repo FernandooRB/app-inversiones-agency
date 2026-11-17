@@ -108,3 +108,12 @@ La auditoría de la entrega registra por separado pruebas, integración y public
 
 El siguiente bloque es 17: desvíos frente a política confirmada. Las tarifas reales
 (14) y la evidencia de 03–07 siguen pendientes; el desarrollo no las sustituye.
+
+## Bloque de política — 16 de noviembre de 2026
+
+El punto17 incorpora criterios explícitos, base de pesos, concentración individual,
+efectivo después de pagos pendientes y objetivos propuestos desde el análisis.
+El ZIPv5 conserva la política sin confirmaciones; la evaluación se renueva y mantiene
+pendientes los criterios o datos no acreditados. `docs/operations_policy.md` detalla
+el recorrido. Auditorías y publicación se registran por entrega, separadas de las
+pruebas humanas. El siguiente bloque técnico es18: conectar varias cuentas y monedas.

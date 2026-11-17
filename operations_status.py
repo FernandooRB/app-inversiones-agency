@@ -41,6 +41,7 @@ class OperationStatus:
     performance_summary: dict | None = None
     ledger_events: tuple = ()
     cut_comparison: dict | None = None
+    policy_report: dict | None = None
 
     def input(self, role, source):
         if source is not None:
@@ -55,6 +56,7 @@ class OperationStatus:
             self.performance_summary = None
             self.ledger_events = ()
             self.cut_comparison = None
+            self.policy_report = None
 
     def evidence(self, role):
         source = self.inputs.get(role)
@@ -385,6 +387,7 @@ class OperationStatus:
             "returns": self.returns,
             "performance_summary": self.performance_summary,
             "cut_comparison": self.cut_comparison,
+            "policy_report": self.policy_report,
             "calendar": self.calendar,
             "documents": self.documents,
             "guidance": self.guidance(),
@@ -406,6 +409,8 @@ class OperationStatus:
                     "operations_report.py",
                     "operations_attribution.py",
                     "operations_cuts.py",
+                    "operations_policy.py",
+                    "operations_policy_ui.py",
                 )
             },
         }
@@ -479,7 +484,14 @@ def status_text(snapshot):
         json.dumps(
             {
                 key: snapshot.get(key)
-                for key in ("valuation", "returns", "calendar", "performance_summary", "cut_comparison")
+                for key in (
+                    "valuation",
+                    "returns",
+                    "calendar",
+                    "performance_summary",
+                    "cut_comparison",
+                    "policy_report",
+                )
             },
             ensure_ascii=False,
             default=str,

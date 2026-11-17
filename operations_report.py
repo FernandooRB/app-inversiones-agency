@@ -197,21 +197,57 @@ def performance_pdf(snapshot):
         )
     story += [PageBreak(), p("Pendientes y procedencia", "Heading1")]
     issues = snapshot.get("issues", [])
+    policy = snapshot.get("policy_report")
+    displayed_issues = 4 if policy else 8
     story.append(
         p(
             f"{len(issues)} pendientes. El ZIP conserva el borrador y los insumos; "
             "el TXT contiene el detalle de esta revisión."
         )
     )
-    for item in issues[:8]:
+    for item in issues[:displayed_issues]:
         story += [p(str(item["title"])[:100], "Heading3"), p(str(item["reason"])[:200], "Evidence")]
-    if len(issues) > 8:
+    if len(issues) > displayed_issues:
         story.append(
             p(
-                f"Otros {len(issues) - 8} pendientes figuran en el resumen TXT de la misma revisión.",
+                f"Otros {len(issues) - displayed_issues} pendientes figuran en el resumen TXT "
+                "de la misma revisión.",
                 "Evidence",
             )
         )
+    if policy:
+        story += [
+            p("Política de cartera", "Heading2"),
+            p(
+                f"Corte {policy['cutoff']} · {policy['counts']['deviations']} desvíos · "
+                f"{policy['counts']['pending']} pendientes · Base {policy['basis']}",
+                "Evidence",
+            ),
+        ]
+        for item in sorted(policy["rows"], key=lambda r: r["state"] == "Dentro de límites")[:3]:
+            observed = "Pendiente" if item["observed"] is None else f"{Decimal(item['observed']):.2%}"
+            limit = "Pendiente" if item["limit"] is None else f"{Decimal(item['limit']) * 100:.2f}"
+            label = {
+                "drift": "Desvío de pesos",
+                "max_weight": "Concentración individual",
+                "cash": "Efectivo disponible",
+            }[item["kind"]]
+            unit = " pp" if item["kind"] == "drift" else "%"
+            detail = f"Observado {observed} · Límite {limit}{unit}"
+            if item["kind"] == "drift":
+                target = "Pendiente" if item["target"] is None else f"{Decimal(item['target']):.2%}"
+                difference = (
+                    "Pendiente"
+                    if item["difference"] is None
+                    else f"{Decimal(item['difference']) * 100:.4f} pp"
+                )
+                detail += f" · Objetivo {target} · Diferencia {difference}"
+            story += [
+                p(f"{label} · {item['instrument'][:65]} · {item['state']}", "Evidence"),
+                p(detail, "Evidence"),
+                p(item["reason"][:140], "Evidence"),
+            ]
+        story.append(p("Fuente: " + policy["source"][:120] + " · " + policy["notice"], "Evidence"))
     story += [Spacer(1, 3 * mm), p("Fuentes de esta ejecución", "Heading2")]
     for source in list(snapshot.get("inputs", {}).values())[:7]:
         story.append(p(f"{source['label']} · SHA-256 {source['sha256'][:20]}…", "Evidence"))

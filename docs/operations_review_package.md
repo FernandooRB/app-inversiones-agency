@@ -120,3 +120,11 @@ compatibles aunque difieran las huellas del motor.
 
 En **Implementación → Guardar propuesta y revisión** se descarga la versión 3;
 el [PDF de propuesta](ledger_proposals.md) se prepara por separado bajo demanda.
+# Política propuesta · ZIP v5
+
+La versión5 añade `policy/policy.json` con criterios, fuente, vigencia, ámbito y
+base explícita de pesos. Requiere libro y conserva los campos anteriores de borrador
+y propuesta cuando existan. La política recuperada es una propuesta sin confirmación;
+los avisos se calculan de nuevo. Se mantiene lectura de versiones1–4 y sus listas
+históricas de huellas. Detalle: `docs/operations_policy.md`.
+
