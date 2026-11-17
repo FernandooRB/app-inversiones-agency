@@ -1557,6 +1557,10 @@ def _feeds(context):
 
 def _wealth(context):
     st.header("Patrimonio entre cuentas MXN y USD")
+    from operations_consolidation_ui import render_consolidation, renew_confirmation
+
+    render_consolidation(context)
+    st.subheader("Patrimonio con CSV manuales")
     cutoff = st.date_input("Corte común del patrimonio", date.today(), max_value=date.today())
     base = st.selectbox("Moneda base del patrimonio", ["MXN", "USD"])
     _template(
@@ -1622,6 +1626,17 @@ def _wealth(context):
             "Flujos: Fecha,Cuenta,Tipo,Moneda,Importe,Referencia,MomentoFlujo,FXBase,FuenteFX",
             ["csv"],
             key=_key("ops_multi_flows"),
+        )
+        renew_confirmation(
+            st.session_state,
+            _key("multi_confirmation"),
+            analysis_key(
+                base,
+                navs.getvalue() if navs else None,
+                rates.getvalue() if rates else None,
+                movements.getvalue() if movements else None,
+                sorted(a["id"] for a in state["accounts"]) if state else None,
+            ),
         )
         confirmed = st.checkbox(
             "Concilié los cierres y todos los flujos del patrimonio, con FX al momento de cada flujo",

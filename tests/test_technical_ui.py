@@ -310,12 +310,20 @@ def test_alpaca_view_is_reachable_without_querying_provider(monkeypatch, tmp_pat
 
 def test_paper_lifecycle_updates_forms_and_persists_closed_result(monkeypatch, tmp_path, technical_history):
     from dataclasses import replace
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
 
     import technical_paper_ui
     import technical_ui
     from technical_analysis import BUY, analyze_history
     from technical_paper_store import SQLitePaperStore
 
+    # This scenario needs a signal before today's SIC quote, including the hour
+    # when New York has changed date and Mexico City has not. Keep production checks.
+    bars = technical_history.bars.copy()
+    yesterday = datetime.now(ZoneInfo("America/Mexico_City")).date() - timedelta(days=1)
+    bars.index = pd.bdate_range(end=yesterday, periods=len(bars))
+    technical_history = replace(technical_history, bars=bars)
     app, watchlist = open_tracking(monkeypatch, tmp_path, ["AAPL"])
     monkeypatch.setattr(technical_ui, "cached_market_history", lambda *_: technical_history)
     real_snapshot = analyze_history(technical_history)
