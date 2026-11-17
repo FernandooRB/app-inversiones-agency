@@ -164,14 +164,39 @@ def _status_panel(context, *, demo=False, review_available=False):
             _explanation_table(rows[:4] + [rows[9]], "performance_primary")
             with st.expander("Ingresos, cargos y detalle del rendimiento"):
                 _explanation_table(rows[5:9] + [rows[10]], "performance_detail")
+                documented = explanation.get("by_instrument", [])
+                if documented:
+                    st.caption("Por instrumento y moneda de origen; no se convierten divisas sin FX fechado.")
+                    st.dataframe(
+                        pd.DataFrame(documented[:100]).rename(
+                            columns={
+                                "instrument": "Instrumento",
+                                "currency": "Moneda",
+                                "income": "Ingresos",
+                                "fees": "Cargos",
+                                "tax": "Impuestos",
+                                "net": "Neto",
+                                "event_ids": "Movimientos",
+                                "converted": "Coincide con moneda base",
+                            }
+                        ),
+                        hide_index=True,
+                        width="stretch",
+                    )
         with meaning:
             st.write("**Qué explica el cambio**")
             st.write("Separamos lo que aportaste o retiraste de la variación de tu patrimonio.")
             st.caption(
                 "Los ingresos y cargos se muestran cuando su moneda permite compararlos. "
-                "La variación no desglosada conserva lo que aún no se ha atribuido."
+                "El resto tras ingresos y cargos puede incluir precios, divisas y otras variaciones. "
+                "El panel de cortes permite desglosarlos cuando existan fuentes."
             )
             st.caption("Revisa los pendientes antes de utilizar el resultado.")
+    if status.book is not None and not status.failed_ledger:
+        from operations_cuts_ui import render_cut_comparison
+
+        status.cut_comparison = render_cut_comparison(context, status, snapshot, key=review_key)
+        snapshot["cut_comparison"] = status.cut_comparison
     if demo:
         snapshot["code_sha256"]["operations_demo.py"] = sha256(
             Path(__file__).with_name("operations_demo.py").read_bytes().replace(b"\r\n", b"\n")
@@ -596,6 +621,7 @@ def _ledger(context, *, demo=False):
         )
         return
     events = _cached_calculation("Libro de movimientos", read_ledger, source.getvalue())
+    status.ledger_events = tuple(events)
     defaults = review_defaults()
     cutoff = st.date_input(
         "Cierre del libro",
