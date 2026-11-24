@@ -17,3 +17,6 @@ Estados_de_Cuenta/
 *.db-journal
 *.db-wal
 *.db-shm
+*.siglocal
+*.sigkey
+*.siglock

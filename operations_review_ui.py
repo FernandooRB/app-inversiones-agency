@@ -8,19 +8,11 @@ import streamlit as st
 
 from analysis_session import analysis_key, session_compute
 from operations_proposal import portable_proposal
+from operations_recovery import ROLE_LABELS, local_copy_guide, movements_inventory
 from operations_review import build_operations_review, read_operations_review, review_code_fingerprints
 from operations_status import status_text
 from portfolio_core import PortfolioError
 
-ROLE_LABELS = {
-    "ledger": "Libro de movimientos",
-    "controls": "Controles de cierre",
-    "quotes": "Cotizaciones de cierre",
-    "fx": "FX del cierre",
-    "repo_values": "Valuaciones de reportos",
-    "nav": "Valuaciones históricas",
-    "flow_fx": "FX de los flujos",
-}
 ROLE_WIDGETS = (
     "ops_ledger",
     "ops_closing_controls",
@@ -188,6 +180,7 @@ def clear_review():
     keys.update(_open_key(name) for name in ("ops_review_open_panel", "ops_review_zip", "ops_review_open"))
     keys.add("_analysis_memo_" + _context_key("operations_calculations"))
     keys.add("_analysis_memo_" + _context_key("bridge_book"))
+    keys.add("_analysis_memo_" + _context_key("operations_restore"))
     keys.update("_analysis_memo_" + review_key(name) for name in ("cut_build", "cut_compare"))
     keys.add("_analysis_memo_" + review_key("policy_evaluation"))
     keys.add(_context_key("proposal_pdf"))
@@ -211,8 +204,8 @@ def clear_review():
     st.session_state["operations_tabs"] = "Movimientos"
 
 
-def new_review():
-    present = _has_current_inputs() or st.session_state.get(_open_key("ops_review_zip")) is not None
+def new_review(context=None):
+    present = _has_current_inputs(context) or st.session_state.get(_open_key("ops_review_zip")) is not None
     if present:
         st.session_state.pop(_context_key("_ops_cleared_notice"), None)
         with st.expander("Nueva revisión de movimientos"):
@@ -235,23 +228,61 @@ def _scope(context):
     return {"case_id": state["id"] if state and account else None, "account_id": account}
 
 
-def _has_current_inputs():
+def _has_current_inputs(context=None):
+    active = st.session_state.get("_execution_proposal") or {}
+    current = False
+    if context is not None:
+        binding = (context[2]["id"] if context[2] else None, context[3])
+        current = (
+            active.get("context") == binding and bool(active.get("inputs")) and bool(active.get("result"))
+        )
     return (
         bool(_recovery().get("files"))
         or bool(movement_draft())
         or bool(recovered_proposal())
         or any(st.session_state.get(review_key(name)) is not None for name in ROLE_WIDGETS)
+        or current
     )
 
 
 def open_review(context):
     with st.expander("Abrir paquete de movimientos", key=_open_key("ops_review_open_panel")):
-        package = st.file_uploader(
-            "Paquete de movimientos ZIP", type=["zip"], key=_open_key("ops_review_zip")
+        st.caption(
+            "Elige el ZIP completo, sin extraerlo. PDF y TXT sirven para leer resultados; "
+            "para continuar necesitas el ZIP. El paquete de varias cuentas se abre en "
+            "Patrimonio → Consolidar libros revisados."
         )
+        package = st.file_uploader(
+            "Paquete de movimientos ZIP", type=["zip"], max_upload_size=15, key=_open_key("ops_review_zip")
+        )
+        with st.expander("Copias personales en tu computadora"):
+            st.write(
+                "Comprueba que descargaste el ZIP antes de cerrar. Puedes conservar una copia "
+                "cifrada en tu computadora y recuperar el mismo ZIP cuando lo necesites."
+            )
+            st.caption(
+                "La clave se conserva por separado en tu equipo. La guía explica los pasos; "
+                "los documentos reales GBM se revisan únicamente en local."
+            )
+            st.download_button(
+                "Descargar guía de copias personales",
+                local_copy_guide(),
+                "guia_copias_personales.txt",
+                "text/plain",
+                on_click="ignore",
+                key=_open_key("ops_local_copy_guide"),
+            )
         if package:
             try:
-                manifest, files = read_operations_review(package.getvalue(), **_scope(context))
+                raw = package.getvalue()
+                scope = _scope(context)
+                manifest, files = session_compute(
+                    st.session_state,
+                    _context_key("operations_restore"),
+                    analysis_key(raw, scope, review_code_fingerprints(schema=5)),
+                    lambda: read_operations_review(raw, **scope),
+                    max_entries=1,
+                )
             except PortfolioError as exc:
                 st.error(str(exc))
             else:
@@ -259,6 +290,24 @@ def open_review(context):
                 st.text(
                     f"Corte: {manifest['cutoff']} · Moneda: {manifest['base']} · {len(files)} archivos CSV"
                 )
+                inventory = movements_inventory(manifest, files)
+                st.info(inventory["stage"] + " · Al abrir se requiere una nueva revisión.")
+                st.table(inventory["contents"])
+                if inventory["originals_required"]:
+                    st.warning(
+                        "Debes volver a adjuntar los originales PDF/XML para cotejar el borrador. "
+                        "El ZIP conserva la procedencia; los originales no están incluidos."
+                    )
+                if "ledger" not in files and manifest.get("draft_data"):
+                    st.caption(
+                        "Para llegar al rendimiento, completa la revisión del borrador y prepara el libro. "
+                        "Los archivos internos JSON permiten retomar tus decisiones."
+                    )
+                elif "ledger" not in files:
+                    st.caption(
+                        "Retoma la propuesta desde Implementación y revisa sus fuentes y supuestos. "
+                        "Para calcular rendimiento necesitas además un libro de movimientos."
+                    )
                 if files:
                     st.caption("Incluye: " + ", ".join(ROLE_LABELS[role] for role in files) + ".")
                 if manifest.get("draft_data"):
@@ -280,7 +329,7 @@ def open_review(context):
                     "Cargar el ZIP no cambia la revisión. Las vistas se recalculan al abrirlo; "
                     "el paquete no confirma fuentes ni flujos."
                 )
-                replacing = _has_current_inputs()
+                replacing = _has_current_inputs(context)
                 if replacing:
                     st.warning(
                         "Se reemplazarán los CSV, el corte, la moneda y la propuesta de esta revisión. "

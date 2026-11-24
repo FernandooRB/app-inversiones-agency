@@ -132,3 +132,13 @@ Siguen pendientes evidencia GBM y tarifas reales, prueba humana de estos recorri
 segunda identidad autorizada y datos de otros intermediarios. Los siguientes
 bloques técnicos son accesibilidad/recuperación y conservación personal local,
 sin contratar alojamiento ni trasladar originales reales a la web.
+
+## Recuperación y copias personales — 24 de noviembre de 2026
+
+Avance de21/24/28: inventario de paquetes antes de reemplazar una revisión, guía
+descargable y copias cifradas locales opcionales de los ZIP existentes, con
+verificación, recuperación exacta a archivo nuevo, cambio de clave y retención
+manual. `docs/local_review_recovery.md` documenta uso y límites. No se configura
+almacenamiento del piloto real ni se trasladan claves u originales a la web.
+Las pruebas, publicación y auditoría se registran aparte; el lector de pantalla,
+la experiencia humana y el teléfono físico de este recorrido siguen pendientes.

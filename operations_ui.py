@@ -590,7 +590,7 @@ def _ledger(context, *, demo=False):
     st.header("Movimientos y rendimiento histórico")
     st.caption("Títulos a fecha de operación, efectivo a liquidación y pendientes separados. MXN y USD.")
     if not demo:
-        new_review()
+        new_review(context)
         open_review(context)
         render_movement_import(context)
         from operations_review_ui import movement_draft
