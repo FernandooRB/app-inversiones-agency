@@ -9,7 +9,17 @@ module.exports=async({browser,out,url})=>{
  const ready=async()=>{await page.waitForTimeout(250);await page.locator('.stApp[data-test-script-state="notRunning"]').waitFor();};
  const expand=async label=>{const b=page.getByText(label,{exact:true}).first().locator('xpath=ancestor::*[@data-testid="stExpander"][1]');if(!await b.evaluate(e=>e.tagName==='DETAILS'?e.open:!!e.querySelector('details')?.open))await b.getByText(label,{exact:true}).click();await ready();return b;};
  const download=async(label,name)=>{const event=page.waitForEvent('download');await page.getByRole('button',{name:label,exact:true}).click();await (await event).saveAs(path.join(out,name));await ready();};
- const open=async filename=>{const b=await expand('Abrir paquete de movimientos');await b.locator('input[type=file]').setInputFiles(path.join(out,filename));await page.getByText('Vista previa del paquete',{exact:true}).waitFor();await ready();await page.getByRole('button',{name:/^(Retomar movimientos|Reemplazar revisión con este paquete)$/}).click();await page.getByText(/Revisión recuperada/).waitFor();await ready();};
+ const open=async filename=>{
+  const b=await expand('Abrir paquete de movimientos');
+  await b.locator('input[type=file]').setInputFiles(path.join(out,filename));
+  await page.getByText('Vista previa del paquete',{exact:true}).waitFor();await ready();
+  const old=page.locator('[class*="st-key-raw_confirmation_"]').first();
+  const oldKey=await old.count()?await old.evaluate(e=>Array.from(e.classList).find(c=>c.startsWith('st-key-raw_confirmation_'))):null;
+  await page.getByRole('button',{name:/^(Retomar movimientos|Reemplazar revisión con este paquete)$/}).click();
+  if(oldKey)await page.locator('.'+oldKey).waitFor({state:'detached'});
+  await page.getByRole('checkbox',{name:'Confirmé las cotizaciones sin ajuste y las valuaciones contra las fuentes del cierre',exact:true}).waitFor();
+  await ready();
+ };
  await page.goto(url);await page.getByRole('tab',{name:'Movimientos',exact:true}).click();await open('policy_fixture_v1.zip');
  const raw=page.getByRole('checkbox',{name:'Confirmé las cotizaciones sin ajuste y las valuaciones contra las fuentes del cierre',exact:true});await raw.press('Space');await ready();
  let block=await expand('Política y avisos de cartera');
