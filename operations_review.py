@@ -10,6 +10,7 @@ from stat import S_IFMT, S_IFREG
 from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile, ZipInfo
 from zlib import error as ZlibError
 
+from csv_mapping import MAX_METADATA, pack_import, unpack_import
 from gbm_movement_review import validate_draft
 from operations_policy import MAX_POLICY_BYTES, validate_policy
 from operations_proposal import MAX_PROPOSAL_BYTES, validate_proposal
@@ -57,6 +58,7 @@ V5_CODE_FILES = (
     "operations_cuts.py",
     "operations_status.py",
 )
+V6_CODE_FILES = (*V5_CODE_FILES, "csv_mapping.py", "csv_mapping_ui.py", "operations_recovery.py")
 MAX_PACKAGE_BYTES = 15_000_000
 MAX_MANIFEST_BYTES = 32_000
 _FIELDS = {"schema", "kind", "created_at", "scope", "cutoff", "base", "files", "code_sha256", "review_state"}
@@ -68,7 +70,9 @@ def review_code_fingerprints(*, schema=1):
     return {
         name: sha256((root / name).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
         for name in (
-            V5_CODE_FILES
+            V6_CODE_FILES
+            if schema == 6
+            else V5_CODE_FILES
             if schema == 5
             else V4_CODE_FILES
             if schema == 4
@@ -130,6 +134,7 @@ def build_operations_review(
     summary=None,
     proposal=None,
     policy=None,
+    csv_import=None,
 ):
     """Preserve exact CSV bytes and settings, including incomplete drafts, without approvals."""
     try:
@@ -138,7 +143,8 @@ def build_operations_review(
         if (
             not isinstance(files, dict)
             or not set(files).issubset(FILE_ROLES)
-            or ("ledger" not in files and draft is None and proposal is None)
+            or ("ledger" not in files and draft is None and proposal is None and csv_import is None)
+            or (csv_import is not None and draft is not None)
         ):
             raise ValueError
         if any(
@@ -166,7 +172,7 @@ def build_operations_review(
             manifest["code_sha256"] = review_code_fingerprints(schema=2)
         if summary is not None:
             if (
-                (draft is None and proposal is None and policy is None)
+                (draft is None and proposal is None and policy is None and csv_import is None)
                 or not isinstance(summary, bytes)
                 or not 0 < len(summary) <= MAX_FILE_BYTES
             ):
@@ -200,6 +206,24 @@ def build_operations_review(
                 schema=5, policy={"size": len(policy_raw), "sha256": sha256(policy_raw).hexdigest()}
             )
             manifest["code_sha256"] = review_code_fingerprints(schema=5)
+        csv_meta = csv_source = None
+        if csv_import is not None:
+            csv_meta, csv_source = pack_import(csv_import)
+            if csv_import["scope"] != scope:
+                raise ValueError
+            applied = csv_import["applied_ledger_sha256"]
+            if applied is not None and (
+                "ledger" not in files or sha256(files["ledger"]).hexdigest() != applied
+            ):
+                raise ValueError
+            manifest.update(
+                schema=6,
+                csv_import={
+                    "source": {"size": len(csv_source), "sha256": sha256(csv_source).hexdigest()},
+                    "proposal": {"size": len(csv_meta), "sha256": sha256(csv_meta).hexdigest()},
+                },
+            )
+            manifest["code_sha256"] = review_code_fingerprints(schema=6)
         stream = BytesIO()
         with ZipFile(stream, "w", compression=ZIP_DEFLATED) as archive:
             data = {"review.json": json.dumps(manifest, ensure_ascii=False, allow_nan=False).encode()}
@@ -212,6 +236,9 @@ def build_operations_review(
                 data["proposal/proposal.json"] = proposal_raw
             if policy_raw is not None:
                 data["policy/policy.json"] = policy_raw
+            if csv_meta is not None:
+                data["mapping/source.csv"] = csv_source
+                data["mapping/proposal.json"] = csv_meta
             for name, raw in sorted(data.items()):
                 archive.writestr(ZipInfo(name, (1980, 1, 1, 0, 0, 0)), raw, compress_type=ZIP_DEFLATED)
         contents = stream.getvalue()
@@ -239,6 +266,8 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
                 "evidence/review.txt",
                 "proposal/proposal.json",
                 "policy/policy.json",
+                "mapping/source.csv",
+                "mapping/proposal.json",
             } | {f"inputs/{role}.csv" for role in FILE_ROLES}
             if (
                 len(entries) > len(allowed)
@@ -250,7 +279,9 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             raw_files = {}
             for entry in entries:
                 limit = (
-                    MAX_POLICY_BYTES
+                    MAX_METADATA
+                    if entry.filename == "mapping/proposal.json"
+                    else MAX_POLICY_BYTES
                     if entry.filename == "policy/policy.json"
                     else MAX_MANIFEST_BYTES
                     if entry.filename == "review.json"
@@ -279,10 +310,16 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         if (
             not isinstance(manifest, dict)
             or type(manifest.get("schema")) is not int
-            or manifest["schema"] not in {1, 2, 3, 4, 5}
+            or manifest["schema"] not in {1, 2, 3, 4, 5, 6}
             or set(manifest)
             != (
                 _FIELDS
+                | {"csv_import"}
+                | ({"policy"} if "policy" in manifest else set())
+                | ({"proposal"} if "proposal" in manifest else set())
+                | ({"summary"} if "summary" in manifest else set())
+                if manifest["schema"] == 6
+                else _FIELDS
                 | {"policy"}
                 | ({"proposal"} if "proposal" in manifest else set())
                 | ({"draft"} if "draft" in manifest else set())
@@ -305,8 +342,37 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
         summary_raw = raw_files.pop("evidence/review.txt", None)
         proposal_raw = raw_files.pop("proposal/proposal.json", None)
         policy_raw = raw_files.pop("policy/policy.json", None)
+        csv_meta = raw_files.pop("mapping/proposal.json", None)
+        csv_source = raw_files.pop("mapping/source.csv", None)
+        csv_data = None
+        if manifest["schema"] == 6:
+            detail = manifest["csv_import"]
+            if not isinstance(detail, dict) or set(detail) != {"source", "proposal"}:
+                raise ValueError
+            for label, raw in (("source", csv_source), ("proposal", csv_meta)):
+                descriptor = detail[label]
+                if (
+                    raw is None
+                    or not isinstance(descriptor, dict)
+                    or set(descriptor) != {"size", "sha256"}
+                    or type(descriptor["size"]) is not int
+                    or descriptor["size"] != len(raw)
+                    or descriptor["sha256"] != sha256(raw).hexdigest()
+                ):
+                    raise ValueError
+            csv_data = unpack_import(csv_meta, csv_source, case_id=case_id, account_id=account_id)
+            applied = csv_data["applied_ledger_sha256"]
+            if applied is not None and (
+                "inputs/ledger.csv" not in raw_files
+                or sha256(raw_files["inputs/ledger.csv"]).hexdigest() != applied
+            ):
+                raise ValueError
+        elif csv_meta is not None or csv_source is not None:
+            raise ValueError
         policy_data = None
-        if (manifest["schema"] == 5) != (policy_raw is not None):
+        if (("policy" in manifest) if manifest["schema"] == 6 else manifest["schema"] == 5) != (
+            policy_raw is not None
+        ):
             raise ValueError
         if policy_raw is not None:
             detail = manifest["policy"]
@@ -325,7 +391,7 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             if policy_data["scope"] != manifest["scope"] or policy_data["base"] != manifest["base"]:
                 raise ValueError
         proposal_data = None
-        if (("proposal" in manifest) if manifest["schema"] == 5 else manifest["schema"] in {3, 4}) != (
+        if (("proposal" in manifest) if manifest["schema"] in {5, 6} else manifest["schema"] in {3, 4}) != (
             proposal_raw is not None
         ):
             raise ValueError
@@ -342,7 +408,9 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             proposal_data = validate_proposal(
                 json.loads(proposal_raw, object_pairs_hook=_unique_object, parse_constant=_no_constant)
             )
-            if manifest["schema"] != 5 and proposal_data["schema"] != (2 if manifest["schema"] == 4 else 1):
+            if manifest["schema"] not in {5, 6} and proposal_data["schema"] != (
+                2 if manifest["schema"] == 4 else 1
+            ):
                 raise ValueError
             if (
                 proposal_data["inputs"]["date"] != manifest["cutoff"]
@@ -404,7 +472,9 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             not isinstance(code, dict)
             or set(code)
             != set(
-                V5_CODE_FILES
+                V6_CODE_FILES
+                if manifest["schema"] == 6
+                else V5_CODE_FILES
                 if manifest["schema"] == 5
                 else V4_CODE_FILES
                 if manifest["schema"] == 4
@@ -441,6 +511,8 @@ def read_operations_review(contents, *, case_id=None, account_id=None):
             manifest = {**manifest, "proposal_data": proposal_data}
         if policy_data is not None:
             manifest = {**manifest, "policy_data": policy_data}
+        if csv_data is not None:
+            manifest = {**manifest, "csv_import_data": csv_data}
         return manifest, files
     except PortfolioError:
         raise

@@ -30,6 +30,8 @@ def movements_inventory(manifest, files):
         ("draft_data", "Borrador GBM y correcciones"),
         ("proposal_data", "Propuesta de cartera"),
         ("policy_data", "Política propuesta"),
+        ("csv_import_data", "CSV original y correspondencia"),
+        ("summary", "Resumen TXT"),
     )
     rows.extend(
         {"Contenido": label, "Guardado": "Incluido" if manifest.get(field) else "No incluido"}
@@ -44,6 +46,8 @@ def movements_inventory(manifest, files):
         if "ledger" in files
         else "Borrador sin libro"
         if manifest.get("draft_data")
+        else "Borrador CSV sin libro"
+        if manifest.get("csv_import_data")
         else "Propuesta sin libro",
         "contents": rows,
         "csv_count": len(files),
@@ -62,7 +66,7 @@ def inspect_package(raw, *, case_id=None, account_id=None, allowed_accounts=None
             raise ValueError
         with ZipFile(BytesIO(raw)) as archive:
             names = archive.namelist()
-            if len(names) > 13 or len(names) != len(set(names)):
+            if len(names) > 14 or len(names) != len(set(names)):
                 raise ValueError
             if "review.json" in names and "consolidation.json" not in names:
                 manifest, files = read_operations_review(raw, case_id=case_id, account_id=account_id)

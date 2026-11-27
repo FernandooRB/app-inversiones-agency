@@ -52,6 +52,40 @@ def movement_draft():
     return _recovery().get("draft")
 
 
+def csv_import_draft():
+    return _recovery().get("csv_import")
+
+
+def set_csv_import(origin, *, ledger=None, cutoff, base):
+    """Explicit replacement: no controls/valuations from the previous book survive."""
+    from copy import deepcopy
+
+    from csv_mapping import pack_import, preview
+
+    origin = deepcopy(origin)
+    if ledger is not None:
+        checked = preview(origin["source"], origin["mapping"], origin["decisions"])
+        if not checked["ready"] or ledger != checked["ledger"]:
+            raise PortfolioError("El CSV aún tiene pendientes; no se puede utilizar como libro.")
+    origin["applied_ledger_sha256"] = sha256(ledger).hexdigest() if ledger is not None else None
+    pack_import(origin)
+    st.session_state[_context_key("_ops_review")] = {
+        "token": uuid4().hex,
+        "files": {"ledger": ledger} if ledger is not None else {},
+        "csv_import": origin,
+        "settings": {"cutoff": str(cutoff), "base": base},
+    }
+    st.session_state[_context_key("_ops_proposal_form_token")] = uuid4().hex
+    for name in (
+        "_ops_last_book",
+        "_ops_book_signature",
+        "_ops_status",
+        "_gbm_attached",
+        "_ops_proposal_bridge",
+    ):
+        st.session_state.pop(_context_key(name), None)
+
+
 def recovered_proposal():
     return _recovery().get("proposal")
 
@@ -107,6 +141,8 @@ def set_movement_draft(draft):
     attached = st.session_state.get(review_key("gbm_documents"))
     # Rotating tokens retires file widgets, editor confirmations and stale derived results together.
     files = _current_files()
+    if current.pop("csv_import", None) is not None:
+        files = {}
     if current.get("draft") != draft:
         files.pop("ledger", None)
         files.pop("controls", None)
@@ -194,6 +230,7 @@ def clear_review():
             "monitor_confirmation",
             "_gbm_attached",
             "_ops_proposal_bridge",
+            "_csv_working",
         )
     )
     for key in keys:
@@ -239,6 +276,12 @@ def _has_current_inputs(context=None):
     return (
         bool(_recovery().get("files"))
         or bool(movement_draft())
+        or bool(csv_import_draft())
+        or bool(
+            st.session_state.get(_context_key("_csv_working"), {}).get("source")
+            and st.session_state[_context_key("_csv_working")].get("bound_review_token")
+            == _recovery().get("token")
+        )
         or bool(recovered_proposal())
         or any(st.session_state.get(review_key(name)) is not None for name in ROLE_WIDGETS)
         or current
@@ -279,7 +322,7 @@ def open_review(context):
                 manifest, files = session_compute(
                     st.session_state,
                     _context_key("operations_restore"),
-                    analysis_key(raw, scope, review_code_fingerprints(schema=5)),
+                    analysis_key(raw, scope, review_code_fingerprints(schema=6)),
                     lambda: read_operations_review(raw, **scope),
                     max_entries=1,
                 )
@@ -302,6 +345,11 @@ def open_review(context):
                     st.caption(
                         "Para llegar al rendimiento, completa la revisión del borrador y prepara el libro. "
                         "Los archivos internos JSON permiten retomar tus decisiones."
+                    )
+                elif "ledger" not in files and manifest.get("csv_import_data"):
+                    st.caption(
+                        "Retoma Preparar desde CSV con otras columnas; "
+                        "revisa sus pendientes y prepara el libro."
                     )
                 elif "ledger" not in files:
                     st.caption(
@@ -347,6 +395,7 @@ def open_review(context):
                         "draft": manifest.get("draft_data"),
                         "proposal": manifest.get("proposal_data"),
                         "policy": manifest.get("policy_data"),
+                        "csv_import": manifest.get("csv_import_data"),
                     }
                     st.session_state.pop(_context_key("_ops_last_book"), None)
                     st.session_state.pop(_context_key("_gbm_attached"), None)
@@ -392,6 +441,8 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
     with st.expander(
         "Guardar propuesta y revisión"
         if suffix == "_proposal"
+        else "Guardar borrador CSV"
+        if suffix == "_csv"
         else "Guardar borrador GBM"
         if suffix
         else "Guardar revisión de movimientos",
@@ -407,6 +458,18 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
             else:
                 present[role] = source.getvalue()
         draft = movement_draft()
+        csv_import = csv_import_draft()
+        if (
+            csv_import
+            and csv_import["applied_ledger_sha256"] is not None
+            and (
+                "ledger" not in present
+                or sha256(present["ledger"]).hexdigest() != csv_import["applied_ledger_sha256"]
+            )
+        ):
+            # A manually replaced book no longer has this source as its applied origin.
+            csv_import = {**csv_import, "applied_ledger_sha256": None}
+            st.caption("El CSV de origen se conserva como propuesta; el libro actual fue reemplazado.")
         proposal = proposal or current_proposal(context, present, cutoff=cutoff, base=base)
         status = st.session_state.get(_context_key("_ops_status"))
         policy = _recovery().get("policy")
@@ -417,7 +480,9 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
             )
             policy = None
         summary = (
-            status_text(status.snapshot("Revisión de movimientos")) if status and (draft or policy) else None
+            status_text(status.snapshot("Revisión de movimientos"))
+            if status and (draft or policy or csv_import)
+            else None
         )
         args = {
             "cutoff": cutoff.isoformat(),
@@ -426,6 +491,7 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
             "summary": summary,
             "proposal": proposal,
             "policy": policy,
+            "csv_import": csv_import,
             **_scope(context),
         }
         _manifest, contents = session_compute(
@@ -435,7 +501,9 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
                 present,
                 args,
                 review_code_fingerprints(
-                    schema=5
+                    schema=6
+                    if csv_import
+                    else 5
                     if policy
                     else (4 if proposal["schema"] == 2 else 3)
                     if proposal
@@ -447,7 +515,12 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
             lambda: build_operations_review(present, **args),
             max_entries=1,
         )
-        if draft and "ledger" not in present:
+        if csv_import and "ledger" not in present:
+            st.info(
+                "Este ZIP guarda el borrador CSV y sus decisiones. "
+                "Revisa los pendientes antes de usarlo como libro."
+            )
+        elif draft and "ledger" not in present:
             st.info(
                 "Este ZIP guarda el borrador GBM. Para preparar el libro, revisa las incidencias, "
                 "coteja los datos con el PDF y pulsa Usar movimientos revisados."
@@ -476,6 +549,8 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
         labels = [ROLE_LABELS[role] for role in ROLE_LABELS if role in present]
         if draft:
             labels.append("Borrador GBM con sus correcciones")
+        if csv_import:
+            labels.append("CSV original, correspondencia y decisiones documentadas")
         if summary:
             labels.append("Resumen TXT")
         if proposal:

@@ -592,6 +592,9 @@ def _ledger(context, *, demo=False):
     if not demo:
         new_review(context)
         open_review(context)
+        from csv_mapping_ui import render_csv_mapping
+
+        render_csv_mapping(context)
         render_movement_import(context)
         from operations_review_ui import movement_draft
 
