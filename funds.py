@@ -6,7 +6,7 @@ from io import BytesIO
 import numpy as np
 import pandas as pd
 
-from fixed_income import merge_prepared_index
+from fixed_income import accumulate_return_index, merge_prepared_index, validate_daily_observation_dates
 from portfolio_core import PortfolioError
 
 
@@ -38,13 +38,8 @@ def prepare_fund_total_return(
     required = [share_value_column, distribution_column]
     if any(column not in observations for column in required):
         raise PortfolioError("El archivo del fondo requiere valor de acción y distribución.")
-    if not isinstance(observations.index, pd.DatetimeIndex):
-        raise PortfolioError("El índice del fondo debe contener fechas.")
-    if observations.index.isna().any() or observations.index.tz is not None:
-        raise PortfolioError("Las fechas del fondo deben ser válidas y no tener zona horaria.")
+    validate_daily_observation_dates(observations.index, "fondo")
     frame = observations[required].copy().sort_index()
-    if frame.index.has_duplicates:
-        raise PortfolioError("La serie del fondo contiene fechas duplicadas.")
     frame.columns = ["value", "distribution"]
     frame = frame.apply(pd.to_numeric, errors="coerce")
     if frame.isna().any().any() or not np.isfinite(frame.to_numpy()).all():
@@ -55,7 +50,7 @@ def prepare_fund_total_return(
         raise PortfolioError("El valor de la acción del fondo debe ser positivo.")
     if (frame["distribution"] < 0).any():
         raise PortfolioError("Las distribuciones del fondo no pueden ser negativas.")
-    if not np.isclose(frame["distribution"].iloc[0], 0.0):
+    if frame["distribution"].iloc[0] != 0:
         raise PortfolioError("La distribución de la primera observación debe ser cero.")
 
     fund = _identifier(fund_id, "fondo")
@@ -68,9 +63,8 @@ def prepare_fund_total_return(
     gross.iloc[0] = 1.0
     if not np.isfinite(gross).all() or (gross <= 0).any():
         raise PortfolioError("No fue posible construir factores válidos para el fondo.")
-    index = (100.0 * gross.cumprod()).rename(name)
     return FundTotalReturn(
-        index=index,
+        index=accumulate_return_index(gross, name),
         share_values=frame["value"].rename("Valor de acción"),
         distributions=frame["distribution"].rename("Distribución por acción"),
         fund_id=fund,

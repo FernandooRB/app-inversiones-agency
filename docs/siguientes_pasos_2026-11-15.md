@@ -158,3 +158,13 @@ El JSON documenta fuentes, diferencias y cobertura. `docs/operations_market_revi
 explica métodos, fechas, unidades y plazos. La aplicación publicada ofrece una
 práctica ficticia y los archivos autorizados se cotejan localmente. El siguiente
 bloque analítico es validar instrumentos y condiciones de mercado adicionales.
+
+## Vencimientos y condiciones de mercado — noviembre de 2026
+
+El punto 30 añade casos ficticios de referencia para CETES, Bono M, fondos,
+liquidez y reportos. Las pruebas cubren cambios de precio y tasa, días inhábiles,
+cupón y principal, reinversión, diferencias de centavos, FX y liquidación diferida.
+El CSV de Bono M acepta `Amortizacion` para documentar el capital pagado al
+vencimiento. La [guía de Bonos M](bonos_m_adapter.md) explica cuándo se requiere.
+Los rendimientos calculados con archivos ficticios prueban el método. La cobertura
+con documentos reales depende de las observaciones y de sus fuentes autorizadas.

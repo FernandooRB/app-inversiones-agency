@@ -6,7 +6,7 @@ from io import BytesIO
 import numpy as np
 import pandas as pd
 
-from fixed_income import merge_prepared_index
+from fixed_income import accumulate_return_index, merge_prepared_index, validate_daily_observation_dates
 from portfolio_core import PortfolioError
 
 SUPPORTED_CONVENTIONS = {"nominal_360", "efectiva_365"}
@@ -43,13 +43,8 @@ def prepare_liquidity_accrual(
     """
     if rate_column not in observations:
         raise PortfolioError("El archivo de liquidez no contiene la tasa anual requerida.")
-    if not isinstance(observations.index, pd.DatetimeIndex):
-        raise PortfolioError("El índice de liquidez debe contener fechas.")
-    if observations.index.isna().any() or observations.index.tz is not None:
-        raise PortfolioError("Las fechas de liquidez deben ser válidas y no tener zona horaria.")
+    validate_daily_observation_dates(observations.index, "liquidez")
     frame = observations[[rate_column]].copy().sort_index()
-    if frame.index.has_duplicates:
-        raise PortfolioError("La serie de liquidez contiene fechas duplicadas.")
     rates_percent = pd.to_numeric(frame[rate_column], errors="coerce")
     if rates_percent.isna().any() or not np.isfinite(rates_percent).all():
         raise PortfolioError("La serie de liquidez contiene tasas faltantes o no numéricas.")
@@ -83,9 +78,8 @@ def prepare_liquidity_accrual(
     gross.iloc[0] = 1.0
     if not np.isfinite(gross).all() or (gross <= 0).any():
         raise PortfolioError("La tasa y los intervalos no producen factores de liquidez válidos.")
-    index = (100.0 * gross.cumprod()).rename(name)
     return LiquidityAccrual(
-        index=index,
+        index=accumulate_return_index(gross, name),
         annual_rates=rates,
         calendar_days=days,
         vehicle=vehicle_name,
