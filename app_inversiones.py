@@ -714,7 +714,9 @@ with st.sidebar:
             type=["csv"],
             help=(
                 "Una sola emisión con Fecha, Emision, Vencimiento, PrecioLimpio, "
-                "InteresDevengado y Cupon por 100 de nominal. Máximo 5 MB; sólo MXN."
+                "InteresDevengado y Cupon por 100 de nominal. Si incluyes el cierre del "
+                "vencimiento, declara el capital pagado en Amortizacion y deja en cero el "
+                "precio limpio y el interés devengado de esa fila. Máximo 5 MB en MXN."
             ),
         )
         bond_name_input = st.text_input(
@@ -723,10 +725,10 @@ with st.sidebar:
         st.download_button(
             "Descargar plantilla Bono M CSV",
             (
-                b"Fecha,Emision,Vencimiento,PrecioLimpio,InteresDevengado,Cupon\n"
-                b"2026-01-02,M 310529,2031-05-29,98.0000,2.8000,0\n"
-                b"2026-01-05,M 310529,2031-05-29,98.0500,2.8500,0\n"
-                b"2026-01-06,M 310529,2031-05-29,98.1000,2.9000,0\n"
+                b"Fecha,Emision,Vencimiento,PrecioLimpio,InteresDevengado,Cupon,Amortizacion\n"
+                b"2026-01-05,SIM-M,2026-01-07,98.0000,2.8000,0,0\n"
+                b"2026-01-06,SIM-M,2026-01-07,98.0500,2.8500,0,0\n"
+                b"2026-01-07,SIM-M,2026-01-07,0,0,3,100\n"
             ),
             "plantilla_bono_m.csv",
             "text/csv",
@@ -1256,10 +1258,19 @@ try:
                 f"SHA-256 {cetes_fingerprint[:12]}"
             )
         if bond_result is not None:
+            bond_maturity_in_period = bond_result.amortizations.reindex(prices.index).gt(0).any()
+            bond_maturity_outside_calendar = (
+                not bond_maturity_in_period
+                and pd.Timestamp(start_date) <= bond_result.maturity_date <= pd.Timestamp(end_date)
+                and bond_result.amortizations.gt(0).any()
+            )
+            bond_maturity_source = ", con amortización documentada" if bond_maturity_in_period else ""
+            if bond_maturity_outside_calendar:
+                bond_maturity_source = ", con amortización fuera de las fechas comunes del análisis"
             data_source += (
                 f"; {bond_name}: CSV aportado por el usuario, emisión "
                 f"{bond_result.issue_id}, vencimiento {bond_result.maturity_date.date()}, "
-                "retorno total desde precio limpio, interés devengado y cupones, "
+                f"retorno total desde precio limpio, interés devengado y cupones{bond_maturity_source}, "
                 f"SHA-256 {bond_fingerprint[:12]}"
             )
         if liquidity_result is not None:
@@ -1746,11 +1757,19 @@ try:
             )
         if bond_result is not None:
             coupon_count = int((bond_result.coupons > 0).sum())
+            maturity_note = (
+                " Incluye la amortización documentada del capital." if bond_maturity_in_period else ""
+            )
             st.info(
                 f"Serie {bond_name} integrada para la emisión {bond_result.issue_id}, con vencimiento "
                 f"{bond_result.maturity_date.date()} y {coupon_count} cupón(es) reconocido(s) en el "
-                "archivo. Verifica emisión, precios, devengado y flujos con la fuente."
+                f"archivo.{maturity_note} Verifica emisión, precios, devengado y flujos con la fuente."
             )
+            if bond_maturity_outside_calendar:
+                st.warning(
+                    f"La amortización queda fuera de las fechas comunes del análisis. "
+                    f"Consulta el pago del {bond_result.maturity_date.date()} en la auditoría Bono M CSV."
+                )
         if liquidity_result is not None:
             st.info(
                 f"Serie {liquidity_name} integrada para {liquidity_result.vehicle}: tasa "
@@ -1912,6 +1931,7 @@ try:
                 bond_result.accrued_interest,
                 bond_result.dirty_prices,
                 bond_result.coupons,
+                bond_result.amortizations,
                 bond_result.index.rename("Índice retorno total"),
             ], axis=1)
             st.download_button(

@@ -30,6 +30,7 @@ class BondTotalReturn:
     coupons: pd.Series
     issue_id: str
     maturity_date: pd.Timestamp
+    amortizations: pd.Series
 
     @property
     def dirty_prices(self) -> pd.Series:
@@ -38,6 +39,23 @@ class BondTotalReturn:
     @property
     def returns(self) -> pd.Series:
         return self.index.pct_change().dropna().rename(self.index.name)
+
+
+def validate_daily_observation_dates(dates: pd.Index, series_kind: str) -> None:
+    if not isinstance(dates, pd.DatetimeIndex):
+        raise PortfolioError(f"El índice de {series_kind} debe contener fechas.")
+    if dates.hasnans or dates.tz is not None or not dates.equals(dates.normalize()):
+        raise PortfolioError(f"Las fechas de {series_kind} deben ser válidas, sin hora ni zona horaria.")
+    if dates.has_duplicates:
+        raise PortfolioError(f"La serie de {series_kind} contiene fechas duplicadas.")
+
+
+def accumulate_return_index(gross: pd.Series, name: str) -> pd.Series:
+    with np.errstate(over="ignore", under="ignore"):
+        index = (100.0 * gross.cumprod()).rename(name)
+    if not np.isfinite(index).all() or (index <= 0).any():
+        raise PortfolioError("El índice acumulado debe conservar valores positivos y finitos.")
+    return index
 
 
 def cetes_price(
@@ -82,11 +100,8 @@ def prepare_cetes_total_return(
     """
     if price_column not in observations or term_column not in observations:
         raise PortfolioError("El archivo debe contener las columnas de precio y plazo indicadas.")
-    if not isinstance(observations.index, pd.DatetimeIndex):
-        raise PortfolioError("El índice de observaciones debe contener fechas.")
+    validate_daily_observation_dates(observations.index, "CETES")
     frame = observations[[price_column, term_column]].copy().sort_index()
-    if frame.index.has_duplicates:
-        raise PortfolioError("La serie CETES contiene fechas duplicadas.")
     frame.columns = ["price", "term"]
     frame = frame.apply(pd.to_numeric, errors="coerce")
     if frame.isna().any().any():
@@ -102,16 +117,19 @@ def prepare_cetes_total_return(
         raise PortfolioError("Los precios de CETES deben ser positivos.")
     if (frame["price"] > nominal_value * 2).any():
         raise PortfolioError("El precio CETES excede el doble del valor nominal; revisa las unidades.")
-    if (frame["term"] < 0).any() or not np.allclose(frame["term"], np.round(frame["term"])):
-        raise PortfolioError("Los plazos de CETES deben ser días enteros no negativos.")
+    terms = frame["term"].to_numpy(dtype=float)
+    if not np.isfinite(terms).all() or np.any((terms < 0) | (terms >= 2**53) | (terms != np.floor(terms))):
+        raise PortfolioError("Los plazos de CETES deben ser días enteros no negativos y representables.")
+    if frame.loc[frame["term"].eq(0), "price"].ne(nominal_value).any():
+        raise PortfolioError("El precio del CETE debe coincidir con el valor nominal al vencimiento.")
 
     elapsed = frame.index.to_series().diff().dt.days
     previous_term = frame["term"].shift(1)
     expected_term = previous_term - elapsed
     roll = frame["term"].ne(expected_term)
     roll.iloc[0] = False
-    maturity = roll & previous_term.le(elapsed)
-    early_switch = roll & ~maturity
+    maturity_roll = roll & previous_term.le(elapsed)
+    early_switch = roll & ~maturity_roll
     if early_switch.any():
         first = frame.index[early_switch][0].date().isoformat()
         raise PortfolioError(
@@ -121,18 +139,19 @@ def prepare_cetes_total_return(
         )
 
     gross = frame["price"].div(frame["price"].shift(1))
-    gross.loc[maturity] = nominal_value / frame["price"].shift(1).loc[maturity]
+    gross.loc[maturity_roll] = nominal_value / frame["price"].shift(1).loc[maturity_roll]
     gross.iloc[0] = 1.0
     if (~np.isfinite(gross)).any() or (gross <= 0).any():
         raise PortfolioError("No fue posible construir factores válidos para la serie CETES.")
 
-    total_return_index = (100.0 * gross.cumprod()).rename(name)
+    # A roll after a quoted redemption is not a second maturity.
+    maturities = frame["term"].eq(0) | (maturity_roll & previous_term.gt(0))
     return CetesTotalReturn(
-        total_return_index,
+        accumulate_return_index(gross, name),
         frame["price"].rename("Precio"),
-        frame["term"].astype(int).rename("Plazo"),
+        frame["term"].astype("int64").rename("Plazo"),
         tuple(frame.index[roll]),
-        tuple(frame.index[maturity]),
+        tuple(frame.index[maturities]),
     )
 
 
@@ -178,7 +197,7 @@ def read_banxico_cetes_csv(
         term = pd.to_numeric(frame[term_column], errors="coerce")
         if term.isna().any():
             raise PortfolioError("El archivo CETES contiene plazos faltantes o inválidos.")
-        implied = cetes_price(annual_yield / 100, term)
+        implied = cetes_price(annual_yield / 100, term, nominal_value)
         reported = pd.to_numeric(frame[price_column], errors="coerce")
         if not np.isfinite(reported).all() or (abs(implied - reported) > 0.0001).any():
             raise PortfolioError(
@@ -202,28 +221,32 @@ def prepare_bond_total_return(
     coupon_column: str,
     issue_id: str,
     maturity_date,
+    amortization_column: str | None = None,
     nominal_value: float = 100.0,
     name: str = "BONO_M",
 ) -> BondTotalReturn:
-    """Create a single-issue bond total-return index from dirty value and cash coupons.
+    """Create total return from dirty value, coupons and documented principal repayment.
 
     A coupon on date t is the cash received per nominal unit between the
     previous observation and the close on t. Therefore the gross factor is
-    `(dirty_t + coupon_t) / dirty_(t-1)`.
+    `(dirty_t + coupon_t + principal_t) / dirty_(t-1)`.
     """
     required = [clean_price_column, accrued_interest_column, coupon_column]
     if any(column not in observations for column in required):
         raise PortfolioError(
             "El archivo del bono debe contener precio limpio, interés devengado y cupón."
         )
-    if not isinstance(observations.index, pd.DatetimeIndex):
-        raise PortfolioError("El índice de observaciones del bono debe contener fechas.")
-    if observations.index.isna().any() or observations.index.tz is not None:
-        raise PortfolioError("Las fechas del bono deben ser válidas y no tener zona horaria.")
+    names = ["clean", "accrued", "coupon"]
+    if amortization_column is not None:
+        if amortization_column not in observations:
+            raise PortfolioError("Falta la columna Amortizacion indicada para el bono.")
+        required.append(amortization_column)
+        names.append("principal")
+    if len(set(required)) != len(required):
+        raise PortfolioError("Usa columnas distintas para cada concepto del bono.")
+    validate_daily_observation_dates(observations.index, "bono")
     frame = observations[required].copy().sort_index()
-    if frame.index.has_duplicates:
-        raise PortfolioError("La serie del bono contiene fechas duplicadas.")
-    frame.columns = ["clean", "accrued", "coupon"]
+    frame.columns = names
     frame = frame.apply(pd.to_numeric, errors="coerce")
     if frame.isna().any().any():
         raise PortfolioError(
@@ -245,27 +268,40 @@ def prepare_bond_total_return(
         raise PortfolioError("La serie del bono contiene fechas posteriores al vencimiento.")
     if not np.isfinite(nominal_value) or nominal_value <= 0:
         raise PortfolioError("El valor nominal del bono debe ser positivo.")
-    if (frame["clean"] <= 0).any() or (frame["clean"] > nominal_value * 3).any():
+    at_maturity = frame.index == maturity
+    if at_maturity.any() and amortization_column is None:
+        raise PortfolioError("La fila de vencimiento del bono requiere la columna Amortizacion documentada.")
+    if amortization_column is None:
+        frame["principal"] = 0.0
+    if frame.loc[~at_maturity, "principal"].ne(0).any():
+        raise PortfolioError("La amortización del Bono M debe ser cero antes del vencimiento.")
+    if frame.loc[at_maturity, "principal"].ne(nominal_value).any():
+        raise PortfolioError("La amortización del Bono M al vencimiento debe igualar el valor nominal.")
+    if frame.loc[at_maturity, ["clean", "accrued"]].ne(0).any().any():
+        raise PortfolioError(
+            "Al cierre del vencimiento el precio limpio y el interés devengado deben ser cero."
+        )
+    if (frame.loc[~at_maturity, "clean"] <= 0).any() or (frame["clean"] > nominal_value * 3).any():
         raise PortfolioError("Los precios limpios del bono tienen unidades o valores inválidos.")
     if (frame["accrued"] < 0).any() or (frame["accrued"] >= nominal_value).any():
         raise PortfolioError("El interés devengado del bono debe estar entre 0 y el valor nominal.")
     if (frame["coupon"] < 0).any() or (frame["coupon"] > nominal_value).any():
         raise PortfolioError("Los cupones del bono deben estar entre 0 y el valor nominal.")
-    if not np.isclose(frame["coupon"].iloc[0], 0.0):
+    if frame["coupon"].iloc[0] != 0:
         raise PortfolioError("El cupón de la primera observación debe ser cero.")
     dirty = frame["clean"] + frame["accrued"]
-    gross = (dirty + frame["coupon"]) / dirty.shift(1)
+    gross = (dirty + frame["coupon"] + frame["principal"]) / dirty.shift(1)
     gross.iloc[0] = 1.0
     if not np.isfinite(gross).all() or (gross <= 0).any():
         raise PortfolioError("No fue posible construir factores válidos para la serie del bono.")
-    index = (100.0 * gross.cumprod()).rename(name)
     return BondTotalReturn(
-        index=index,
+        index=accumulate_return_index(gross, name),
         clean_prices=frame["clean"].rename("Precio limpio"),
         accrued_interest=frame["accrued"].rename("Interés devengado"),
         coupons=frame["coupon"].rename("Cupón"),
         issue_id=issue,
         maturity_date=maturity,
+        amortizations=frame["principal"].rename("Amortización"),
     )
 
 
@@ -278,6 +314,7 @@ def read_bond_total_return_csv(
     clean_price_column: str = "PrecioLimpio",
     accrued_interest_column: str = "InteresDevengado",
     coupon_column: str = "Cupon",
+    amortization_column: str = "Amortizacion",
     nominal_value: float = 100.0,
     name: str = "BONO_M",
 ) -> BondTotalReturn:
@@ -286,15 +323,24 @@ def read_bond_total_return_csv(
         raise PortfolioError("El archivo del bono está vacío.")
     if len(contents) > 5_000_000:
         raise PortfolioError("El archivo del bono debe ocupar menos de 5 MB.")
-    try:
-        frame = pd.read_csv(BytesIO(contents))
-    except (UnicodeDecodeError, pd.errors.ParserError) as exc:
-        raise PortfolioError("No se pudo leer el CSV del bono.") from exc
-    required = {
+    columns = (
         date_column, issue_column, maturity_column, clean_price_column,
         accrued_interest_column, coupon_column,
-    }
-    if not required.issubset(frame.columns):
+    )
+    if len(set((*columns, amortization_column))) != len(columns) + 1:
+        raise PortfolioError("Usa columnas distintas para cada concepto del bono.")
+    try:
+        header = pd.read_csv(BytesIO(contents), header=None, nrows=1, dtype=str, keep_default_na=False)
+        if header.empty:
+            raise PortfolioError("El CSV del bono requiere un encabezado.")
+        header = header.iloc[0]
+        normalized = [field.strip().casefold() for field in header]
+        if len(set(normalized)) != len(normalized):
+            raise PortfolioError("El CSV del bono contiene columnas duplicadas.")
+        frame = pd.read_csv(BytesIO(contents))
+    except (UnicodeDecodeError, pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
+        raise PortfolioError("No se pudo leer el CSV del bono.") from exc
+    if not set(columns).issubset(frame.columns):
         raise PortfolioError("El archivo del bono no contiene todas las columnas requeridas.")
     raw_dates = frame.pop(date_column).astype(str).str.strip()
     iso = raw_dates.str.fullmatch(r"\d{4}-\d{2}-\d{2}").all()
@@ -324,6 +370,7 @@ def read_bond_total_return_csv(
         clean_price_column=clean_price_column,
         accrued_interest_column=accrued_interest_column,
         coupon_column=coupon_column,
+        amortization_column=amortization_column if amortization_column in frame else None,
         issue_id=issues.iloc[0],
         maturity_date=maturities.iloc[0],
         nominal_value=nominal_value,

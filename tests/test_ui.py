@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
@@ -624,7 +625,8 @@ def test_order_tariff_csv_flows_through_analysis_and_reports(monkeypatch):
     assert any("manifiesto de alcance cargado está vacío" in item.value for item in app.error)
 
 
-def test_bond_issue_csv_is_integrated_with_auditable_total_return(monkeypatch):
+@pytest.mark.parametrize("maturity_case", ["legacy", "aligned", "outside_calendar"])
+def test_bond_issue_csv_is_integrated_with_auditable_total_return(monkeypatch, maturity_case):
     import access
 
     monkeypatch.setattr(access, "require_access", lambda: None)
@@ -642,6 +644,13 @@ def test_bond_issue_csv_is_integrated_with_auditable_total_return(monkeypatch):
         "Cupon": 0.0,
     })
     bond_table.loc[70, ["PrecioLimpio", "InteresDevengado", "Cupon"]] = [96.0, 0.1, 3.0]
+    if maturity_case != "legacy":
+        bond_table["Vencimiento"] = bond_table["Fecha"].iloc[-1]
+        bond_table["Amortizacion"] = 0
+        columns = ["PrecioLimpio", "InteresDevengado", "Cupon", "Amortizacion"]
+        bond_table.loc[bond_table.index[-1], columns] = [0, 0, 3, 100]
+    if maturity_case == "outside_calendar":
+        price_table = price_table.iloc[:-1]
     uploads = {
         "Precios ajustados CSV aportados por el equipo (opcional)": BytesIO(
             price_table.to_csv(index=False).encode("utf-8-sig")
@@ -672,6 +681,12 @@ def test_bond_issue_csv_is_integrated_with_auditable_total_return(monkeypatch):
     assert not app.exception
     assert not app.error, [item.value for item in app.error]
     assert any("M 310529" in item.value for item in app.info)
+    assert any("Incluye la amortización documentada" in item.value for item in app.info) == (
+        maturity_case == "aligned"
+    )
+    assert any("amortización queda fuera de las fechas comunes" in item.value for item in app.warning) == (
+        maturity_case == "outside_calendar"
+    )
 
 
 def test_liquidity_rate_csv_is_integrated_without_future_rate_use(monkeypatch):
