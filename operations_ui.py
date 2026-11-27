@@ -1410,7 +1410,10 @@ def _implementation(context):
 
 
 def _feeds(context):
+    from operations_market_review_ui import render_market_review
+
     st.header("Fuentes aprobadas y alertas")
+    render_market_review()
     store, principal, state, account = context
     catalogue_file = st.file_uploader(
         "Catálogo de instrumentos e identidades de emisor", ["csv"], key=_key("ops_catalogue")
