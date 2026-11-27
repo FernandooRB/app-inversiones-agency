@@ -15,6 +15,7 @@ from gbm_movement_review import validate_draft
 from operations_policy import MAX_POLICY_BYTES, validate_policy
 from operations_proposal import MAX_PROPOSAL_BYTES, validate_proposal
 from portfolio_core import PortfolioError
+from transaction_ledger import latest_review_day
 
 FILE_ROLES = ("ledger", "controls", "quotes", "fx", "repo_values", "nav", "flow_fx")
 CODE_FILES = (
@@ -106,7 +107,7 @@ def _settings(cutoff, base):
         or base not in {"MXN", "USD"}
     ):
         raise ValueError
-    if date.fromisoformat(cutoff) > date.today():
+    if date.fromisoformat(cutoff) > latest_review_day():
         raise ValueError
 
 

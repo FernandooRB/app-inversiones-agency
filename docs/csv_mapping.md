@@ -45,6 +45,12 @@ cifradas locales admiten también v6. Los originales PDF/XML permanecen fuera de
 ZIP; el CSV original **sí está dentro** y puede contener datos privados. El ZIP se
 guarda sin cifrar hasta usar la herramienta local de copias personales.
 
+La app conserva el corte al abrir un ZIP generado en UTC aunque en México aún
+sea el día anterior. Si un libro guardado requiere correcciones según la
+validación actual, recupera la correspondencia para que puedas revisarla.
+Conserva el ZIP original como evidencia. Si el importe coincide con el neto de
+una compra o venta, coteja el bruto y los cargos antes de usar el libro.
+
 Límites: CSV y libro normalizado hasta 2 MB, 20,000 registros, 40 columnas y 2,000
 caracteres por celda; propuesta JSON hasta 100 KB, hasta 100 decisiones y ZIP hasta
 15 MB. No se redondean importes ni se crean ceros, contrapartes, aperturas o fechas

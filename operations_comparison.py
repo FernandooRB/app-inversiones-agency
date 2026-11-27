@@ -16,6 +16,7 @@ from executable_allocation import executable_plan
 from implementation_costs import ImplementationCostAssumptions, _validate_assumptions
 from portfolio_core import PortfolioError
 from portfolio_exposure import _text
+from transaction_ledger import latest_review_day
 
 STRATEGY_FIELDS = {
     "schema",
@@ -74,7 +75,7 @@ def validate_strategy(value, assets, cutoff, currency, target):
                 d.isoformat() != value[k]
                 for d, k in zip(days, ("history_start", "sample_start", "sample_end", "as_of"), strict=True)
             )
-            or not days[0] <= days[1] <= days[2] <= days[3] <= date.today()
+            or not days[0] <= days[1] <= days[2] <= days[3] <= latest_review_day()
         ):
             raise ValueError
         hashes = value["files_sha256"]

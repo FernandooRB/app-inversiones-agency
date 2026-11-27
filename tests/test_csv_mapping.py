@@ -74,6 +74,31 @@ def test_complete_mapping_preserves_source_and_independently_expected_money_and_
     assert result["rows"][1]["line_start"] == result["rows"][1]["line_end"] == 3
 
 
+@pytest.mark.parametrize(("kind", "net"), [(b"BUY", b"20.01"), (b"SELL", b"19.99")])
+def test_mapped_net_cannot_be_used_as_gross_when_charges_explain_difference(kind, net):
+    raw = RAW.replace(b"Compra,A,MXN,2,10,20,0.2", kind + b",A,MXN,2,10,20,0.01")
+    if kind == b"SELL":
+        raw += b"h,2026-01-01,2026-01-01,OPEN_POSITION,A,MXN,2,0,0,0,0,,UNKNOWN,0\n"
+    correct = mapper.preview(raw, mapping(), {})
+    assert correct["ready"]
+    raw = raw.replace(b",2,10,20,0.01", b",2,10," + net + b",0.01")
+    result = mapper.preview(raw, mapping(), {})
+    assert result["ledger"] is None and not result["ready"]
+    assert any(i["row"] == 7 and i["code"] == "NET_AS_GROSS" for i in result["issues"])
+    assert result["rows"][6]["original"]["bruto"] == net.decode()
+
+
+def test_template_with_invalid_unicode_is_rejected_before_preview():
+    template = json.loads(mapper.write_template(mapping(), mapper.read_source(RAW)))
+    template["mapping"]["fields"]["Referencia"] = {
+        "mode": "constant",
+        "value": "\ud800",
+        "transform": "identity",
+    }
+    with pytest.raises(PortfolioError):
+        mapper.read_template(json.dumps(template).encode(), RAW)
+
+
 def test_unknown_description_and_blank_amount_never_become_classification_or_zero():
     config = mapping()
     config["values"]["Tipo"].pop("Abono")

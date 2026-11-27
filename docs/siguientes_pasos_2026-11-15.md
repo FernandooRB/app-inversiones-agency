@@ -142,3 +142,11 @@ manual. `docs/local_review_recovery.md` documenta uso y límites. No se configur
 almacenamiento del piloto real ni se trasladan claves u originales a la web.
 Las pruebas, publicación y auditoría se registran aparte; el lector de pantalla,
 la experiencia humana y el teléfono físico de este recorrido siguen pendientes.
+
+## Correspondencia CSV — noviembre de 2026
+
+El punto 27 permite relacionar columnas y clasificaciones con el libro de
+movimientos. El ZIP v6 conserva la fuente y las decisiones, y requiere una nueva
+revisión al abrirse. La guía `docs/csv_mapping.md` incluye el recorrido ficticio.
+El próximo bloque técnico es el cotejo de fuentes del punto 29. La incorporación
+de otro intermediario sigue sujeta a contar con documentos autorizados.

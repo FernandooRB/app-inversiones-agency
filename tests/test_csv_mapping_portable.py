@@ -1,6 +1,7 @@
 """Synthetic source provenance, bounded v6 ZIP, legacy and encryption contracts."""
 
 from copy import deepcopy
+from datetime import UTC, date, datetime
 from hashlib import sha256
 from io import BytesIO
 from zipfile import ZipFile
@@ -124,3 +125,56 @@ def test_v6_encrypted_local_copy_recovers_exact_zip(tmp_path):
     assert storage.verify_copy(target, key)["schema"] == 6
     storage.restore_copy(target, restored, key)
     assert restored.read_bytes() == raw
+
+
+def test_cloud_cutoff_can_reopen_before_midnight_in_mexico(monkeypatch):
+    from test_operations_comparison import flow, proposal_case
+    from test_operations_policy import policy
+
+    import operations_review as review
+    import transaction_ledger as ledger_clock
+    from operations_proposal import portable_proposal
+
+    class MexicoDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 11, 26)
+
+    class CloudTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 11, 27, 1, tzinfo=UTC).astimezone(tz)
+
+    origin, ledger = proposal(True)
+    entry = proposal_case(flow.__wrapped__(), linked=True)
+    entry["inputs"]["date"] = entry["inputs"]["strategy"]["as_of"] = "2026-11-27"
+
+    # Build the package on the UTC server, then open it on a computer still on the previous day.
+    class CloudDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 11, 27)
+
+    monkeypatch.setattr(ledger_clock, "datetime", CloudTime, raising=False)
+    monkeypatch.setattr(ledger_clock, "date", CloudDate)
+    monkeypatch.setattr(review, "datetime", CloudTime)
+    monkeypatch.setattr(review, "date", CloudDate)
+    saved_policy = policy(valid_from="2026-11-27")
+    saved_proposal = portable_proposal(entry)
+    supplements = {"policy": saved_policy, "proposal": saved_proposal}
+    _, raw = build_operations_review(
+        {"ledger": ledger}, cutoff="2026-11-27", base="MXN", csv_import=origin, **supplements
+    )
+    monkeypatch.setattr(ledger_clock, "date", MexicoDate)
+    monkeypatch.setattr(review, "date", MexicoDate)
+    recovered, files = read_operations_review(raw)
+    assert recovered["cutoff"] == "2026-11-27" and files["ledger"] == ledger
+    assert recovered["review_state"] == "PENDING_REVIEW"
+    assert recovered["policy_data"] == saved_policy and recovered["proposal_data"] == saved_proposal
+    with pytest.raises(PortfolioError):
+        read_operations_review(repack(raw, transform=lambda data: data.update(cutoff="2026-11-28")))
+    # Saving the same recovered review does not change its cutoff or bytes.
+    _, saved = build_operations_review(
+        files, cutoff=recovered["cutoff"], base="MXN", csv_import=origin, **supplements
+    )
+    assert read_operations_review(saved)[1] == files
