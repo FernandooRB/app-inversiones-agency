@@ -150,3 +150,11 @@ movimientos. El ZIP v6 conserva la fuente y las decisiones, y requiere una nueva
 revisión al abrirse. La guía `docs/csv_mapping.md` incluye el recorrido ficticio.
 El próximo bloque técnico es el cotejo de fuentes del punto 29. La incorporación
 de otro intermediario sigue sujeta a contar con documentos autorizados.
+
+## Cotejo de fuentes — noviembre de 2026
+
+El punto 29 incorpora cotejo de precios, tipos de cambio y tasas por observación.
+El JSON documenta fuentes, diferencias y cobertura. `docs/operations_market_review.md`
+explica métodos, fechas, unidades y plazos. La aplicación publicada ofrece una
+práctica ficticia y los archivos autorizados se cotejan localmente. El siguiente
+bloque analítico es validar instrumentos y condiciones de mercado adicionales.
