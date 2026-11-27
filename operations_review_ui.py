@@ -364,8 +364,10 @@ def open_review(context):
             else:
                 st.write("**Vista previa del paquete**")
                 st.text(
-                    f"Corte: {manifest['cutoff']} · Moneda: {manifest['base']} · {len(files)} CSV de insumos"
+                    f"Corte: {manifest['cutoff']} · Moneda: {manifest['base']} · {len(files)} archivos CSV"
                 )
+                if manifest.get("csv_import_data"):
+                    st.caption("El paquete también conserva el CSV original y su correspondencia.")
                 inventory = movements_inventory(manifest, files)
                 st.info(inventory["stage"] + " · Al abrir se requiere una nueva revisión.")
                 st.table(inventory["contents"])
