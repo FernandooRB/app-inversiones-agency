@@ -10,7 +10,7 @@ from io import StringIO
 
 from operations_cuts import cut_state
 from portfolio_core import PortfolioError
-from transaction_ledger import decimal
+from transaction_ledger import decimal, latest_review_day
 
 MAX_POLICY_BYTES = 100_000
 FIELDS = {
@@ -71,7 +71,7 @@ def validate_policy(value):
         day = date.fromisoformat(value["valid_from"])
         if (
             day.isoformat() != value["valid_from"]
-            or day > date.today()
+            or day > latest_review_day()
             or value["base"] not in {"MXN", "USD"}
         ):
             raise ValueError

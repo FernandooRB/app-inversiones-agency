@@ -34,6 +34,58 @@ def test_csv_replacement_clears_only_this_account_and_renews_consent(monkeypatch
     }
 
 
+def test_clear_review_removes_csv_source_preview_and_package_for_only_the_active_account(monkeypatch):
+    memo_names = ("csv_source", "csv_preview", "operations_zip")
+    state = {"_ops_context_key": "a", "_csv_working_a": {"source": b"synthetic-A"}}
+    for name in memo_names:
+        state[f"_analysis_memo_{name}_a"] = {"data": b"synthetic-A"}
+        state[f"_analysis_memo_{name}_b"] = {"data": b"synthetic-B"}
+    monkeypatch.setattr(review_ui, "st", SimpleNamespace(session_state=state))
+    review_ui.clear_review()
+    assert "_csv_working_a" not in state
+    for name in memo_names:
+        assert f"_analysis_memo_{name}_a" not in state
+        assert state[f"_analysis_memo_{name}_b"] == {"data": b"synthetic-B"}
+
+
+def test_completing_nav_preserves_pending_csv_edits(monkeypatch):
+    import csv_mapping_ui as ui
+
+    state = {"_ops_context_key": "a", "_ops_review_a": {"token": "first", "files": {}}}
+    streamlit = SimpleNamespace(session_state=state)
+    monkeypatch.setattr(review_ui, "st", streamlit)
+    monkeypatch.setattr(ui, "st", streamlit)
+    _, candidate = ui._working()
+    candidate["source"] = b"fictional.csv"
+    review_ui.save_review_input("nav", b"fictional valuations")
+    assert ui._working()[1]["source"] == b"fictional.csv"
+    assert state["_ops_review_a"]["token"] != "first"
+
+
+def test_old_mapped_book_with_net_amount_reopens_as_source_pending_financial_review():
+    from hashlib import sha256
+
+    from test_csv_mapping import RAW, mapping
+
+    from csv_mapping import preview
+    from operations_review import build_operations_review, read_operations_review
+
+    raw = RAW.replace(b",2,10,20,0.2", b",2,10,20.01,0.01")
+    config = mapping()
+    historical = preview(raw, config, {})["normalized_candidate"]
+    origin, _ = proposal()
+    origin.update(source=raw, mapping=config, applied_ledger_sha256=sha256(historical).hexdigest())
+    _, package = build_operations_review(
+        {"ledger": historical}, cutoff="2026-01-10", base="MXN", csv_import=origin
+    )
+    manifest, files = read_operations_review(package)
+    assert files["ledger"] == historical
+    active_files, restored_origin, pending = review_ui._restore_csv_book(manifest, files)
+    assert pending and "ledger" not in active_files
+    assert restored_origin["source"] == raw and restored_origin["applied_ledger_sha256"] is None
+    assert files["ledger"] == historical
+
+
 def screen():
     app = AppTest.from_string("""
 import streamlit as st

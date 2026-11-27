@@ -8,11 +8,17 @@ import csv
 import json
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from io import StringIO
 
 from portfolio_core import PortfolioError
+
+
+def latest_review_day():
+    """Latest cutoff accepted by reviews shared between a local computer and a UTC server."""
+    return max(date.today(), datetime.now(UTC).date())
+
 
 KINDS = {
     "OPEN_CASH",

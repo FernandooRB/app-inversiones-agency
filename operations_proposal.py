@@ -15,6 +15,7 @@ from implementation_costs import ImplementationCostAssumptions, _validate_assump
 from operations_comparison import validate_strategy
 from portfolio_core import PortfolioError
 from portfolio_exposure import _text
+from transaction_ledger import latest_review_day
 
 MAX_PROPOSAL_BYTES = 500_000
 INPUT_FIELDS = {
@@ -117,7 +118,7 @@ def validate_proposal(payload):
             raise ValueError
         if (
             date.fromisoformat(inputs["date"]).isoformat() != inputs["date"]
-            or date.fromisoformat(inputs["date"]) > date.today()
+            or date.fromisoformat(inputs["date"]) > latest_review_day()
         ):
             raise ValueError
         for field in ("quote_source", "tariff_source"):

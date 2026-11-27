@@ -43,7 +43,7 @@ def _text(value, limit, *, empty=True):
         isinstance(value, str)
         and len(value) <= limit
         and (empty or bool(value.strip()))
-        and not any(ord(c) < 32 for c in value)
+        and not any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in value)
     )
 
 
@@ -255,7 +255,7 @@ def _project(raw, config, decisions, *, financial):
                 included.append(row)
                 if financial:
                     try:
-                        Event(
+                        event = Event(
                             mapped["ID"],
                             date.fromisoformat(mapped["Fecha"]),
                             date.fromisoformat(mapped["Liquidacion"]),
@@ -270,7 +270,19 @@ def _project(raw, config, decisions, *, financial):
                             mapped["MomentoFlujo"],
                             Decimal(mapped["Interes"]),
                         )
-                        if date.fromisoformat(mapped["Fecha"]) > date.today():
+                        charges = event.fee + event.tax
+                        if event.kind in {"BUY", "SELL"} and charges:
+                            gross = event.quantity * event.price
+                            net = gross + charges if event.kind == "BUY" else gross - charges
+                            if event.amount != gross and event.amount == net:
+                                issue(
+                                    row["row"],
+                                    "Importe",
+                                    "NET_AS_GROSS",
+                                    "El importe coincide con el neto. "
+                                    "Coteja el bruto y los cargos por separado.",
+                                )
+                        if event.day > date.today():
                             issue(
                                 row["row"],
                                 "Fecha",

@@ -626,10 +626,12 @@ def _ledger(context, *, demo=False):
     events = _cached_calculation("Libro de movimientos", read_ledger, source.getvalue())
     status.ledger_events = tuple(events)
     defaults = review_defaults()
+    today = date.today()
+    restored_cutoff = date.fromisoformat(defaults["cutoff"]) if defaults else today
     cutoff = st.date_input(
         "Cierre del libro",
-        value=date.fromisoformat(defaults["cutoff"]) if defaults else date.today(),
-        max_value=date.today(),
+        value=restored_cutoff,
+        max_value=max(today, restored_cutoff),
         key=review_key("ops_cutoff"),
     )
     files = {"ledger": source}
@@ -987,10 +989,12 @@ def _implementation(context):
             index=1 if defaults.get("currency") == "USD" else 0,
             key=proposal_key("proposal_currency"),
         )
+        today = date.today()
+        proposal_date = date.fromisoformat(defaults["date"]) if defaults else today
         quote_day = st.date_input(
             "Fecha de cotización de las órdenes",
-            date.fromisoformat(defaults["date"]) if defaults else date.today(),
-            max_value=date.today(),
+            proposal_date,
+            max_value=max(today, proposal_date),
             key=proposal_key("proposal_date"),
         )
         quote_source = st.text_input(

@@ -425,15 +425,18 @@ def render_csv_mapping(context):
             st.json({"original": row["original"], "propuesta": row["mapped"]}, expanded=False)
             if result["issues"]:
                 st.dataframe(pd.DataFrame(result["issues"][:200]), hide_index=True, width="stretch")
-                st.download_button(
-                    "Descargar todos los pendientes CSV",
-                    pd.DataFrame(result["issues"]).to_csv(index=False).encode("utf-8-sig"),
-                    "pendientes_correspondencia.csv",
-                    "text/csv",
-                    key=key("issues"),
-                    on_click="ignore",
-                )
-                st.caption("La tabla muestra hasta 200 pendientes; la descarga incluye todos.")
+                st.caption("La tabla muestra hasta 200 pendientes. El CSV incluye todos.")
+                issues_panel = key("issues_panel")
+                with st.expander("Preparar descarga de pendientes", key=issues_panel, on_change="rerun"):
+                    if st.session_state.get(issues_panel, False):
+                        st.download_button(
+                            "Descargar todos los pendientes CSV",
+                            pd.DataFrame(result["issues"]).to_csv(index=False).encode("utf-8-sig"),
+                            "pendientes_correspondencia.csv",
+                            "text/csv",
+                            key=key("issues"),
+                            on_click="ignore",
+                        )
         with st.expander("Decidir sobre filas repetidas o excluidas"):
             fields = {n: key("decision_" + n) for n in ("row", "action", "reason", "source")}
             with st.form(key("decision_form")):
@@ -464,10 +467,12 @@ def render_csv_mapping(context):
             if work["decisions"]:
                 st.json(work["decisions"], expanded=False)
         defaults = _recovery().get("settings", {})
+        today = date.today()
+        restored_cutoff = date.fromisoformat(defaults["cutoff"]) if defaults.get("cutoff") else today
         cutoff = st.date_input(
             "Corte del libro CSV",
-            value=date.fromisoformat(defaults["cutoff"]) if defaults.get("cutoff") else date.today(),
-            max_value=date.today(),
+            value=restored_cutoff,
+            max_value=max(today, restored_cutoff),
             key=key("cutoff"),
         )
         base = st.selectbox(

@@ -136,10 +136,11 @@ def render_policy(context, status):
             max_chars=500,
             key=review_key("policy_source"),
         )
+        policy_date = date.fromisoformat(saved.get("valid_from", status.cutoff))
         valid = st.date_input(
             "Política vigente desde",
-            value=date.fromisoformat(saved.get("valid_from", status.cutoff)),
-            max_value=date.today(),
+            value=policy_date,
+            max_value=max(date.today(), policy_date),
             key=review_key("policy_date"),
         )
         bases = ["Patrimonio neto", "Sólo instrumentos cotizados"]

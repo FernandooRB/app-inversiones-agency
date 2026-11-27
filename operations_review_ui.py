@@ -130,7 +130,11 @@ def save_review_input(role, raw):
     current = dict(_recovery())
     files = _current_files()
     files[role] = raw
+    working = st.session_state.get(_context_key("_csv_working"))
+    preserve_mapping = working is not None and working.get("bound_review_token") == current.get("token")
     current.update(token=uuid4().hex, files=files)
+    if preserve_mapping:
+        working["bound_review_token"] = current["token"]
     st.session_state[_context_key("_ops_review")] = current
     st.session_state.pop(_context_key("_ops_last_book"), None)
 
@@ -214,9 +218,17 @@ def clear_review():
     )
     keys = {_context_key(name) for name in names} | {review_key(name) for name in names}
     keys.update(_open_key(name) for name in ("ops_review_open_panel", "ops_review_zip", "ops_review_open"))
-    keys.add("_analysis_memo_" + _context_key("operations_calculations"))
-    keys.add("_analysis_memo_" + _context_key("bridge_book"))
-    keys.add("_analysis_memo_" + _context_key("operations_restore"))
+    keys.update(
+        "_analysis_memo_" + _context_key(name)
+        for name in (
+            "operations_calculations",
+            "bridge_book",
+            "operations_restore",
+            "csv_source",
+            "csv_preview",
+            "operations_zip",
+        )
+    )
     keys.update("_analysis_memo_" + review_key(name) for name in ("cut_build", "cut_compare"))
     keys.add("_analysis_memo_" + review_key("policy_evaluation"))
     keys.add(_context_key("proposal_pdf"))
@@ -288,6 +300,27 @@ def _has_current_inputs(context=None):
     )
 
 
+def _restore_csv_book(manifest, files):
+    """Keep a readable archive separate from a book that passes current financial checks."""
+    origin = manifest.get("csv_import_data")
+    if not origin or origin["applied_ledger_sha256"] is None:
+        return files, origin, False
+
+    from csv_mapping import preview
+
+    try:
+        current = preview(origin["source"], origin["mapping"], origin["decisions"])
+    except PortfolioError:
+        current = None
+    if current and current["ready"] and current["ledger"] == files["ledger"]:
+        return files, origin, False
+    return (
+        {role: raw for role, raw in files.items() if role != "ledger"},
+        {**origin, "applied_ledger_sha256": None},
+        True,
+    )
+
+
 def open_review(context):
     with st.expander("Abrir paquete de movimientos", key=_open_key("ops_review_open_panel")):
         st.caption(
@@ -333,6 +366,8 @@ def open_review(context):
                 st.text(
                     f"Corte: {manifest['cutoff']} · Moneda: {manifest['base']} · {len(files)} archivos CSV"
                 )
+                if manifest.get("csv_import_data"):
+                    st.caption("El paquete también conserva el CSV original y su correspondencia.")
                 inventory = movements_inventory(manifest, files)
                 st.info(inventory["stage"] + " · Al abrir se requiere una nueva revisión.")
                 st.table(inventory["contents"])
@@ -385,17 +420,19 @@ def open_review(context):
                     )
                 label = "Reemplazar revisión con este paquete" if replacing else "Retomar movimientos"
                 if st.button(label, key=_open_key("ops_review_open")):
+                    active_files, csv_import, csv_pending = _restore_csv_book(manifest, files)
                     st.session_state[_context_key("_ops_proposal_form_token")] = uuid4().hex
                     st.session_state[_context_key("_ops_review")] = {
                         "token": uuid4().hex,
-                        "files": files,
+                        "files": active_files,
                         "settings": {"cutoff": manifest["cutoff"], "base": manifest["base"]},
                         "code_changed": manifest["code_sha256"]
                         != review_code_fingerprints(schema=manifest["schema"]),
                         "draft": manifest.get("draft_data"),
-                        "proposal": manifest.get("proposal_data"),
-                        "policy": manifest.get("policy_data"),
-                        "csv_import": manifest.get("csv_import_data"),
+                        "proposal": None if csv_pending else manifest.get("proposal_data"),
+                        "policy": None if csv_pending else manifest.get("policy_data"),
+                        "csv_import": csv_import,
+                        "csv_ledger_pending": csv_pending,
                     }
                     st.session_state.pop(_context_key("_ops_last_book"), None)
                     st.session_state.pop(_context_key("_gbm_attached"), None)
@@ -404,6 +441,11 @@ def open_review(context):
         st.info("Revisión recuperada. Se recalculan las vistas; confirma otra vez las fuentes y los flujos.")
         if _recovery().get("code_changed"):
             st.caption("El motor cambió desde la descarga; la revisión usa la versión actual.")
+        if _recovery().get("csv_ledger_pending"):
+            st.warning(
+                "El libro CSV requiere correcciones con las reglas actuales. Retoma la correspondencia y "
+                "vuelve a cotejar los importes. Conserva el ZIP original como evidencia."
+            )
 
 
 def review_upload(label, role, *, key):
@@ -496,7 +538,7 @@ def download_review(context, files, *, cutoff, base, suffix="", proposal=None):
         }
         _manifest, contents = session_compute(
             st.session_state,
-            "operations_zip",
+            _context_key("operations_zip"),
             analysis_key(
                 present,
                 args,
